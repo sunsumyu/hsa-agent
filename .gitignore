@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.env
+
+# Logs
+*.log
+agent_start_log.txt
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data/Temporary
+*.json
+!llm_registry.json
+!llm_providers.json
+!requirements.txt

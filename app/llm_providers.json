@@ -1,0 +1,37 @@
+{
+  "qwen-plus": {
+    "provider": "bailian",
+    "priority": 1,
+    "model_name": "qwen-plus",
+    "api_key_env": "BAILIAN_API_KEY",
+    "base_url_env": "BAILIAN_BASE_URL",
+    "tools_support": true,
+    "temperature": 0.3
+  },
+  "gemma-4-31b-it": {
+    "provider": "google",
+    "priority": 2,
+    "model_name": "gemma-4-31b-it",
+    "api_key_env": "GOOGLE_API_KEY",
+    "tools_support": true,
+    "temperature": 0.1
+  },
+  "doubao-pro-32k": {
+    "provider": "volcengine",
+    "priority": 3,
+    "model_name": "doubao-pro-32k",
+    "api_key_env": "VOLC_API_KEY",
+    "base_url_env": "VOLC_BASE_URL",
+    "tools_support": true,
+    "temperature": 0.3
+  },
+  "qwen-max": {
+    "provider": "bailian",
+    "priority": 4,
+    "model_name": "qwen-max",
+    "api_key_env": "BAILIAN_API_KEY",
+    "base_url_env": "BAILIAN_BASE_URL",
+    "tools_support": true,
+    "temperature": 0.2
+  }
+}
