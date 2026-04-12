@@ -1,0 +1,38 @@
+# LoRA 微调配置文件 (医保审计专家版)
+# 适用框架: LLaMA-Factory / PEFT
+
+model_name_or_path: qwen/Qwen-7B-Chat  # 或您当前使用的基座模型
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all  # 针对 Qwen 建议针对所有 Linear 层
+
+# 数据集配置
+dataset: audit_sft_train
+dataset_dir: data
+template: qwen  # 必须与基座模型匹配
+cutoff_len: 1024
+max_samples: 1000
+overwrite_cache: true
+preprocessing_num_workers: 8
+
+# 训练超参数
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 4
+learning_rate: 5e-5
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_steps: 100
+fp16: true
+
+# LoRA 参数
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.05
+
+# 输出配置
+output_dir: saves/Qwen-7B/lora/audit_expert_v1
+logging_steps: 10
+save_steps: 100
+plot_loss: true
+overwrite_output_dir: true

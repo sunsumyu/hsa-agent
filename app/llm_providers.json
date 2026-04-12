@@ -1,37 +1,73 @@
 {
-  "qwen-plus": {
-    "provider": "bailian",
-    "priority": 1,
-    "model_name": "qwen-plus",
-    "api_key_env": "BAILIAN_API_KEY",
-    "base_url_env": "BAILIAN_BASE_URL",
-    "tools_support": true,
-    "temperature": 0.3
-  },
   "gemma-4-31b-it": {
     "provider": "google",
-    "priority": 2,
     "model_name": "gemma-4-31b-it",
-    "api_key_env": "GOOGLE_API_KEY",
+    "priority": 1,
     "tools_support": true,
-    "temperature": 0.1
+    "temperature": 0.1,
+    "api_key_env": "GOOGLE_API_KEY",
+    "daily_quota": 4000000,
+    "input_cost_1k": 0.0005,
+    "output_cost_1k": 0.0015
+  },
+  "qwen-long": {
+    "provider": "dashscope",
+    "model_name": "qwen-long",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "BAILIAN_API_KEY",
+    "base_url_env": "BAILIAN_BASE_URL",
+    "daily_quota": 50000000,
+    "input_cost_1k": 0.0002,
+    "output_cost_1k": 0.0006
+  },
+  "qwen-turbo": {
+    "provider": "dashscope",
+    "model_name": "qwen-turbo",
+    "priority": 10,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "BAILIAN_API_KEY",
+    "base_url_env": "BAILIAN_BASE_URL",
+    "daily_quota": 5000000,
+    "input_cost_1k": 0.0001,
+    "output_cost_1k": 0.0003
+  },
+  "qwen-plus": {
+    "provider": "dashscope",
+    "model_name": "qwen-plus",
+    "priority": 11,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "BAILIAN_API_KEY",
+    "base_url_env": "BAILIAN_BASE_URL",
+    "daily_quota": 5000000,
+    "input_cost_1k": 0.0002,
+    "output_cost_1k": 0.0006
+  },
+  "qwen-max": {
+    "provider": "dashscope",
+    "model_name": "qwen-max",
+    "priority": 12,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "BAILIAN_API_KEY",
+    "base_url_env": "BAILIAN_BASE_URL",
+    "daily_quota": 1000000,
+    "input_cost_1k": 0.001,
+    "output_cost_1k": 0.003
   },
   "doubao-pro-32k": {
     "provider": "volcengine",
-    "priority": 3,
-    "model_name": "doubao-pro-32k",
+    "model_name": "ep-m-20260409000028-vhkbw",
+    "priority": 999,
+    "tools_support": true,
+    "temperature": 0.3,
     "api_key_env": "VOLC_API_KEY",
     "base_url_env": "VOLC_BASE_URL",
-    "tools_support": true,
-    "temperature": 0.3
-  },
-  "qwen-max": {
-    "provider": "bailian",
-    "priority": 4,
-    "model_name": "qwen-max",
-    "api_key_env": "BAILIAN_API_KEY",
-    "base_url_env": "BAILIAN_BASE_URL",
-    "tools_support": true,
-    "temperature": 0.2
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.0001,
+    "output_cost_1k": 0.0002
   }
 }

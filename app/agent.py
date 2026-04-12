@@ -1,137 +1,162 @@
 import os
+import sys
+import pydantic
+from loguru import logger
+
+# [核心补丁] 修复 2026 年 LangChain 0.3+ 移除 pydantic_v1 导致的所有旧版模型驱动崩溃
+# 将 Pydantic v2 内置的 v1 兼容层直接映射回命名空间
+try:
+    import langchain_core
+    # 动态创建并注入模块
+    if "langchain_core.pydantic_v1" not in sys.modules:
+        sys.modules["langchain_core.pydantic_v1"] = pydantic.v1
+        logger.info("已成功建立 Pydantic v1 运行时补丁，全量异构算力已并网。")
+except Exception as e:
+    logger.warning(f"兼容补丁注入失败: {e}")
+
 import json
 import faiss
-from loguru import logger
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.vectorstores import FAISS
 from langchain_community.docstore.in_memory import InMemoryDocstore
-from app.tools import execute_audit_sql, list_tables
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 from app.model_manager import model_manager
 
 load_dotenv()
 
-# 初始化高可用 LLM 集群 - 支持几十个模型的自动化动态切换
-llm = model_manager.get_adaptive_llm(require_tools=True)
+# 延迟加载资源缓存
+_llm = None
+_embeddings = None
+_prompt = None
 
-# 初始化 Embedding - 使用百炼云端模型 (text-embedding-v3)
-embeddings = OpenAIEmbeddings(
-    model=os.getenv("EMBEDDING_MODEL", "text-embedding-v3"),
-    api_key=os.getenv("BAILIAN_API_KEY"),
-    base_url=os.getenv("BAILIAN_BASE_URL"),
-    check_embedding_ctx_length=False,
-    chunk_size=10
-)
+def get_llm():
+    global _llm
+    if _llm is None:
+        _llm = model_manager.get_adaptive_llm(require_tools=True)[0]
+    return _llm
 
-def build_vector_store():
-    """从 Java 目录加载政策及表结构知识库并构建向量库。"""
-    try:
-        project_root = os.getenv("PROJECT_ROOT", "e:/chain/fqz-hsa-manage")
-        kb_files = [
-            f"{project_root}/hsa-agent/src/main/resources/medical_policies.json",
-            f"{project_root}/hsa-agent/src/main/resources/audit_rules_kb.json",
-            f"{project_root}/hsa-agent/src/main/resources/database_tables_kb.json",
-            f"{project_root}/hsa-agent/src/main/resources/clickhouse_audit_guide.md"
-        ]
-        
-        texts = []
-        for kb_file in kb_files:
-            if os.path.exists(kb_file):
-                logger.info(f"正在加载知识文件: {kb_file}")
-                with open(kb_file, 'r', encoding='utf-8') as f:
-                    if kb_file.endswith(".json"):
-                        data = json.load(f)
-                        for item in data:
-                            # 兼容不同类型的 JSON 知识格式
-                            content = item.get("policyContent") or item.get("ruleContent") or item.get("content") or ""
-                            if content:
-                                texts.append(content)
-                    elif kb_file.endswith(".md"):
-                        # 直接读取 Markdown 内容
-                        texts.append(f.read())
-        
-        if texts:
-            logger.info(f"正在构建向量库，共加载 {len(texts)} 条知识条目...")
-            vector_store = FAISS.from_texts(texts, embeddings)
-            return vector_store
-        else:
-            logger.warning("知识库未发现有效数据。")
-            return None
-    except Exception as e:
-        logger.error(f"构建向量库失败: {e}")
-        return None
+def get_embeddings():
+    from app.tools import get_embeddings
+    return get_embeddings()
 
-# 初始化向量库
-vector_store = build_vector_store()
+def build_vector_store(force_rebuild=False):
+    from app.tools import build_vector_store
+    return build_vector_store(force_rebuild)
 
-# 定义 Agent 的 Prompt
-prompt = ChatPromptTemplate.from_messages([
-    ("system", """你是一名专业的智能稽核助手。你的任务是基于医疗数据和政策条文，为用户提供最终的稽核分析报告。
+# 初始化向量库 - 延迟加载
+_vector_store = None
 
-## [机密-仅供内部SQL构造] 核心库Schema:
-以下表名和字段名属于系统内部机密。你在面向用户的回复中绝对禁止提及任何表名(如fqz_开头的名称)、字段名(如medfee_sumamt)、SQL语句或数据库术语。违反此规则等同于数据泄露。
-1. 结算主表 fqz_all_yy_yd_1: fixmedins_name(机构名), medfee_sumamt(总金额), setl_time(结算时间), admdvs(医保区划)
-2. 住院明细表 fqz_ptzy_hosp: fixmedins_code(机构代码), fixmedins_name(机构名), ipt_days_hj(住院天数), medfee_sumamt(总金额), setl_rq(结算日期)
-[注意] 物理表不含 diag_name 或 psn_no。如果查询这些字段报错，请立即调用 get_table_schema 重新核实。
-## 极其重要的输出规则（违规将导致数据无法正常显示）：
-1. **排版格式**：禁止输出任何横向宽表格（即不使用 | ---- | 语法）。
-2. **垂直卡片流**：每一个高风险案例必须以“Markdown 标题 + 列表”的样式纵向排版。请严格按以下模板输出每个案例：
+def get_vector_store():
+    # 为了兼容旧版调用，从 tools 转发
+    from app.tools import get_vector_store
+    return get_vector_store()
 
-   ### 🚩 [风险等级] 案例名称 (或案例 ID)
-   - **涉及机构**: [机构名称]
-   - **具体表现**: [异常行为简述]
-   - **涉案金额**: [金额]
-   - **政策依据**: [具体的政策条款名称]
-   - **稽核建议**: [下一步处理建议]
-   ---
+EXPERT_SYSTEM_PROMPT = """你是一名医保审计专家。你已经内化了所有的稽核表 Schema 和核心政策规则。
+你的任务是：由用户提问，你直接输出深度审计报告。
 
-3. **思考隔离**：你必须将所有的逻辑分析过程包裹在 `<thought>` 和 `</thought>` 标签内。
-4. **数据安全红线（最高优先级）**：
-   - 回复中严禁出现任何表名（fqz_开头的标识符）、字段名（英文下划线标识符如medfee_sumamt）、SQL代码片段。
-   - 用业务语言代替技术语言。例如：说"住院记录"而非表名，说"医疗费用"而非字段名。
-   - 用户只需要看到稽核卡片结果，不需要知道你查了什么表或执行了什么SQL。
-   - 禁止说"我将查询xxx表"、"从xxx表中获取"等透露内部实现的文字。
-5. **输出协议一致性 (Audit-Card-V1)**：
-   - 不论查询的时间跨度（1个月或1年），禁止输出大段综述。
-   - 必须将结果拆分为 3-5 个独立的"风险卡片"。
-   - 每个卡片强制使用以下格式（Markdown）：
-     ### 🚩 [卡片名称：机构名 + 风险特征简述]
-     - **涉及机构**: xxx
-     - **具体表现**: xxx
-     - **涉案金额**: 累计金额/单笔金额
-     - **政策依据**: xxx
-     - **稽核建议**: xxx
-     ---
-6. **静默执行**：不要对用户说"我正在查询"、"让我分析"之类的过程描述。直接输出稽核卡片，没有数据时才告知用户。"""),
-    MessagesPlaceholder(variable_name="chat_history"),
-    ("human", "{input}"),
-    MessagesPlaceholder(variable_name="agent_scratchpad"),
-])
+## 执行指令：
+1. 你的思考过程必须包裹在 ⟦THOUGHT⟧ 标签中。
+2. 你的 SQL 执行建议必须包裹在 ⟦REASONING⟧ 标签中，并使用正确的 ClickHouse 或 MySQL 语法。
+3. 最终回复给用户的必须是结构清晰、数据精准的“审计风险卡片”。
 
-# 工具列表
-tools = [execute_audit_sql, list_tables]
+## 极其重要的输出规则：
+- **卡片排版**：强制使用 [### 🚩 风险特征] 的层级结构。
+- **数据一致**：涉案金额、机构名称必须与 SQL 执行结果 100% 对应。
+- **安全红线**：禁止在最终卡片中输出任何物理表名或 SQL 代码。
+"""
 
-# 添加政策检索工具
-from langchain_core.tools import tool
-@tool
-def search_policies(query: str) -> str:
-    """检索并返回与医疗审计、医保报销或违规处罚相关的政策条文。"""
-    if not vector_store:
-        return "错误: 向量库未初始化。"
+def get_prompt(expert_mode=False, schema_info=""):
+    global _prompt
     
-    docs = vector_store.similarity_search(query, k=3)
-    return "\n\n".join([doc.page_content for doc in docs])
+    system_content = EXPERT_SYSTEM_PROMPT if expert_mode else """你是一名专业的智能稽核助手。你的任务是基于医疗数据和政策条文，为用户提供最终的稽核分析报告。
+        
+        ## [机密-仅供内部SQL构造] 核心库Schema:
+        {schema_info}
+        
+        ## 极其重要的输出规则（违规将导致数据无法正常显示）：
+        1. **排版格式**：禁止输出任何横向宽表格（即不使用 | ---- | 语法）。
+        2. **垂直卡片流**：每一个高风险案例必须以“Markdown 标题 + 列表”的样式纵向排版。请严格按以下模板输出每个案例：
+        
+           ### 🚩 [风险等级] 案例名称 (或案例 ID)
+           - **涉及机构**: [机构名称]
+           - **具体表现**: [异常行为简述]
+           - **涉案金额**: [金额]
+           - **政策依据**: [具体的政策条款名称]
+           - **稽核建议**: [下一步处理建议]
+           ---
+        
+        3. **思考隔离**：你必须将所有的逻辑分析过程包裹在 `<thought>` 和 `</thought>` 标签内。
+        4. **数据安全与事实锚点 (Factual Anchor)**：
+           - **具体表现** 字段必须且仅能依据 `execute_audit_sql` 返回的真实观测数据编写。严禁捏造任何 SQL 结果中未出现的医院、金额或日期。
+           - **政策依据** 字段必须通过 `search_expert_knowledge` 获取。你可以将政策逻辑应用到事实数据上，但严禁将政策里的“示例金额”误导为“实发金额”。
+           - 回复中严禁出现任何表名（fqz_开头的标识符），字段名（英文下划线标识符如medfee_sumamt）、SQL代码片段。
+           - 用业务语言代替技术语言。例如：说"住院记录"而非表名，说"医疗费用"而非字段名。
+        5. **输出协议一致性 (Audit-Card-V1)**：
+           - 不论查询的时间跨度（1个月或1年），禁止输出大段综述。
+           - 必须将结果拆分为 3-5 个独立的"风险卡片"。
+           - 每个卡片强制使用以下格式（Markdown）：
+             ### 🚩 [卡片名称：机构名 + 风险特征简述]
+             - **涉及机构**: [必须与 SQL 结果中的医院名 100% 对应]
+             - **具体表现**: [描述 SQL 查出的异常事实，例如：同一人同日结算两次]
+             - **涉案金额**: [必须与 SQL 结果中累计的金额 100% 对应]
+             - **政策依据**: [具体的政策条款名称或逻辑来源]
+             - **稽核建议**: [针对该异常行为的专业建议]
+             ---
+        6. **静默执行**：不要对用户说"我正在查询"、"让我分析"之类的过程描述。直接输出稽核卡片，没有数据时才告知用户。
+        7. **专家知识库优先**：在处理复杂的 SQL 需求或违规判定时，必须优先调用 `search_expert_knowledge` 检索现有的稽核逻辑和政策依据。
+        8. **确定性计算红线 (Calculation Redline)**：
+           - **严禁心算**：禁止在回复中直接写出未经工具计算的金额累加、平均值或百分比。
+           - **优先 SQL 聚合**：金额汇总、均值计算应尽可能在 SQL 层面完成（如 `SUM(medfee_sumamt)`）。
+           - **强制工具计算**：对于跨 SQL 结果的数值汇总、费用占比计算，必须调用 `calculator` 工具，并可通过其控制精度（默认2位）。
+           - **输出一致性**：最终回复中的金额必须与工具（SQL 或 calculator）返回的结果 100% 对应。"""
 
-tools.append(search_policies)
+    return ChatPromptTemplate.from_messages([
+        ("system", system_content),
+        MessagesPlaceholder(variable_name="chat_history"),
+        ("human", "{input}"),
+        MessagesPlaceholder(variable_name="agent_scratchpad"),
+    ])
+
+# 获取工具列表
+def get_tools():
+    return [execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge]
+
+# search_expert_knowledge 已通过 app.tools 导入
+
+# search_expert_knowledge 已在下方定义
 
 # 导出动态构建函数，支持根据前端 model_id 实时切换算力
 def get_executor(model_id: str = None):
     # 通过管理器获取对应的（且带回退能力的）LLM
-    # 如果 model_id 为 None，则按注册表优先级自动选择
-    dynamic_llm, resolved_id = model_manager.get_adaptive_llm(model_id=model_id, require_tools=True)
+    is_expert = False
+    if model_id:
+        dynamic_llm, resolved_id = model_manager.get_adaptive_llm(model_id=model_id, require_tools=True)
+        # 识别是否为本地 LoRA 专家模型
+        config = model_manager.providers.get(model_id, {})
+        if config.get("provider") == "local_lora" or os.getenv("AUDIT_LORA_PATH"):
+            is_expert = True
+            logger.info("检测到专家算力流入，切换至 Slim-Prompt 引导模式。")
+    else:
+        dynamic_llm = get_llm()
+        resolved_id = "default"
     
     # 构建动态 Agent
-    dynamic_agent = create_openai_tools_agent(dynamic_llm, tools, prompt)
-    return AgentExecutor(agent=dynamic_agent, tools=tools, verbose=True), resolved_id
+    current_tools = get_tools()
+    
+    # 获取动态 Schema 并注入 Prompt
+    schema_info = list_tables.invoke("all")
+    current_prompt = get_prompt(expert_mode=is_expert, schema_info=schema_info)
+    
+    # 解析 Prompt 变量 (如果有 {schema_info} 占位符)
+    try:
+        # LangChain 的 ChatPromptTemplate 需要处理变量
+        formatted_prompt = current_prompt.partial(schema_info=schema_info)
+    except Exception:
+        formatted_prompt = current_prompt
+
+    dynamic_agent = create_openai_tools_agent(dynamic_llm, current_tools, formatted_prompt)
+    return AgentExecutor(agent=dynamic_agent, tools=current_tools, verbose=True, return_intermediate_steps=True), resolved_id
