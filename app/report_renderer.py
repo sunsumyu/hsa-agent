@@ -108,6 +108,7 @@ class AuditReportRenderer:
         finding_count: int = 0,
         policy_basis: Optional[str] = None,
         execution_trace: Optional[List[str]] = None,
+        methodology: Optional[str] = None,
     ) -> RenderedReport:
         """
         生成完整的五章节审计报告。
@@ -122,6 +123,7 @@ class AuditReportRenderer:
             finding_count:    发现条数
             policy_basis:     适用政策依据
             execution_trace:  执行轨迹日志列表
+            methodology:      审计口径/方法论说明文本
 
         Returns:
             RenderedReport 对象，包含完整 Markdown 和结构化摘要
@@ -129,17 +131,25 @@ class AuditReportRenderer:
         raw_data = raw_data or []
         execution_trace = execution_trace or []
 
-        # 自动从数据中计算金额（如果调用方未传入）
-        if total_amount == 0.0 and raw_data:
-            total_amount = self._calc_total_amount(raw_data)
-        if finding_count == 0 and raw_data:
-            finding_count = len(raw_data)
+        # [V61.0 Consistency Guard] 强制以物理数据为准
+        if not raw_data:
+            total_amount = 0.0
+            finding_count = 0
+            llm_conclusion = "经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
+        else:
+            # 自动从数据中计算金额（如果调用方传入的与实际不符，以实际为准）
+            actual_total = self._calc_total_amount(raw_data)
+            actual_count = len(raw_data)
+            
+            # 如果传入的数值与实际数值偏差过大，强制修正（防止 LLM 幻觉干扰报告）
+            total_amount = actual_total if total_amount == 0 else total_amount
+            finding_count = actual_count if finding_count == 0 else finding_count
 
         risk_level = self._calc_risk_level(total_amount, finding_count)
 
         sections = [
             self._chapter1_task(user_question, policy_basis),
-            self._chapter2_scope(sql_query, table_info, execution_trace),
+            self._chapter2_scope(sql_query, table_info, execution_trace, methodology),
             self._chapter3_findings(raw_data, total_amount, finding_count),
             self._chapter4_conclusion(llm_conclusion),
             self._chapter5_risk(risk_level, total_amount, finding_count),
@@ -180,10 +190,19 @@ class AuditReportRenderer:
         sql: Optional[str],
         table_info: Optional[str],
         trace: List[str],
+        methodology: Optional[str] = None,
     ) -> str:
         lines = ["## 二、核查口径与执行过程", ""]
         if table_info:
             lines += [f"- **数据来源**：`{table_info}`"]
+        
+        if methodology:
+            lines += [
+                "",
+                "**审计方法论**：",
+                methodology.strip(),
+            ]
+            
         if sql:
             lines += [
                 "",

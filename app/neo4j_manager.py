@@ -20,29 +20,29 @@ from typing import List, Dict, Any, Optional
 FIELD_ALIAS_REGISTRY: List[Dict] = [
     {
         "canonical": "fixmedins_code",
-        "aliases": ["hosp_code", "hospital_code", "med_ins_code", "org_code"],
-        "table": "fqz_gz_jzsj_all_ql",
+        "aliases": ["hosp_code", "hospital_code", "med_ins_code", "org_code", "fixmedins_code"],
+        "table": "fqz_fymx_test1",
         "desc": "医疗机构唯一编码（物理字段名，hosp_code 不存在）",
         "forbidden_aliases": ["hosp_code"]
     },
     {
         "canonical": "fixmedins_name",
-        "aliases": ["hosp_name", "hospital_name", "med_ins_name"],
-        "table": "fqz_gz_jzsj_all_ql",
+        "aliases": ["hosp_name", "hospital_name", "med_ins_name", "fixmedins_name"],
+        "table": "fqz_fymx_test1",
         "desc": "医疗机构名称",
         "forbidden_aliases": ["hosp_name"]
     },
     {
         "canonical": "psn_no",
-        "aliases": ["patient_id", "person_id", "psn_id", "insured_no"],
-        "table": "fqz_gz_jzsj_all_ql",
-        "desc": "参保人唯一标识（主要关联字段）",
+        "aliases": ["patient_id", "person_id", "psn_id", "insured_no", "psn_no"],
+        "table": "fqz_fymx_test1",
+        "desc": "参保人唯一标识",
         "forbidden_aliases": []
     },
     {
         "canonical": "gend",
-        "aliases": ["gender", "sex"],
-        "table": "fqz_gz_jzsj_all_ql",
+        "aliases": ["gender", "sex", "gend"],
+        "table": "fqz_fymx_test1",
         "desc": "性别代码：1=男，2=女",
         "forbidden_aliases": ["gender", "sex"]
     },
@@ -83,8 +83,8 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     },
     {
         "canonical": "setl_time",
-        "aliases": ["settle_time", "settlement_date"],
-        "table": "fqz_gz_jzsj_all_ql",
+        "aliases": ["settle_time", "settlement_date", "setl_time"],
+        "table": "fqz_fymx_test1",
         "desc": "医疗费用结算时间",
         "forbidden_aliases": ["settle_time"]
     },
@@ -97,10 +97,31 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     },
     {
         "canonical": "med_type",
-        "aliases": ["medical_type", "visit_type"],
-        "table": "fqz_gz_jzsj_all_ql",
+        "aliases": ["medical_type", "visit_type", "med_type"],
+        "table": "fqz_fymx_test1",
         "desc": "就医类型（门诊/住院/药店）",
         "forbidden_aliases": ["medical_type"]
+    },
+    {
+        "canonical": "hilist_name",
+        "aliases": ["item_name", "drug_name", "treat_name", "project_name", "fee_name", "hilist_name"],
+        "table": "fqz_fymx_test1",
+        "desc": "费用明细项目名称（药品/诊疗/耗材）",
+        "forbidden_aliases": ["drug_name", "treat_name", "item_name"]
+    },
+    {
+        "canonical": "hilist_code",
+        "aliases": ["item_code", "drug_code", "treat_code", "list_code", "hilist_code"],
+        "table": "fqz_fymx_test1",
+        "desc": "医保标准项目编码",
+        "forbidden_aliases": ["drug_code", "item_code"]
+    },
+    {
+        "canonical": "det_item_fee_sumamt",
+        "aliases": ["item_fee", "detail_amount", "item_amount", "det_item_fee_sumamt"],
+        "table": "fqz_fymx_test1",
+        "desc": "明细项目总金额",
+        "forbidden_aliases": ["item_fee", "item_amount"]
     },
 ]
 
@@ -109,10 +130,11 @@ _ALIAS_TO_CANONICAL: Dict[str, str] = {}
 _FORBIDDEN_SET: set = set()
 
 for _entry in FIELD_ALIAS_REGISTRY:
+    _canonical = _entry["canonical"].strip()
     for _alias in _entry.get("aliases", []):
-        _ALIAS_TO_CANONICAL[_alias.lower()] = _entry["canonical"]
+        _ALIAS_TO_CANONICAL[_alias.strip().lower()] = _canonical
     for _forbidden in _entry.get("forbidden_aliases", []):
-        _FORBIDDEN_SET.add(_forbidden.lower())
+        _FORBIDDEN_SET.add(_forbidden.strip().lower())
 
 
 class FieldKnowledgeGraph:
@@ -165,19 +187,22 @@ class FieldKnowledgeGraph:
         """
         warnings = []
         fixed = sql
+        # 第一阶段：纠错禁用别名
         for forbidden in self._forbidden:
             if re.search(r'\b' + re.escape(forbidden) + r'\b', fixed, re.IGNORECASE):
                 canonical = self._alias_map.get(forbidden)
                 if canonical:
-                    fixed = re.sub(
-                        r'\b' + re.escape(forbidden) + r'\b',
-                        canonical, fixed, flags=re.IGNORECASE
-                    )
+                    fixed = re.sub(r'\b' + re.escape(forbidden) + r'\b', canonical, fixed, flags=re.IGNORECASE)
                     msg = f"[FieldKG] 自动纠错: {forbidden} -> {canonical}"
                     warnings.append(msg)
                     logger.warning(msg)
-                else:
-                    warnings.append(f"[FieldKG] 发现禁用字段 {forbidden}，无映射，请人工核查")
+
+        # 第二阶段：对齐普通别名
+        for alias, canonical in self._alias_map.items():
+            if alias in self._forbidden: continue
+            if re.search(r'\b' + re.escape(alias) + r'\b', fixed, re.IGNORECASE):
+                fixed = re.sub(r'\b' + re.escape(alias) + r'\b', canonical, fixed, flags=re.IGNORECASE)
+                    
         return fixed, warnings
 
     def get_canonical_fields(self, table: Optional[str] = None) -> List[Dict]:
@@ -219,7 +244,11 @@ class Neo4jManager:
     def _init_connection(self):
         try:
             from neo4j import GraphDatabase
-            self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
+            self.driver = GraphDatabase.driver(
+                self.uri, 
+                auth=(self.user, self.password),
+                connection_timeout=3.0
+            )
             self.driver.verify_connectivity()
             self.is_connected = True
             logger.info(">>> 成功直连至企业级 Neo4j 图数据库。")
@@ -232,6 +261,30 @@ class Neo4jManager:
         if not self.is_connected:
             raise RuntimeError("Neo4j 服务未连接，无法执行图查询。")
         return self.driver
+
+    def get_ontology(self) -> str:
+        """获取图数据库的本体结构（标签和关系类型）"""
+        if not self.is_connected:
+            return "Neo4j 未连接，无法获取本体结构。"
+        
+        try:
+            with self.driver.session() as session:
+                # 获取标签
+                labels_res = session.run("CALL db.labels()")
+                labels = [record["label"] for record in labels_res]
+                
+                # 获取关系类型
+                rel_types_res = session.run("CALL db.relationshipTypes()")
+                rel_types = [record["relationshipType"] for record in rel_types_res]
+                
+                ontology = "**[Neo4j Graph Ontology]**\n"
+                ontology += f"- **Labels**: {', '.join(labels) if labels else 'None'}\n"
+                ontology += f"- **Relationships**: {', '.join(rel_types) if rel_types else 'None'}\n"
+                ontology += "请务必使用上述定义的标签和关系编写 Cypher，严禁臆造。"
+                return ontology
+        except Exception as e:
+            logger.error(f"获取 Neo4j 本体失败: {e}")
+            return "获取 Neo4j 本体结构失败。"
 
 
 # ──────────────────────────────────────────────────────────────

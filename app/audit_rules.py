@@ -19,52 +19,20 @@ class AuditRuleEngine:
         "GENDER_CONFLICT": """
             SELECT
                 psn_no,
-                toYear(setl_time)     AS year,
                 fixmedins_name        AS hospital,
                 gend                  AS gender_code,
-                dise_name             AS diagnosis,
+                hilist_name           AS item_name,
                 med_type              AS service_type,
-                medfee_sumamt         AS total_fee,
-                fund_pay_sumamt       AS fund_paid,
-                toDate(setl_time)     AS settle_date
-            FROM {table}
-            WHERE toYear(setl_time) = 2024
+                det_item_fee_sumamt   AS item_fee,
+                setl_time             AS settle_date
+            FROM fqz_fymx_test1
+            WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
+              AND gend = '1' -- 男性患者
               AND (
-                  -- 主策略：男性患者（gend='1'）产生女性专科诊断
-                  (
-                    gend = '1'
-                    AND (
-                         dise_name LIKE '%妇%'
-                      OR dise_name LIKE '%阴道%'
-                      OR dise_name LIKE '%子宫%'
-                      OR dise_name LIKE '%乳腺%'
-                      OR dise_name LIKE '%卵巢%'
-                      OR dise_name LIKE '%宫颈%'
-                      OR dise_name LIKE '%产%'
-                    )
-                  )
-                  OR
-                  -- 补充策略：med_type 含"妇产科"关键词但 gend=男性
-                  (
-                    gend = '1'
-                    AND (
-                         med_type LIKE '%妇%'
-                      OR med_type LIKE '%产%'
-                      OR med_type LIKE '%妇幼%'
-                    )
-                  )
-                  OR
-                  -- 反向检测：女性患者（gend='2'）产生男性专科诊断
-                  (
-                    gend = '2'
-                    AND (
-                         dise_name LIKE '%前列腺%'
-                      OR dise_name LIKE '%睾丸%'
-                      OR dise_name LIKE '%精%'
-                    )
-                  )
+                  multiSearchAny(hilist_name, ['妇', '产', '阴道', '子宫', '乳腺', '卵巢', '宫颈', '避孕']) OR
+                  multiSearchAny(med_type, ['妇', '产', '妇幼'])
               )
-            ORDER BY total_fee DESC
+            ORDER BY det_item_fee_sumamt DESC
             LIMIT {limit}
         """,
 
@@ -82,7 +50,7 @@ class AuditRuleEngine:
                 sum(fund_pay_sumamt) as total_fund_paid
             FROM {table}
             WHERE med_type = '定点药店购药'
-              AND toYear(setl_time) = 2024
+              AND toYear(toDateTime(setl_time)) = 2024
             GROUP BY psn_no, fixmedins_code, fixmedins_name
             HAVING purchase_count >= 10
             ORDER BY purchase_count DESC
@@ -99,7 +67,7 @@ class AuditRuleEngine:
                 sum(fund_pay_sumamt) as total_fund_paid
             FROM {table}
             WHERE med_type = '定点药店购药'
-              AND toYear(setl_time) = 2024
+              AND toYear(toDateTime(setl_time)) = 2024
             GROUP BY psn_no
             HAVING store_count >= 5 AND total_fund_paid > 5000
             ORDER BY total_fund_paid DESC
@@ -109,33 +77,38 @@ class AuditRuleEngine:
         # [算子 4] 分解住院检测（当住院数据可用时）
         # med_type 住院值需按实际数据口径替换
         "DECOMPOSITION_HOSPITALIZATION": """
-            SELECT a.psn_no, a.fixmedins_name, a.end_date as discharge_a, b.start_date as admission_b, 
-                   dateDiff('day', toDate(a.end_date), toDate(b.start_date)) as interval_days,
-                   a.medfee_sumamt as fee_a, b.medfee_sumamt as fee_b,
-                   a.dise_name as disease_a, b.dise_name as disease_b
-            FROM {table} AS a
-            INNER JOIN {table} AS b ON a.psn_no = b.psn_no AND a.fixmedins_code = b.fixmedins_code
-            WHERE a.setl_id != b.setl_id
-              AND b.start_date > a.end_date
-              AND dateDiff('day', toDate(a.end_date), toDate(b.start_date)) BETWEEN 1 AND 15
-              AND a.med_type NOT LIKE '%药%'
-              AND b.med_type NOT LIKE '%药%'
-              AND toYear(a.start_date) = 2024
+            SELECT psn_no, fixmedins_name, 
+                   prev_end_date as discharge_a, 
+                   start_date as admission_b,
+                   dateDiff('day', toDate(prev_end_date), toDate(start_date)) as interval_days,
+                   prev_fee as fee_a, medfee_sumamt as fee_b
+            FROM (
+                SELECT psn_no, fixmedins_name, fixmedins_code, start_date, end_date, medfee_sumamt, med_type,
+                       lagInFrame(end_date) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY start_date) as prev_end_date,
+                       lagInFrame(medfee_sumamt) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY start_date) as prev_fee
+                FROM {table}
+                WHERE toYear(toDateTime(start_date)) = 2024
+            )
+            WHERE prev_end_date IS NOT NULL 
+              AND med_type NOT LIKE '%药%'
+              AND dateDiff('day', toDate(prev_end_date), toDate(start_date)) BETWEEN 1 AND 15
             ORDER BY interval_days ASC
             LIMIT {limit}
         """,
         
         # [算子 5] 跨机构同日结算（疑似挂名）
+        # [算子 3] 跨机构重复住院（同一参保人在不同医院、时间重叠的住院记录）
         "CROSS_HOSPITAL_OVERLAP": """
-            SELECT a.psn_no, a.psn_name, a.fixmedins_name as store_a, b.fixmedins_name as store_b,
-                   toDate(a.setl_time) as date_a, toDate(b.setl_time) as date_b,
-                   a.medfee_sumamt as amt_a, b.medfee_sumamt as amt_b
-            FROM {table} AS a
-            INNER JOIN {table} AS b ON a.psn_no = b.psn_no
-            WHERE a.fixmedins_code != b.fixmedins_code
-              AND toDate(a.setl_time) = toDate(b.setl_time)
-              AND a.setl_id != b.setl_id
-            ORDER BY a.psn_no
+            SELECT
+                psn_no,
+                toDate(setl_time)              AS setl_date,
+                count(DISTINCT fixmedins_code) AS hospital_count,
+                groupArray(fixmedins_name)     AS hospitals,
+                sum(medfee_sumamt)             AS total_amount
+            FROM {table}
+            WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
+            GROUP BY psn_no, setl_date
+            HAVING hospital_count > 1
             LIMIT {limit}
         """,
 
@@ -149,20 +122,20 @@ class AuditRuleEngine:
                 sum(medfee_sumamt)      AS total_fee,
                 sum(fund_pay_sumamt)    AS total_fund_paid
             FROM {table}
-            WHERE toYear(setl_time) = 2024
+            WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
             GROUP BY psn_no, setl_date, fixmedins_code, fixmedins_name
             HAVING bill_count > 1
             ORDER BY bill_count DESC, total_fee DESC
             LIMIT {limit}
         """,
 
-        # [算子 7] 共用联系方式欺诈网络检测（查找报销额异常偏高的高频结算群体）
-        # [ISS-010 Fix] 聚合函数 sum() 不能放在 WHERE，已移至 HAVING
-        # 注意：直接查联系方式尾号需要 contact_phone 字段，生产表暂不支持
-        # 替代策略：查 2024 年高额报销 + 高报销比率 + 高频次 的异常患者群
+        # [算子 7] 共用联系方式欺诈网络检测
+        # 通过 tel (联系电话) 聚合，找出多个不同参保人共用同一手机号的异常情况
         "CONTACT_SHARING_DETECTOR": """
             SELECT
-                a.psn_no,
+                a.tel                  AS contact_phone,
+                count(DISTINCT a.psn_no) AS shared_patient_count,
+                groupArray(a.psn_name) AS shared_patients,
                 a.fixmedins_name       AS hospital,
                 count()                AS total_visits,
                 sum(a.medfee_sumamt)   AS total_fee,
@@ -172,25 +145,121 @@ class AuditRuleEngine:
                     4
                 ) AS reimb_ratio
             FROM {table} AS a
-            WHERE toYear(a.setl_time) = 2024
-            GROUP BY a.psn_no, a.fixmedins_name, a.fixmedins_code
+            WHERE toYear(toDateTime(a.setl_time)) = 2024
+              AND a.tel IS NOT NULL
+              AND a.tel != ''
+              AND length(a.tel) >= 7
+            GROUP BY a.tel, a.fixmedins_name
             HAVING
-                total_fund_paid > 5000      -- 报销金额偏高
-                AND reimb_ratio > 0.7       -- 报销比例异常（超过 70%）
-                AND total_visits > 5        -- 高频结算（5次以上）
-            ORDER BY total_fund_paid DESC
+                shared_patient_count >= 2   -- 至少2个不同参保人共用
+                AND total_fund_paid > 5000  -- 报销金额偏高
+            ORDER BY shared_patient_count DESC, total_fund_paid DESC
             LIMIT {limit}
         """
     }
 
     @staticmethod
-    def get_rule_sql(rule_id: str, table_name: str = "fqz_gz_jzsj_all_ql", limit: int = 50) -> str:
-        """根据规则 ID 获取物理取证 SQL"""
+    def get_rule_sql(rule_id: str, table_name: str = "fqz_gz_jzsj_all_ql", limit: int = 50, extra_filters: Optional[Dict[str, str]] = None) -> str:
+        """
+        [企业级算子引擎 V61.5] 结构化获取审计 SQL 并注入动态过滤器。
+        
+        改进点：
+        1. 字段对齐：通过 FieldKG 将动态字段映射为标准物理字段。
+        2. 算子推断：自动补全缺失的 '=' 或 'LIKE'。
+        3. 安全包裹：智能处理单引号，防止语法崩溃。
+        """
         template = AuditRuleEngine.TEMPLATES.get(rule_id.upper())
         if not template:
             logger.error(f">>> [RuleEngine] 未定义的规则算子: {rule_id}")
             return ""
+
+        # 1. 基础渲染（处理表名和限制）
         sql = template.format(table=table_name, limit=limit)
+        
+        # 2. 清理：移除残留在模板功能区的中文干扰项（保护单引号内业务关键词）
+        import re
+        def _clean_non_sql_chinese(text):
+            literals = re.findall(r"'(?:''|[^'])*'", text)
+            placeholder_text = re.sub(r"'(?:''|[^'])*'", "___SQL_LITERAL___", text)
+            cleaned_text = re.sub(r'[^\x00-\x7f]+', ' ', placeholder_text)
+            for lit in literals:
+                cleaned_text = cleaned_text.replace("___SQL_LITERAL___", lit, 1)
+            return cleaned_text
+
+        lines = []
+        for line in sql.split('\n'):
+            if '--' in line:
+                parts = line.split('--', 1)
+                clean_part = _clean_non_sql_chinese(parts[0])
+                lines.append(f"{clean_part} -- {parts[1]}")
+            else:
+                lines.append(_clean_non_sql_chinese(line))
+        sql = '\n'.join(lines)
+
+        # 3. 动态过滤器注入 (SQLBooster V2)
+        if extra_filters:
+            from app.neo4j_manager import field_kg
+            filter_clauses = []
+            
+            for raw_field, cond in extra_filters.items():
+                # A. 字段名对齐
+                field = field_kg.resolve(raw_field) or raw_field
+                
+                # B. 算子与值智能补全
+                cond_str = str(cond).strip()
+                # 检测是否已包含运算符
+                has_operator = any(cond_str.upper().startswith(op) for op in ['=', '>', '<', 'LIKE', 'IN', 'BETWEEN', '!='])
+                
+                if not has_operator:
+                    # C. 算子与类型推断 (工业级)
+                    numeric_fields = ['medfee_sumamt', 'fund_pay_sumamt', 'det_item_fee_sumamt', 'amount', 'fee']
+                    is_numeric = any(nf in field.lower() for nf in numeric_fields) or field.lower().endswith('_amt') or 'count' in field.lower()
+                    
+                    if is_numeric and re.match(r'^-?\d+(\.\d+)?$', cond_str):
+                        # 确实是数字字段且值合法
+                        safe_predicate = f"{field} = {cond_str}"
+                    else:
+                        # 字符串字段或非纯数字值，强制包裹单引号
+                        if cond_str.startswith("'") and cond_str.endswith("'"):
+                            safe_predicate = f"{field} = {cond_str}"
+                        else:
+                            # 处理转义：防止注入值本身含有单引号
+                            escaped_val = cond_str.replace("'", "''")
+                            safe_predicate = f"{field} = '{escaped_val}'"
+                else:
+                    # 已有运算符，直接组合
+                    safe_predicate = f"{field} {cond_str}"
+                
+                filter_clauses.append(f"({safe_predicate})")
+            
+            if filter_clauses:
+                combined_filter = " AND ".join(filter_clauses)
+                
+                # 寻找关键插入点
+                insert_pos = -1
+                for marker in [r"\bGROUP\s+BY\b", r"\bHAVING\b", r"\bORDER\s+BY\b", r"\bLIMIT\b"]:
+                    match = re.search(marker, sql, re.IGNORECASE)
+                    if match:
+                        if insert_pos == -1 or match.start() < insert_pos:
+                            insert_pos = match.start()
+                
+                where_match = re.search(r"\bWHERE\b", sql, re.IGNORECASE)
+                
+                if where_match:
+                    patch = f" AND {combined_filter} "
+                    if insert_pos != -1:
+                        sql = sql[:insert_pos] + patch + sql[insert_pos:]
+                    else:
+                        sql += patch
+                else:
+                    patch = f" WHERE {combined_filter} "
+                    if insert_pos != -1:
+                        sql = sql[:insert_pos] + patch + sql[insert_pos:]
+                    else:
+                        sql += patch
+            
+            logger.info(f">>> [RuleEngine] 工业级逻辑注入成功: {extra_filters}")
+            
         return sql
 
     @staticmethod

@@ -9,8 +9,10 @@ import asyncio
 
 from app.usage_tracker import usage_tracker
 from app.model_manager import model_manager
+from app.neo4j_manager import field_kg, neo4j_manager
 from app.prompts import PLANNER_PROMPT, CODER_PROMPT, ANALYST_PROMPT, REPORTER_PROMPT, AUDITOR_PROMPT
-from app.tools import execute_audit_sql, get_table_schema, list_tables, search_expert_knowledge
+from app.tools import execute_audit_sql, get_table_schema, list_tables, search_expert_knowledge, query_fraud_ring
+from app.skills import MedicalSchemaSkill, RuleExecutionSkill, SQLSafeExecutionSkill
 from app.experience import experience_manager
 from app.semantic_layer import SemanticRetriever
 from app.semantic_memory import cognitive_memory_manager
@@ -97,6 +99,7 @@ class AuditState(TypedDict):
     next_step: str
     schema_hint: Optional[str]   # NEED_SCHEMA 补充检索后的字段字典
     execution_trace: List[str]   # [V57.0] 审计执行轨迹：记录每步 SQL/工具 的物理行为日志
+    methodology: str             # [V59.3] 审计口径/方法论说明，记录 SQL 背后的业务逻辑定义
 
 
 
@@ -143,7 +146,9 @@ async def planner_node(state: AuditState, config: RunnableConfig):
 
     # ── [V48.0] 语义 SQL 缓存拦截（最高优先级）─────────────────────
     from app.semantic_memory import sql_cache_manager
-    cached_sql = sql_cache_manager.search(user_input)
+    import os as _os
+    disable_cache = _os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true"
+    cached_sql = None if disable_cache else sql_cache_manager.search(user_input)
     if cached_sql:
         logger.success("⚡ [CACHE HIT] 命中问题语义缓存，直接短路 Planner 与 Coder！")
         return {
@@ -173,6 +178,7 @@ async def planner_node(state: AuditState, config: RunnableConfig):
             "metadata": {
                 "fast_route_id": route.target_id,
                 "fast_route_type": route.route_type.value,
+                "extra_filters": route.extra_filters,
                 "user_question": user_input,  # [ISS-009 Fix] 保存原始问题供 Reporter 使用
             },
             "retry_count": 0,
@@ -189,9 +195,12 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     llm, actual_model = model_manager.get_llm_by_role(role, retry_count=state.get("retry_count", 0), config=config)
 
     mem_context = cognitive_memory_manager.recall_context(state.get("session_id", "default"), user_input)
+    
+    # 获取图谱本体
+    ontology = neo4j_manager.get_ontology()
 
     prompt_template = get_langfuse_prompt("planner-audit-v1", fallback=PLANNER_PROMPT)
-    prompt = prompt_template.format_messages(messages=state["messages"], experiences=mem_context)
+    prompt = prompt_template.format_messages(messages=state["messages"], experiences=mem_context, schema_info=f"{ontology}\n\n请使用 lookup_medical_schema 技能查询字段")
     obs_config = build_obs_config(config, role, state)
     logger.debug(f">>> [执行期诊断] 节点角色: {role} | LLM对象: {llm} | 实际模型ID: {actual_model}")
     response = await llm.ainvoke(prompt, config=obs_config)
@@ -204,148 +213,80 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     return {"tasks": tasks[:3], "messages": [response], "retry_count": 0, "complexity": complexity}
 
 async def sqlexec_node(state: AuditState, config: RunnableConfig):
+    """
+    [工业级 Skills 节点] 完全基于 Tool Calling 调用独立封装的 Skills。
+    """
     retry = state.get("retry_count", 0)
     if retry >= MAX_RETRIES:
-        logger.error(f"🛑 [SQLEXEC] 达到重试上限 ({MAX_RETRIES}次)，强制熔断并汇报失败。")
+        logger.error(f"🛑 [SQLEXEC] 达到重试上限，强制熔断并汇报失败。")
         return {
-            "raw_data": "【审计异常】由于系统在 3 次重试内均未能生成有效取证逻辑或遭遇持续错误，本次任务已强制终止。建议人工核查业务口径或补充物理字典。",
+            "raw_data": "【审计异常】由于系统未能生成有效逻辑，任务已强制终止。",
+            "sql_query": state.get("sql_query", "-- 多次尝试执行失败，未保留最终有效 SQL"),
+            "methodology": state.get("methodology", ""),
             "sql_validated": True,
             "error_log": "REACHED_MAX_RETRIES"
         }
-    # ── [V59.1] Fast Route 直接执行：跳过 LLM Coder ─────────────────
+
+    # 优先走 Fast Route
     fast_route_id = (state.get("metadata") or {}).get("fast_route_id")
-    fast_route_type = (state.get("metadata") or {}).get("fast_route_type")
     if fast_route_id:
-        logger.success(f"🚀 [FAST_EXEC] Fast Route 直接执行算子 [{fast_route_id}]，LLM Coder 休眠")
-        from app.tools import audit_medical_rule, run_anomaly_detection
+        logger.success(f"🚀 [FAST_EXEC] Fast Route 命中，直接执行 Skill")
         try:
-            # [V60.0 P0 修复] 异步工具必须使用 ainvoke，同步 invoke 会在事件循环中阻塞/挂起
-            if fast_route_type == RouteType.KNOWN_RULE.value:
-                tool_result = await audit_medical_rule.ainvoke({"rule_id": fast_route_id})
-            else:
-                tool_result = await run_anomaly_detection.ainvoke({"algorithm_id": fast_route_id})
-
-            # tool_result 可能是 dict 或被 LangChain 序列化为字符串
-            if isinstance(tool_result, str):
-                import json as _j
-                try:
-                    tool_result = _j.loads(tool_result)
-                except Exception:
-                    tool_result = {"report": tool_result, "evidence_count": 0, "raw_evidence": []}
-
-            raw_evidence = tool_result.get("raw_evidence", [])
+            skill = RuleExecutionSkill()
+            extra_filters = (state.get("metadata") or {}).get("extra_filters")
+            res = await skill._arun(fast_route_id, extra_filters=extra_filters)
+            trace = _append_trace(state, res.get("trace_hint", ""))
+            
             import json as _j
             import datetime as _dt
             from decimal import Decimal as _Dec
 
             class _AuditEncoder(_j.JSONEncoder):
-                """[ISS-006 Fix] 支持 datetime.date/datetime 和 Decimal 的审计专用序列化器"""
                 def default(self, obj):
-                    if isinstance(obj, (_dt.datetime, _dt.date)):
-                        return obj.isoformat()
-                    if isinstance(obj, _Dec):
-                        return float(obj)
+                    if isinstance(obj, (_dt.datetime, _dt.date)): return obj.isoformat()
+                    if isinstance(obj, _Dec): return float(obj)
                     return super().default(obj)
-
-            result_str = (
-                _j.dumps(raw_evidence, ensure_ascii=False, cls=_AuditEncoder)
-                if isinstance(raw_evidence, list)
-                else str(raw_evidence)
-            )
-
-            ev_count = tool_result.get("evidence_count", len(raw_evidence) if isinstance(raw_evidence, list) else 0)
-            trace = _append_trace(state, f"[FastExec] {fast_route_id} → 命中 {ev_count} 条违规记录")
-            logger.success(f"✅ [FAST_EXEC] 算子 {fast_route_id} 执行完毕，命中 {ev_count} 条")
+            
+            raw_evidence = res.get("raw_evidence", [])
+            result_str = _j.dumps(raw_evidence, ensure_ascii=False, cls=_AuditEncoder) if isinstance(raw_evidence, list) else str(raw_evidence)
+            
             return {
                 "raw_data": result_str,
-                "sql_query": f"-- FastRoute: {fast_route_id}",
+                "sql_query": res.get("sql_logic", f"-- FastRoute: {fast_route_id}"),
+                "methodology": res.get("methodology", ""),
                 "sql_validated": True,
                 "error_log": None,
                 "execution_trace": trace,
             }
         except Exception as e:
-            logger.warning(f"⚠️ [FAST_EXEC] Fast Route 执行异常，降级到 LLM 路径: {e}")
-            # 降级：清除 fast_route_id，允许 LLM Coder 接管
-            state_metadata = dict(state.get("metadata") or {})
-            state_metadata.pop("fast_route_id", None)
+            logger.warning(f"⚠️ [FAST_EXEC] 执行异常: {e}")
+            state.get("metadata", {}).pop("fast_route_id", None)
 
-    
-    logger.info(f">>> [SQLEXEC] 正在物理取证... (尝试 {retry + 1}/3)")
-    from app.tools import audit_medical_rule, run_anomaly_detection, search_expert_knowledge, get_table_schema
+    logger.info(f">>> [SKILLS] LLM 智能调度 Skills... (尝试 {retry + 1}/3)")
     llm, actual_model = model_manager.get_llm_by_role("coder", retry_count=retry, config=config)
     
-    tools = [audit_medical_rule, run_anomaly_detection, search_expert_knowledge, get_table_schema]
+    tools = [MedicalSchemaSkill(), RuleExecutionSkill(), SQLSafeExecutionSkill(), query_fraud_ring]
     llm_with_tools = llm.bind_tools(tools)
+    
     tasks_list = state.get("tasks", [])
-    # ── [V59.2] M4 精准 Schema 注入（替代全量 FAISS Schema 堆砌）────────
-    schema_override = state.get("schema_hint")
-    if schema_override:
-        semantic_dict = schema_override
-        logger.info("[SQLEXEC] 使用 NEED_SCHEMA 补充 Schema 重试")
-    else:
-        # 精准召回：只注入与当前任务最相关的 6 个字段（约 600 字符 vs 旧版 3000+ 字符）
-        user_q = ""
-        for m in state.get("messages", []):
-            c = getattr(m, "content", "")
-            if c:
-                user_q = str(c)
-                break
-        task_hint = " ".join(state.get("tasks", []))
-        semantic_dict = _schema_injector.inject(
-            user_question=f"{user_q} {task_hint}",
-            top_k=6,
-            max_chars=700,
-        )
-        logger.debug(f"[SQLEXEC] 精准 Schema ({len(semantic_dict)} chars)")
-    
-    # [V47.7] 统一记忆召回：结合传统经验与语义记忆
     mem_context = cognitive_memory_manager.recall_context(state.get("session_id", "default"), "\n".join(tasks_list))
-    relevant_experiences = experience_manager.get_relevant_experience(tasks_list)
-    combined_exp = f"{mem_context}\n\n{relevant_experiences}"
     
-    # [V51.0 深度优化] 吸收 hello-agents Chapter 7/9 的 Observation 模式
-    if retry > 0:
-        # 1. 提取核心指令
-        sys_msgs = [m for m in state["messages"] if isinstance(m, SystemMessage)]
-        user_msgs = [m for m in state["messages"] if isinstance(m, HumanMessage)]
-        
-        # 2. 构造 Observation 日志（模仿 ReAct 模式）
-        # 将失败历史重塑为“外部观察事实”，而不是“对话历史”
-        observation_log = f"\n### 📝 物理取证观察日志 (Audit Observation Log):\n"
-        observation_log += f"- 上轮状态: REJECTED\n"
-        observation_log += f"- 拦截原因: {state.get('error_log', 'Unknown Error')}\n"
-        
-        if state.get("schema_hint"):
-            observation_log += f"- [关键发现] 已锁定物理映射: {state['schema_hint']}\n"
-        
-        # 3. 构造 State Reflection 指令
-        reflection_instruction = HumanMessage(content=(
-            f"{observation_log}\n"
-            f"### 🎯 当前指令 (Refined Instruction):\n"
-            f"根据上述观察结果，修正逻辑并重新生成 SQL。请严格遵守物理字典，禁止幻觉。\n"
-            f"待执行任务: " + "\n".join(tasks_list)
-        ))
-        
-        # 只保留最核心的消息对，防止 Context Collapse
-        clean_state_messages = (sys_msgs[:1] + user_msgs[:1] + [reflection_instruction])
-        logger.info(f"[SQLEXEC] Context Reshaped via hello-agents Observation pattern.")
-    else:
-        clean_state_messages = state["messages"]
-
-    prompt_template = get_langfuse_prompt("coder-sql-expert-v1", fallback=CODER_PROMPT)
-    prompt = prompt_template.format_messages(
-        messages=clean_state_messages, schema_info=semantic_dict,
-        tasks="\n".join(tasks_list), experiences=combined_exp, semantic_dict=semantic_dict
+    # 获取图谱本体
+    ontology = neo4j_manager.get_ontology()
+    
+    prompt = CODER_PROMPT.format_messages(
+        messages=state["messages"], 
+        schema_info=f"{ontology}\n\n请使用 lookup_medical_schema 技能按需查询字段",
+        tasks="\n".join(tasks_list), experiences=mem_context, semantic_dict=""
     )
     
-    if tasks_list and not state.get("human_input"):
-        prompt.append(HumanMessage(content=f"请根据计划执行取证：\n" + "\n".join(tasks_list)))
-
+    if retry > 0 and state.get("error_log"):
+        prompt.append(HumanMessage(content=f"上一轮执行失败，原因：{state['error_log']}\n请修正参数并重新调用工具。"))
+    
     obs_config = build_obs_config(config, "sqlexec", state)
     response = await llm_with_tools.ainvoke(prompt, config=obs_config)
     _record_usage_with_budget("coder", response, actual_model, prompt=prompt)
     
-    # 工具调用路径
     if getattr(response, "tool_calls", None):
         async def invoke_tool(t_call):
             t_instance = next((t for t in tools if t.name == t_call["name"]), None)
@@ -359,256 +300,72 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
         
         tool_msgs = []
         raw_data_list = []
+        sql_logics = []
+        methodologies = []
+        tool_traces = []
+        has_error = False
+        error_msg = ""
+        
         for t_call, res in results:
             if res is not None:
                 tool_msg = ToolMessage(content=str(res), tool_call_id=t_call["id"])
                 tool_msgs.append(tool_msg)
-                raw_data_list.append(str(res))
-                # [V47.0] 将关键取证数据记录为情景记忆
-                cognitive_memory_manager.add_message(state.get("session_id", "default"), tool_msg)
                 
-        combined_raw = "\n---\n".join(raw_data_list)
-        # [V37.7] 强制持久化取证数据到文件
-        with open("data/raw_audit_evidence_dump.json", "w", encoding="utf-8") as f:
-            json.dump({"raw": combined_raw}, f, ensure_ascii=False)
+                if isinstance(res, dict):
+                    if "trace_hint" in res:
+                        tool_traces.append(res["trace_hint"])
+                    if "sql_logic" in res:
+                        sql_logics.append(res["sql_logic"])
+                    if "methodology" in res:
+                        methodologies.append(res["methodology"])
+                        
+                    if res.get("status") == "ERROR" or "error" in res:
+                        has_error = True
+                        error_msg = res.get("error_message") or res.get("error")
+                    else:
+                        if "records_sample" in res:
+                            raw_data_list.append(str(res["records_sample"]))
+                        if "raw_evidence" in res:
+                            raw_data_list.append(str(res["raw_evidence"]))
+                else:
+                    raw_data_list.append(str(res))
 
-        # [V57.0] 从工具返回值中提取 trace_hint，写入执行轨迹
-        tool_traces = []
-        for _, res in results:
-            if isinstance(res, dict) and "trace_hint" in res:
-                tool_traces.append(res["trace_hint"])
         trace = list(state.get("execution_trace") or [])
         for hint in tool_traces:
             trace = _append_trace({"execution_trace": trace}, hint)
 
-        # [Fix-2] 若工具返回空 evidence，直接标记完成，不触发 retry
-        any_evidence = any(
-            isinstance(r, dict) and r.get("evidence_count", 0) > 0
-            for _, r in results if isinstance(r, dict)
-        ) or bool(combined_raw.strip())
+        combined_sql = "\n---\n".join(sql_logics) if sql_logics else ""
+        combined_meth = "\n\n".join(methodologies) if methodologies else ""
+
+        if has_error:
+            logger.warning(f"Skill 报错: {error_msg}")
+            return {
+                "error_log": error_msg,
+                "sql_query": combined_sql,
+                "methodology": combined_meth,
+                "messages": [response] + tool_msgs,
+                "retry_count": retry + 1,
+                "execution_trace": trace
+            }
+
+        combined_raw = "\n---\n".join(raw_data_list)
+        
         return {
             "raw_data": combined_raw,
+            "sql_query": combined_sql,
+            "methodology": combined_meth,
             "messages": [response] + tool_msgs,
             "retry_count": retry + 1,
-            "sql_validated": True,   # 工具路径视为已完成，不再重试
-            "error_log": None,
-            "execution_trace": trace
-        }
-    
-    response_text = str(response.content).strip()
-
-    # ── 路径 0: NEED_SCHEMA ──────────────────────────────────────
-    if response_text.startswith("NEED_SCHEMA"):
-        missing = [l.replace("- missing:", "").strip()
-                   for l in response_text.split("\n") if "missing:" in l]
-        reason  = next((l.replace("- reason:", "").strip()
-                        for l in response_text.split("\n") if "reason:" in l), "")
-        logger.warning(f"[SQLEXEC] NEED_SCHEMA: 缺失字段 {missing}")
-        # 触发 semantic_layer 补充检索
-        if missing and retry < MAX_RETRIES - 1:
-            new_items = semantic_retriever.get_relevant_columns([" ".join(missing)])
-            new_dict  = semantic_retriever.format_for_prompt(new_items)
-            if new_dict and "暂未检索到" not in new_dict:
-                logger.info("[SQLEXEC] 補充 Schema 检索成功，触发重试")
-                return {
-                    "error_log": f"NEED_SCHEMA，已補充字典，重试中",
-                    "messages": [response],
-                    "retry_count": retry + 1,
-                    "schema_hint": new_dict,
-                }
-        # 不能補充 → 诚实兄底（不再 retry）
-        missing_str = "、".join(missing) if missing else "关键业务字段"
-        return {
-            "raw_data": (
-                f"【审计说明】本次核查任务涉及 {missing_str}，"
-                f"当前数据字典未检索到对应物理字段映射。"
-                f"{reason}。建议补充以下字段的物理映射后重新执行：{missing_str}。"
-            ),
-            "sql_validated": True,
-            "error_log": None,
-            "messages": [response],
-            "retry_count": retry + 1,
-        }
-
-    # ── 路径 0b: 文本格式 TOOL_CALL （bind_tools 失效时的兑底解析） ──────
-    if not getattr(response, "tool_calls", None) and response_text.startswith("TOOL_CALL:"):
-        lines     = response_text.split("\n")
-        tool_name = lines[0].replace("TOOL_CALL:", "").strip()
-        args_str  = next((l.replace("ARGS:", "").strip()
-                          for l in lines if l.strip().startswith("ARGS:")), "{}")
-        try:
-            args          = json.loads(args_str)
-            tool_instance = next((t for t in tools if t.name == tool_name), None)
-            if tool_instance:
-                res      = await tool_instance.ainvoke(args)
-                tool_msg = ToolMessage(content=str(res), tool_call_id="text_fallback_0")
-                combined = str(res)
-                with open("data/raw_audit_evidence_dump.json", "w", encoding="utf-8") as f:
-                    json.dump({"raw": combined}, f, ensure_ascii=False)
-                return {
-                    "raw_data": combined,
-                    "messages": [response, tool_msg],
-                    "retry_count": retry + 1,
-                    "sql_validated": True,
-                    "error_log": None,
-                }
-        except Exception as e:
-            logger.warning(f"[SQLEXEC] 文本 TOOL_CALL 解析失败: {e}")
-
-    # SQL 路径：强化正则解析，支持大小写及不规范换行
-    sql_match = re.search(r'```(?:sql|SQL)?\n?(.*?)\n?```', response_text, re.DOTALL | re.IGNORECASE)
-    sql = sql_match.group(1).strip() if sql_match else response_text
-    
-    # 物理过滤：剔除可能夹带的 Markdown 标记
-    sql = re.sub(r'^```sql\s*|\s*```$', '', sql, flags=re.IGNORECASE | re.MULTILINE).strip()
-    
-    # [V41.7] 增强错误归因：在进入语法校验前，明确判断空 SQL 的根本原因
-    if not sql:
-        finish_reason = ""
-        if hasattr(response, "response_metadata"):
-            finish_reason = response.response_metadata.get("finish_reason", "未知")
-            
-        if not response_text:
-            error_reason = f"Agent 输出了空内容 (底层结束原因: {finish_reason})。"
-            if finish_reason.lower() in ["safety", "content_filter", "recitation"]:
-                error_reason += " 🛑 明确判定：触发了模型提供商的安全、敏感词或背诵拦截策略。"
-            elif finish_reason.lower() in ["stop", "end_turn"]:
-                error_reason += " ⚠️ 模型主动停止了生成，可能是它没有理解指令，或者认为不需要执行 SQL。"
-        elif "```" in response_text:
-            error_reason = "Agent 输出了代码块标记，但内部没有包含任何实际的 SQL 语句。"
-        else:
-            error_reason = f"Agent 没有生成有效的 SQL 格式，而是输出了普通对话文本：'{response_text[:150]}...'"
-            
-        detailed_error = f"SQL 内容不能为空。根本原因: {error_reason}"
-        logger.warning(f"[SQLEXEC 诊断] 尝试 {retry+1} 失败: {detailed_error}")
-        trace = _append_trace(state, f"[SQL失败] 尝试 {retry+1}/3：{error_reason[:150]}")
-        return {"error_log": detailed_error, "messages": [response], "retry_count": retry + 1, "execution_trace": trace}
-
-    try:
-        sql = SQLGuardian.validate_sql(sql)
-        # [V60.0 P0 修复] execute_audit_sql 是异步 @tool，必须通过 ainvoke 调用
-        # 直接调用 execute_audit_sql(sql) 只会返回 Coroutine 对象，查询从未真实发出
-        result_raw_obj = await execute_audit_sql.ainvoke({"sql": sql})
-        result_raw = str(result_raw_obj) if result_raw_obj is not None else ""
-        # [V37.7] 强制持久化
-        with open("data/raw_audit_evidence_dump.json", "w", encoding="utf-8") as f:
-            json.dump({"sql": sql, "raw": result_raw}, f, ensure_ascii=False)
-        # [V57.0] 将执行行为写入审计轨迹（已脏敏 + 限长）
-        trace = _append_trace(state, f"[SQL执行] {sql.strip()[:200]} → 返回: {result_raw[:80]}")
-        logger.success(f"✅ [SQL] 执行成功，结果长度 {len(result_raw)} chars")
-        return {
-            "raw_data": result_raw, 
-            "sql_query": sql, 
-            "messages": [response], 
-            "retry_count": retry + 1, 
             "sql_validated": True,
             "error_log": None,
             "execution_trace": trace
         }
-    except Exception as e:
-        logger.warning(f"SQLEXEC 尝试 {retry+1} 失败: {e}")
-        trace = _append_trace(state, f"[SQL失败] 尝试 {retry+1}/3：{str(e)[:150]}")
-        return {"error_log": str(e), "messages": [response], "retry_count": retry + 1, "execution_trace": trace}
-
-async def auditor_node(state: AuditState, config: RunnableConfig):
-    """
-    [V60.0 架构升级] 企业级 AUDITOR 节点：
-    - 对 Fast Route 路径（物理算子已执行）直接 PASS，无需 SQL 语法审计
-    - 对 LLM Coder 生成的 SQL 执行逻辑完整性 + ClickHouse 语法审查
-    - 内嵌 CRITIC 过滤逻辑（不产生循环）
-    """
-    logger.info(">>> [AUDITOR] 正在进行技术审计与逻辑对撞...")
-
-    # ── [ISS-005 Fix] Fast Route 豁免：物理算子已执行，无 SQL 可审计 ────────
-    fast_route_id = (state.get("metadata") or {}).get("fast_route_id")
-    if fast_route_id:
-        import json as _fj
-        raw_str = state.get("raw_data", "[]")
-        try:
-            ev_count = len(_fj.loads(raw_str)) if isinstance(raw_str, str) and raw_str.strip().startswith("[") else 0
-        except Exception:
-            ev_count = 0
-        feedback = AuditFeedback(
-            decision="PASS",
-            reason=(
-                f"[FastRoute 豁免] 物理算子 {fast_route_id} 已通过 ainvoke 直接执行，"
-                f"命中 {ev_count} 条记录。Fast Route 路径无 LLM 生成 SQL，无需 SQL 语法审计，直接通过。"
-            )
-        )
-        trace = _append_trace(state, f"[AUDITOR] FastRoute PASS → {fast_route_id}，命中 {ev_count} 条")
-        logger.success(f"✅ [AUDITOR] Fast Route 豁免通过: {fast_route_id}")
-        return {"audit_feedback": feedback, "is_awaiting_human": False, "execution_trace": trace}
-
-    llm, _ = model_manager.get_llm_by_role("planner", config=config)
-    prompt_template = get_langfuse_prompt("auditor-chief-v1", fallback=AUDITOR_PROMPT)
-    safe_messages = _sanitize_for_thinking_mode(list(state["messages"]))
-    prompt = prompt_template.format_messages(
-        messages=safe_messages,
-        tasks="\n".join(state["tasks"]),
-        sql=state.get("sql_query", "N/A"),
-        raw_data_sample=str(state.get("raw_data", ""))[:1000]
-    )
-
-    # ── 确定性冲突检测（不需要 LLM）─────────────────────────────
-    findings_texts = [f.evidence for f in state.get("audit_findings", [])]
-    conflicts = detect_conflicts(findings_texts)
-    if conflicts:
-        logger.warning(f">>> [CONFLICT] 检测到 {len(conflicts)} 处审计事实矛盾！触发人工审核拦截。")
-        return {
-            "audit_feedback": AuditFeedback(decision="REJECT", reason=f"检测到物理事实冲突: {conflicts[0]['description']}"),
-            "is_awaiting_human": True,
-            "retry_count": state.get("retry_count", 0) + 1
-        }
-
-    # ── LLM 审计判定─────────────────────────────────────
-    try:
-        response = await llm.ainvoke(prompt)
-        res_text = str(getattr(response, "content", response)).strip()
-        json_match = re.search(r'(\{.*\})', res_text, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(1))
-            feedback = AuditFeedback(**data)
-        else:
-            feedback = AuditFeedback(
-                decision="PASS" if "PASS" in res_text.upper() else "REJECT",
-                reason=res_text[:200]
-            )
-    except Exception as e:
-        logger.error(f"[AUDITOR_ERROR] 解析失败: {e}")
-        feedback = AuditFeedback(decision="PASS", reason=f"解析兜底通过: {str(e)}")
-
-    # ── [V59.3] 内嵌 Judge 连锁：AUDITOR PASS 后内联过滤误报（取代独立的 CRITIC 节点）
-    if feedback.decision == "PASS":
-        report = state.get("structured_report")
-        if report and report.findings:
-            raw_data_str = str(state.get("raw_data", ""))
-            valid_findings = []
-            try:
-                eval_tasks = [
-                    audit_judge.evaluate_finding(f.dict(), raw_data_str)
-                    for f in report.findings
-                ]
-                judge_results = await asyncio.gather(*eval_tasks, return_exceptions=True)
-                for finding, result in zip(report.findings, judge_results):
-                    if isinstance(result, Exception):
-                        valid_findings.append(finding)  # 判断异常则保留
-                        continue
-                    if result.get("is_valid") and result.get("confidence_score", 0) > 60:
-                        valid_findings.append(finding)
-                    else:
-                        logger.warning(f"🚨 [INLINE_JUDGE_REJECT] 线索被推翻: "
-                                       f"{finding.violation_type} | {result.get('refutation_reason', '')}")
-                report.findings = valid_findings
-                report.finding_count = len(valid_findings)
-                logger.info(f"✅ [INLINE_JUDGE] 过滤完成：{len(valid_findings)}/{len(judge_results)} 条线索通过终审")
-            except Exception as je:
-                logger.warning(f"⚠️ [INLINE_JUDGE] Judge 错误，所有线索保留: {je}")
-
-    trace = _append_trace(state, f"[AUDITOR] 判定结果={feedback.decision} | {feedback.reason[:80]}")
+    
+    # 无工具调用，尝试解析内容
     return {
-        "audit_feedback": feedback,
-        "is_awaiting_human": False,
-        "execution_trace": trace
+        "error_log": "Agent did not output a tool call.",
+        "messages": [response],
+        "retry_count": retry + 1
     }
 
 async def reporter_node(state: AuditState, config: RunnableConfig):
@@ -682,6 +439,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     )
 
     sql_query = state.get("sql_query", "")
+    methodology = state.get("methodology", "")
     execution_trace = list(state.get("execution_trace") or [])
 
     # ── Step 4: 调用 LLM 只生成第四章"核查结论"（约 150~300 字）───────
@@ -689,14 +447,18 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     try:
         llm, _ = model_manager.get_llm_by_role("reporter", config=config)
 
-        # [V59.0] 极简 Conclusion Prompt：只要求生成结论段，严格控制输出长度
+        # [V59.1] 极简 Conclusion Prompt：强调核查广度与方法的透明度
         CONCLUSION_PROMPT = (
-            "你是一名医保基金稽核专家。根据以下审计信息，用 150~300 字的专业语言"
-            "撰写「核查结论」，要求：①明确说明是否发现违规；②列出关键数据指标；"
-            "③给出整改建议。只需输出结论段落本身，不需要标题。\n\n"
+            "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~300 字的「核查结论」。\n"
+            "要求：\n"
+            "1. 结论必须明确（发现或未发现违规）。\n"
+            "2. 必须引用下方的“审计方法论”中的核心判定标准，展示核查的专业性。\n"
+            "3. 如果发现条数为 0，必须说明核查已穿透相关结算明细，验证了业务逻辑的完整性，确保无遗漏。\n"
+            "4. 给出具有可操作性的后续整改或监测建议。\n\n"
             f"审计任务：{user_question[:300]}\n\n"
-            f"执行轨迹摘要：{'; '.join(execution_trace[-3:]) if execution_trace else '已完成数据核查'}\n\n"
-            f"数据概览：共检索 {hard_count} 条记录，涉及金额 ¥{hard_sum:,.2f}"
+            f"审计方法论：{methodology[:500]}\n\n"
+            f"执行轨迹：{'; '.join(execution_trace[-3:]) if execution_trace else '已完成物理数据核查'}\n\n"
+            f"数据摘要：共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}"
         )
 
         from langchain_core.messages import HumanMessage as _HM
@@ -717,6 +479,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         llm_conclusion=llm_conclusion,
         raw_data=raw_data_list,
         sql_query=sql_query,
+        methodology=methodology,
         table_info="fqz_gz_jzsj_all_ql（全量结算明细）",
         total_amount=hard_sum,
         finding_count=hard_count,
@@ -817,30 +580,26 @@ def route_post_audit(state: AuditState) -> str:
 
 def build_graph():
     """
-    [V59.3] 线性工作流切换：移除 CRITIC 循环节点
-
-    旧拓扑（可能无限循环）:
-        PLANNER → SQLEXEC ↺(重试环) → AUDITOR → CRITIC ↺(取证环) → CONSOLIDATOR → REPORTER
-
-    新拓扑（绹寻可预测）:
-        PLANNER → SQLEXEC ↺(限MAX_RETRIES次) → AUDITOR → CONSOLIDATOR → REPORTER → END
+    [工业级 Skills 拓扑] 严格的线性工作流
+    PLANNER → SKILLS_EXEC(原SQLEXEC) ↺(限次重试) → CONSOLIDATOR → REPORTER → END
     """
     workflow = StateGraph(AuditState)
     workflow.add_node("PLANNER", planner_node)
-    workflow.add_node("SQLEXEC", sqlexec_node)
-    workflow.add_node("AUDITOR", auditor_node)
+    workflow.add_node("SQLEXEC", sqlexec_node)  # 我们保留了名字以兼容旧代码
     workflow.add_node("REPORTER", reporter_node)
     workflow.add_node("CONSOLIDATOR", consolidator_node)
 
     workflow.set_entry_point("PLANNER")
     workflow.add_edge("PLANNER", "SQLEXEC")
+    
+    def route_post_exec(state: AuditState) -> str:
+        if state.get("error_log") and state.get("retry_count", 0) < MAX_RETRIES:
+            return "SQLEXEC"  # 发生错误则原节点重试
+        return "CONSOLIDATOR" # 成功直接进入整合
+        
     workflow.add_conditional_edges(
         "SQLEXEC", route_post_exec,
-        {"SQLEXEC": "SQLEXEC", "AUDITOR": "AUDITOR"}
-    )
-    workflow.add_conditional_edges(
-        "AUDITOR", route_post_audit,
-        {"CONSOLIDATOR": "CONSOLIDATOR"}
+        {"SQLEXEC": "SQLEXEC", "CONSOLIDATOR": "CONSOLIDATOR"}
     )
     workflow.add_edge("CONSOLIDATOR", "REPORTER")
     workflow.add_edge("REPORTER", END)

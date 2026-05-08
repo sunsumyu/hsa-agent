@@ -57,6 +57,7 @@ class RouteResult:
     target_id: str              # 对应的算子 ID（如 "GENDER_CONFLICT"）
     confidence: float           # 置信度 [0.0, 1.0]
     matched_keywords: List[str] = field(default_factory=list)
+    extra_filters: Dict[str, str] = field(default_factory=dict)
     reason: str = ""
 
 
@@ -205,14 +206,25 @@ class FastAuditRouter:
             )
 
         text = user_question.strip()
+        
+        # 提取动态参数（如：尾号 8888）
+        import re
+        extra_filters = {}
+        tail_match = re.search(r"尾号\s*(\d{3,11})", text)
+        if tail_match:
+            extra_filters["tel"] = f"LIKE '%{tail_match.group(1)}'"
+        
+        amt_match = re.search(r"金额\s*[>|超过]\s*(\d+)", text)
+        if amt_match:
+            extra_filters["medfee_sumamt"] = f"> {amt_match.group(1)}"
 
         # 优先级 1：精确关键词匹配（置信度 1.0）
-        result = self._match_exact(text)
+        result = self._match_exact(text, extra_filters)
         if result:
             return result
 
         # 优先级 2：模糊关键词组合匹配（置信度 0.7~0.95）
-        result = self._match_fuzzy(text)
+        result = self._match_fuzzy(text, extra_filters)
         if result:
             return result
 
@@ -232,7 +244,7 @@ class FastAuditRouter:
     # 内部匹配逻辑
     # ──────────────────────────────────────────────────────
 
-    def _match_exact(self, text: str) -> Optional[RouteResult]:
+    def _match_exact(self, text: str, extra_filters: Dict[str, str]) -> Optional[RouteResult]:
         """精确关键词匹配"""
         for rule in self._config:
             for kw in rule.get("exact_keywords", []):
@@ -242,11 +254,12 @@ class FastAuditRouter:
                         target_id=rule["target_id"],
                         confidence=1.0,
                         matched_keywords=[kw],
+                        extra_filters=extra_filters,
                         reason=f"精确匹配关键词「{kw}」→ {rule['description']}",
                     )
         return None
 
-    def _match_fuzzy(self, text: str) -> Optional[RouteResult]:
+    def _match_fuzzy(self, text: str, extra_filters: Dict[str, str]) -> Optional[RouteResult]:
         """模糊关键词组合匹配，找出最高置信度的规则"""
         best: Optional[Tuple[float, RouteResult]] = None
 
@@ -262,6 +275,7 @@ class FastAuditRouter:
                         target_id=rule["target_id"],
                         confidence=confidence,
                         matched_keywords=matched,
+                        extra_filters=extra_filters,
                         reason=f"模糊匹配组合 {matched} → {rule['description']}",
                     )
                     if best is None or confidence > best[0]:

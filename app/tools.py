@@ -27,11 +27,10 @@ def _clean_encrypted_fields(records: List[Dict]) -> List[Dict]:
     for row in records:
         for key, val in row.items():
             if not isinstance(val, str): continue
-            # 简单启发式：如果包含大量替换符或二进制字符，则置空
-            has_replacement = val.count('') > 2
+            # 仅当包含非打印二进制字符时才置空（防止乱码泄露）
             has_binary = any(ord(c) < 32 and c not in '\n\r\t' for c in val)
-            if has_replacement or has_binary:
-                row[key] = ""
+            if has_binary:
+                row[key] = "[REDACTED/ENCRYPTED]"
     return records
 
 async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return_raw: bool = False) -> Any:
@@ -211,3 +210,55 @@ def get_embeddings():
                 return model.encode([text])[0].tolist()
         _embeddings = SimpleEmbeddings()
     return _embeddings
+
+# ──────────────────────────────────────────────────────────
+# Neo4j 团伙欺诈分析工具 (Graph Analysis)
+# ──────────────────────────────────────────────────────────
+
+@tool
+async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
+    """
+    [V59.6] 执行 Neo4j Cypher 查询，用于发现隐蔽的医疗欺诈团伙。
+    例如：查找共用同一电话的患者群体，或通过同一医生洗单的异常网络。
+    """
+    from app.neo4j_manager import neo4j_manager
+    logger.info(f"🕸️ [GRAPH] 执行 Cypher 查询: {cypher}")
+    
+    try:
+        # --- [V61.8] 工具空间隔离：物理拦截关系表进入图查询 ---
+        import re
+        relational_tables = re.findall(r'\bfqz_[a-z0-9_]+\b', cypher, re.IGNORECASE)
+        if relational_tables:
+            logger.warning(f"🚨 [SPACE_ISOLATION] 拦截到越界图查询意图: {relational_tables}")
+            return {
+                "status": "ERROR",
+                "error_message": f"物理拦截：在 Cypher 语句中发现了关系型表名 {relational_tables}。图数据库（Neo4j）中不包含物理表，仅包含节点（如 Patient, Contact）和关系（如 HAS_CONTACT）。请重新规划，在 [RELATIONAL_ZONE] 使用 execute_audit_sql 查询该表。",
+                "sql_logic": cypher
+            }
+
+        # 使用 asyncio.to_thread 防止阻塞
+        def _exec_cypher():
+            driver = neo4j_manager.get_driver()
+            with driver.session() as session:
+                result = session.run(cypher)
+                return [dict(record) for record in result]
+        
+        records = await asyncio.to_thread(_exec_cypher)
+        count = len(records)
+        
+        return {
+            "report": f"图数据库查询成功，发现 {count} 个关联节点/关系对。",
+            "evidence_count": count,
+            "raw_evidence": records,
+            "sql_logic": cypher,
+            "trace_hint": f"[图谱分析] 执行 Cypher 命中 {count} 条深层关联线索"
+        }
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"❌ [GRAPH ERROR] Neo4j 物理查询失败: {error_msg}")
+        return {
+            "status": "ERROR",
+            "error_message": f"图数据库查询失败: {error_msg}。请检查您的 Cypher 语法，或联系系统管理员检查 Neo4j 服务是否正常运行。",
+            "sql_logic": cypher,
+            "suggestion": "如果是因为网络或服务不可用导致，请在最终报告中明确说明'图谱数据源连接中断，无法完成多跳关联分析'。"
+        }

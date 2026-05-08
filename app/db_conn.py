@@ -29,8 +29,8 @@ def get_clickhouse_client():
             username=os.getenv("CLICKHOUSE_USER", "default"),
             password=os.getenv("CLICKHOUSE_PASSWORD", ""),
             database=os.getenv("CLICKHOUSE_DB", "default"),
-            connect_timeout=3,
-            send_receive_timeout=10
+            connect_timeout=10,
+            send_receive_timeout=60
         )
         _CK_GLOBAL_CLIENT = client
         logger.info(f"✅ ClickHouse 物理连接成功: {host}")

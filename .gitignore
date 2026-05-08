@@ -25,3 +25,4 @@ Thumbs.db
 !llm_providers.json
 !requirements.txt
 *.db
+data/reports/
