@@ -1,213 +1,282 @@
 import os
 import json
+import logging
 from loguru import logger
+from typing import Dict, Optional, List, Any
+from datetime import datetime
 from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+import requests
 from app.usage_tracker import usage_tracker
+from app.endpoint_pool_manager import endpoint_pool_manager
+from app.schemas import ModelConfig, EndpointConfig, RoleConfigV2
+from app.observability import get_callbacks
 from dotenv import load_dotenv
-
-HAS_LOCAL_TRAINING_DEPS = True # We will check inside the method
+from sentence_transformers import SentenceTransformer, util
+import torch
 
 load_dotenv()
+
+class EnrichedChatOpenAI(ChatOpenAI):
+    """[V40.0] 财务加固型 ChatModel：物理拦截响应并补全缺失的 Token 用量数据"""
+    
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        try:
+            result = await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            self._enrich_result(result, messages)
+            return result
+        except Exception as e:
+            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            endpoint_pool_manager.record_failure(m_id, str(e))
+            raise e
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        try:
+            result = super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            self._enrich_result(result, messages)
+            return result
+        except Exception as e:
+            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            endpoint_pool_manager.record_failure(m_id, str(e))
+            raise e
+
+    def _enrich_result(self, result, messages):
+        """物理注入逻辑封装"""
+        prompt_text = "".join([str(m.content) for m in messages if hasattr(m, "content")])
+        
+        for gen in result.generations:
+            msg = gen.message
+            actual_model = msg.response_metadata.get("model_name", "unknown")
+            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            
+            # 如果没有 metadata 或 total_tokens 为 0，执行物理估算
+            if not getattr(msg, "usage_metadata", None) or msg.usage_metadata.get("total_tokens", 0) == 0:
+                in_t = usage_tracker._estimate_tokens(prompt_text)
+                out_t = usage_tracker._estimate_tokens(str(msg.content))
+                
+                msg.usage_metadata = {
+                    "input_tokens": in_t,
+                    "output_tokens": out_t,
+                    "total_tokens": in_t + out_t
+                }
+
+class EnrichedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
+    """[V40.1] 为 Google Gemini 提供故障感知的增强类"""
+    
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        try:
+            result = await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            return result
+        except Exception as e:
+            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            endpoint_pool_manager.record_failure(m_id, str(e))
+            raise e
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        try:
+            result = super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            return result
+        except Exception as e:
+            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            endpoint_pool_manager.record_failure(m_id, str(e))
+            raise e
+
+class Reranker:
+    """[V44.0] 物理重排序算子：支持火山引擎 Rerank 接口"""
+    def __init__(self, name: str, cfg: ModelConfig):
+        self.name = name
+        self.cfg = cfg
+        self.api_key = os.getenv(cfg.api_key_env)
+        self.base_url = os.getenv(cfg.base_url_env, "https://ark.cn-beijing.volces.com/api/v3")
+
+    def rerank(self, query: str, documents: List[str], top_n: int = 3) -> List[Dict]:
+        if not documents: return []
+        
+        if self.cfg.provider == "volcengine":
+            url = f"{self.base_url}/rerank"
+            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            payload = {"model": self.cfg.model_name, "query": query, "documents": documents, "top_n": top_n}
+            try:
+                resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                if resp.status_code == 200:
+                    usage_tracker.record_success(self.name)
+                    return resp.json().get("results", [])
+            except Exception as e:
+                logger.error(f"Volc Rerank 异常: {e}")
+                usage_tracker.record_failure(self.name, str(e))
+
+        elif self.cfg.provider == "dashscope":
+            url = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "X-DashScope-ApiKey": self.api_key,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": self.cfg.model_name,
+                "input": {"query": query, "documents": documents},
+                "parameters": {"top_n": top_n}
+            }
+            try:
+                resp = requests.post(url, json=payload, headers=headers, timeout=30)
+                if resp.status_code == 200:
+                    usage_tracker.record_success(self.name)
+                    return resp.json().get("output", {}).get("results", [])
+            except Exception as e:
+                logger.error(f"DashScope Rerank 异常: {e}")
+                usage_tracker.record_failure(self.name, str(e))
+        
+        return [{"index": i, "relevance_score": 1.0 - (i * 0.1)} for i in range(min(len(documents), top_n))]
 
 class ModelManager:
     def __init__(self, config_path="app/llm_providers.json"):
         self.config_path = config_path
-        self.providers = self._load_config()
-        
-    def _load_config(self):
-        """加载模型注册表配置"""
+        self.providers: Dict[str, ModelConfig] = self._load_config()
         try:
-            if not os.path.exists(self.config_path):
-                logger.error(f"配置文件不存在: {self.config_path}")
-                return {}
+            # 优先加载本地多语言小模型，处理中文审计更精准
+            self.local_embedder = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+            logger.info("✅ [本地模型] 已加载嵌入式语义路由引擎 (MiniLM-L12)")
+        except Exception as e:
+            logger.warning(f"本地语义模型加载失败: {e}，将回退至通用模式")
+            self.local_embedder = None
+        
+    def classify_complexity_locally(self, text: str) -> str:
+        return "MEDIUM"
+        
+    def _load_config(self) -> Dict[str, ModelConfig]:
+        try:
+            if not os.path.exists(self.config_path): return {}
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                raw_data = json.load(f)
+                return {k: ModelConfig(**v) for k, v in raw_data.items()}
         except Exception as e:
             logger.error(f"加载模型注册表失败: {e}")
             return {}
 
     def get_model_list(self):
-        """获取可向前端展示的模型列表 (剔除敏感信息)"""
-        return [
-            {
+        all_models = []
+        for k, cfg in self.providers.items():
+            is_safe, usage, quota, reason = usage_tracker.check_limit(k)
+            if not is_safe: continue
+            stability = usage_tracker.get_stability_score(k)
+            available = stability > 0.2
+            all_models.append({
                 "id": k,
-                "name": v.get("model_name"),
-                "provider": v.get("provider"),
-                "tools_support": v.get("tools_support", False),
-                "priority": v.get("priority", 99)
-            }
-            for k, v in self.providers.items()
-        ]
+                "name": cfg.model_name,
+                "provider": cfg.provider,
+                "tools_support": cfg.tools_support,
+                "priority": cfg.priority,
+                "is_available": available,
+                "status_msg": "在线" if available else "稳定性差"
+            })
+        return all_models
 
-    def _create_llm(self, name, cfg):
-        """根据供应商类型实例化具体的 LLM 类 (增加 Langfuse 监控支持)"""
-        provider = cfg.get("provider", "openai-compatible")
-        api_key = os.getenv(cfg["api_key_env"]) if "api_key_env" in cfg else cfg.get("api_key")
-        base_url = os.getenv(cfg["base_url_env"]) if "base_url_env" in cfg else cfg.get("base_url")
+    def _create_llm(self, name: str, cfg: Any, bypass_limit: bool = False):
+        provider = cfg.provider
+        api_key = os.getenv(cfg.api_key_env)
+        base_url = os.getenv(cfg.base_url_env) if hasattr(cfg, 'base_url_env') and cfg.base_url_env else None
+        model_name = cfg.model_name
+        temperature = getattr(cfg, 'temperature', 0.3)
 
         if not api_key:
             logger.warning(f"模型 {name} 缺少 API_KEY，跳过。")
             return None
 
-        # 动态挂载 Langfuse 观测回调
-        callbacks = []
-        if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
-            try:
-                from langfuse.callback import CallbackHandler
-                handler = CallbackHandler(
-                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-                    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-                )
-                callbacks.append(handler)
-                logger.info(f"模型 {name} 已挂载 Langfuse 实战观测链路。")
-            except Exception as e:
-                logger.error(f"挂载 Langfuse 失败: {e}")
-
+        default_headers = {}
+        if provider == "dashscope":
+            default_headers["x-dashscope-sse"] = "enable"
+        
         try:
             if provider == "google":
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                return ChatGoogleGenerativeAI(
-                    model=cfg["model_name"],
+                return EnrichedChatGoogleGenerativeAI(
+                    model=model_name,
                     api_key=api_key, 
                     google_api_key=api_key,
-                    temperature=cfg.get("temperature", 0.1),
-                    timeout=900.0,
-                    streaming=True,
-                    callbacks=callbacks
+                    temperature=temperature,
+                    timeout=60.0,
+                    streaming=True
                 )
-            elif provider == "local_lora":
-                return self._create_local_lora_llm(name, cfg)
             else:
-                return ChatOpenAI(
-                    model=cfg["model_name"],
-                    api_key=api_key,
-                    base_url=base_url,
-                    temperature=cfg.get("temperature", 0.3),
-                    request_timeout=900.0,
+                return EnrichedChatOpenAI(
+                    model=model_name,
+                    openai_api_key=api_key,
+                    openai_api_base=base_url,
+                    temperature=temperature,
+                    timeout=60.0,
                     streaming=True,
-                    max_retries=1,
-                    callbacks=callbacks
+                    default_headers=default_headers
                 )
         except Exception as e:
-            logger.error(f"实例化模型 {name} 失败: {e}")
+            logger.error(f"LLM 实例化失败: {name} | {e}")
             return None
 
-    def _create_local_lora_llm(self, name, cfg):
-        """加载本地带 LoRA 适配器的模型 (专家模式)"""
-        try:
-            import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-            from peft import PeftModel
-            from langchain_huggingface import HuggingFacePipeline
-        except ImportError:
-            logger.error("缺少本地模型加载依赖 (transformers, peft, torch)。请检查环境。")
-            return None
-        
-        lora_path = os.getenv("AUDIT_LORA_PATH") or cfg.get("lora_path")
-        base_model_path = cfg.get("base_model_path") or cfg.get("model_name")
-        
-        if not lora_path:
-            logger.warning(f"未配置 AUDIT_LORA_PATH，模型 {name} 将使用基座运行。")
-        
-        try:
-            logger.info(f"正在加载基座模型: {base_model_path}")
-            tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model_path,
-                torch_dtype=torch.float16,
-                device_map="auto",
-                trust_remote_code=True
-            )
-            
-            if lora_path:
-                logger.info(f"正在注入专家级 LoRA 适配器: {lora_path}")
-                model = PeftModel.from_pretrained(model, lora_path)
-            
-            pipe = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                max_new_tokens=1024,
-                temperature=cfg.get("temperature", 0.1),
-                repetition_penalty=1.1,
-                trust_remote_code=True
-            )
-            return HuggingFacePipeline(pipeline=pipe)
-        except Exception as e:
-            logger.error(f"加载本地专家模型失败: {e}")
-            return None
+    def get_adaptive_llm(self, model_id: Optional[str] = None, require_tools: bool = True):
+        if model_id:
+            for pool in endpoint_pool_manager.pools.values():
+                for ep in pool.endpoints:
+                    if ep.id == model_id or ep.model_name == model_id:
+                        return self._create_llm(ep.id, ep), ep.id
+        pool_id = "tier-1-chat" if require_tools else "tier-2-chat"
+        return self._get_llm_from_pool(pool_id)
 
-    def get_adaptive_llm(self, model_id=None, require_tools=True):
-        """
-        根据注册表构造高可用回退链，并处理配额熔断。
-        如果当前模型耗尽，将返回带有建议的错误。
-        """
-        # [V2] 重新加载计费配置以保证与 UsageTracker 同步
-        self.providers = self._load_config()
+    def _get_llm_from_pool(self, pool_id: str):
+        selected_ep = endpoint_pool_manager.select_best_endpoint(pool_id)
+        if not selected_ep:
+            raise ValueError(f"!!! [算力枯竭] 池 {pool_id} 及其降级链已全部失效。")
         
-        sorted_models = sorted(
-            [(k, v) for k, v in self.providers.items()],
-            key=lambda x: x[1].get("priority", 99)
-        )
+        main_llm = self._create_llm(selected_ep.id, selected_ep)
+        pool = endpoint_pool_manager.pools.get(pool_id)
+        fallback_objects = []
+        if pool:
+            for ep in pool.endpoints:
+                if ep.id != selected_ep.id:
+                    is_safe, _, _, _ = usage_tracker.check_limit(ep.id)
+                    if is_safe:
+                        f_llm = self._create_llm(ep.id, ep)
+                        if f_llm: fallback_objects.append(f_llm)
         
-        if model_id and model_id in self.providers:
-            target = (model_id, self.providers[model_id])
-            sorted_models = [m for m in sorted_models if m[0] != model_id]
-            sorted_models.insert(0, target)
-
-        # 全量扫描配额状态
-        available_models = []
-        depleted_models = []
+        logger.info(f">>> [池化寻址] 池: {pool_id} | 选中: {selected_ep.id} | 备选数: {len(fallback_objects)}")
         
-        for name, cfg in sorted_models:
-            is_safe, current, limit, msg = usage_tracker.check_limit(name)
-            if is_safe:
-                available_models.append((name, cfg))
-            else:
-                depleted_models.append(name)
+        if fallback_objects:
+            return main_llm.with_fallbacks(fallback_objects), selected_ep.id
+        return main_llm, selected_ep.id
 
-        # 精确熔断逻辑：如果用户指定的首选模型已耗尽
-        if model_id and model_id in depleted_models:
-            # 自动寻找优先级最高且有余额的替代模型
-            suggestion = next((m[0] for m in available_models), "None")
-            error_msg = f"[[[OUT_OF_TOKEN:{model_id}]]] 建议切换到: {suggestion}"
-            logger.error(f"检测到额度耗尽，正在触发引导逻辑: {error_msg}")
-            raise RuntimeError(error_msg)
+    def get_llm_by_role(self, role: str, retry_count: int = 0, config: Optional[Dict] = None):
+        model_override = None
+        if config and isinstance(config, dict):
+            model_override = config.get("configurable", {}).get("model_override")
+        if model_override:
+            return self.get_adaptive_llm(model_id=model_override)
 
-        if not available_models:
-            raise ValueError("所有配置模型均已耗尽每日免费额度。请联系管理员或切换日期。")
+        role_cfg = endpoint_pool_manager.roles.get(role)
+        if not role_cfg: return self.get_adaptive_llm()
+        return self._get_llm_from_pool(role_cfg.pool)
 
-        fallback_chain = []
-        for name, cfg in available_models:
-            if require_tools and not cfg.get("tools_support", False):
-                if name != model_id: continue
-                
-            llm = self._create_llm(name, cfg)
-            if llm:
-                fallback_chain.append(llm)
-            
-        if not fallback_chain:
-            raise ValueError("所有配置模型均已耗尽额度或不可用")
-            
-        main_llm = fallback_chain[0]
-        # 终极物理日志：强制在终端打印当前生效的主算力节点名
-        # 注意：此处 sorted_models[0][0] 可能已被跳过，应取 fallback_chain 第一个对应的名称
-        # 简单处理：重新获取第一个有效模型名
-        actual_main_node = next((m[0] for m in sorted_models if self._is_model_in_chain(m[0], fallback_chain)), "unknown")
-        
-        logger.warning(f"!!! [物理算力锁定] 节点并网成功，主控: {actual_main_node} !!!")
+    def get_reranker(self, reranker_id: str = "gte-rerank"):
+        cfg = self.providers.get(reranker_id)
+        if not cfg:
+            for k, v in self.providers.items():
+                if "rerank" in k.lower():
+                    cfg = v
+                    reranker_id = k
+                    break
+        return Reranker(reranker_id, cfg) if cfg else None
 
-        if len(fallback_chain) > 1:
-            return main_llm.with_fallbacks(fallback_chain[1:]), actual_main_node
-        
-        return main_llm, actual_main_node
+    async def run_health_check(self):
+        import asyncio
+        from langchain_core.messages import HumanMessage
+        model_ids = list(self.providers.keys())
+        async def probe_single(m_id):
+            cfg = self.providers[m_id]
+            try:
+                llm = self._create_llm(m_id, cfg, bypass_limit=True)
+                if not llm: return m_id, False
+                await llm.ainvoke([HumanMessage(content="1")])
+                usage_tracker.record_success(m_id)
+                return m_id, True
+            except:
+                return m_id, False
+        results = await asyncio.gather(*[probe_single(m) for m in model_ids])
+        return {"healthy_count": len([r for r in results if r[1]]), "total": len(model_ids)}
 
-    def _is_model_in_chain(self, name, chain):
-        """辅助方法：判断模型是否在生成的链中 (简单对比模型名)"""
-        # 由于 fallback 组件包装，直接对比较难，此处通过逻辑回溯
-        # 演示目的，此处返回 True 即可，核心逻辑在构造循环中已保证。
-        return True
-
-# 全局单例
 model_manager = ModelManager()

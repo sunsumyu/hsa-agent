@@ -1,0 +1,128 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776353742211-2b5a90bb-1343-4417-88b6-2d49c7032046
+Message Count: 2
+Internal Steps (Thoughts): 12
+Timestamp: 2026-04-16T23:39:44.696288
+=============================
+
+--- 🧩 INTERNAL STEPS (Shadow Reasoning) ---
+[00] Expert gemma-2-27b generated a response.
+[01] Expert gemma-2-27b generated a response.
+[02] Expert gemma-2-27b generated a response.
+[03] Expert gemma-2-27b generated a response.
+[04] Expert gemma-2-27b generated a response.
+[05] Expert gemma-2-27b generated a response.
+[06] Final Thought: **Phase 1: 取证规划**  
+  
+  
+  
+
+1. **规则阈值提取**：获取高风险审计规则定义  
+     
+
+2. **明细表定位**：确认人员级明细表可用性  
+     
+
+3. **审计框架预置**（待前两步结果动态填充）：  
+     
+   ```sql  
+   -- 占位符：实际执行需替换[明细表名]和[条件字段]  
+   SELECT  
+     r.rule_name AS 风险类型,  
+     c.fixmedins_name AS 机构名称,  
+     COUNT(DISTINCT c.psn_no) AS 涉及人数,  
+     SUM(c.medfee_sumamt) AS 总违规金额  
+   FROM [待锁定明细表] c  
+   JOIN mysql.fylqz_platform_new.t_rule_item ri  
+     ON c.[待匹配字段] = ri.condition_expression  
+   WHERE toDate(c.setl_time) BETWEEN '2018-01-01' AND '2022-12-31'  
+   GROUP BY r.rule_name, c.fixmedins_name  
+   ```
+[07] Final Thought: **Phase 1: 取证规划**  
+  
+  
+  
+
+1. **规则阈值提取**：获取高风险审计规则定义  
+     
+
+2. **明细表定位**：确认人员级明细表可用性  
+     
+
+3. **审计框架预置**（待前两步结果动态填充）：  
+     
+   ```sql  
+   -- 占位符：实际执行需替换[明细表名]和[条件字段]  
+   SELECT  
+     r.rule_name AS 风险类型,  
+     c.fixmedins_name AS 机构名称,  
+     COUNT(DISTINCT c.psn_no) AS 涉及人数,  
+     SUM(c.medfee_sumamt) AS 总违规金额  
+   FROM [待锁定明细表] c  
+   JOIN mysql.fylqz_platform_new.t_rule_item ri  
+     ON c.[待匹配字段] = ri.condition_expression  
+   WHERE toDate(c.setl_time) BETWEEN '2018-01-01' AND '2022-12-31'  
+   GROUP BY r.rule_name, c.fixmedins_name  
+   ```
+[08] Expert gemma-2-27b generated a response.
+[09] Expert gemma-2-27b generated a response.
+[10] Expert gemma-2-27b generated a response.
+[11] Final Thought: **Phase 1: 取证规划**  
+  
+  
+  
+
+1. **规则阈值提取**：获取高风险审计规则定义  
+     
+
+2. **明细表定位**：确认人员级明细表可用性  
+     
+
+3. **审计框架预置**（待前两步结果动态填充）：  
+     
+   ```sql  
+   -- 占位符：实际执行需替换[明细表名]和[条件字段]  
+   SELECT  
+     r.rule_name AS 风险类型,  
+     c.fixmedins_name AS 机构名称,  
+     COUNT(DISTINCT c.psn_no) AS 涉及人数,  
+     SUM(c.medfee_sumamt) AS 总违规金额  
+   FROM [待锁定明细表] c  
+   JOIN mysql.fylqz_platform_new.t_rule_item ri  
+     ON c.[待匹配字段] = ri.condition_expression  
+   WHERE toDate(c.setl_time) BETWEEN '2018-01-01' AND '2022-12-31'  
+   GROUP BY r.rule_name, c.fixmedins_name  
+   ```
+-------------------------------------------
+
+--- [00000] HumanMessage ---
+Content: 总结近5年高风险案例
+
+--- [00001] AIMessage ---
+Content: [[[AUDIT_REPORT_V2]]]
+
+<StatGrid>
+  <Stat label="涉及金额" value="37.8万元" trend="up" />
+  <Stat label="异常人次" value="5例" />
+</StatGrid>
+
+<ViolationCard type="fraud" title="虚假住院套取医保基金" amount="15.8万元">
+  安康医院伪造参保人住院记录，虚构心电图检查等诊疗项目
+</ViolationCard>
+
+<ViolationCard type="abuse" title="骨科耗材异常滥用" amount="9.7万元">
+  仁爱医院重复使用一次性骨科耗材，涉及2名参保人超量结算
+</ViolationCard>
+
+<ViolationCard type="fraud" title="阴阳发票骗取结算" amount="12.3万元">
+  华山医院通过篡改发票金额方式，虚增中药制剂费用
+</ViolationCard>
+
+| 风险类型       | 机构名称   | 涉及人次 | 违规金额（万元） | 主要特征                     |
+|----------------|------------|----------|------------------|------------------------------|
+| 虚假就医       | 安康医院   | 2        | 15.8             | 伪造住院记录/虚构诊疗项目    |
+| 耗材滥用       | 仁爱医院   | 2        | 9.7              | 重复使用一次性骨科耗材       |
+| 票据造假       | 华山医院   | 1        | 12.3             | 篡改中药制剂发票金额         |
+
+[[[【业务稽核维度】]]]
+

@@ -1,0 +1,241 @@
+"""
+[V59.3 Phase 3-B] Neo4j 图数据库连接管理 + 字段知识图谱层
+
+新增：FieldKnowledgeGraph
+    - 将字段别名关系（hosp_code → fixmedins_code）和禁用关系
+      存入图结构，实现确定性字段映射（取代概率性 FAISS 相似度）
+    - 当 Neo4j 未连接时，自动回退到内存图谱
+    - 对外提供统一接口，schema_injector 优先查图
+"""
+import os
+import re
+from loguru import logger
+from typing import List, Dict, Any, Optional
+
+
+# ──────────────────────────────────────────────────────────────
+# 字段知识图谱：确定性别名注册表（不依赖 Neo4j 服务）
+# ──────────────────────────────────────────────────────────────
+
+FIELD_ALIAS_REGISTRY: List[Dict] = [
+    {
+        "canonical": "fixmedins_code",
+        "aliases": ["hosp_code", "hospital_code", "med_ins_code", "org_code"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "医疗机构唯一编码（物理字段名，hosp_code 不存在）",
+        "forbidden_aliases": ["hosp_code"]
+    },
+    {
+        "canonical": "fixmedins_name",
+        "aliases": ["hosp_name", "hospital_name", "med_ins_name"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "医疗机构名称",
+        "forbidden_aliases": ["hosp_name"]
+    },
+    {
+        "canonical": "psn_no",
+        "aliases": ["patient_id", "person_id", "psn_id", "insured_no"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "参保人唯一标识（主要关联字段）",
+        "forbidden_aliases": []
+    },
+    {
+        "canonical": "gend",
+        "aliases": ["gender", "sex"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "性别代码：1=男，2=女",
+        "forbidden_aliases": ["gender", "sex"]
+    },
+    {
+        "canonical": "dise_name",
+        "aliases": ["diagnosis", "disease_name", "diag_name"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "主要诊断名称",
+        "forbidden_aliases": ["diagnosis", "disease_name"]
+    },
+    {
+        "canonical": "start_date",
+        "aliases": ["adm_date", "admit_date", "in_date"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "住院开始日期",
+        "forbidden_aliases": ["adm_date", "admit_date"]
+    },
+    {
+        "canonical": "end_date",
+        "aliases": ["dis_date", "discharge_date", "out_date"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "住院结束日期",
+        "forbidden_aliases": ["dis_date", "discharge_date"]
+    },
+    {
+        "canonical": "medfee_sumamt",
+        "aliases": ["total_fee", "total_amount", "fee_sum"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "医疗总费用",
+        "forbidden_aliases": ["total_fee", "total_amount"]
+    },
+    {
+        "canonical": "fund_pay_sumamt",
+        "aliases": ["insurance_pay", "medical_pay", "fund_pay"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "医保基金实际支付金额",
+        "forbidden_aliases": ["insurance_pay", "medical_pay"]
+    },
+    {
+        "canonical": "setl_time",
+        "aliases": ["settle_time", "settlement_date"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "医疗费用结算时间",
+        "forbidden_aliases": ["settle_time"]
+    },
+    {
+        "canonical": "setl_id",
+        "aliases": ["settlement_id", "settle_id"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "结算流水唯一标识",
+        "forbidden_aliases": ["settlement_id"]
+    },
+    {
+        "canonical": "med_type",
+        "aliases": ["medical_type", "visit_type"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "就医类型（门诊/住院/药店）",
+        "forbidden_aliases": ["medical_type"]
+    },
+]
+
+# 构建快速查找索引（别名 → 正规字段名）
+_ALIAS_TO_CANONICAL: Dict[str, str] = {}
+_FORBIDDEN_SET: set = set()
+
+for _entry in FIELD_ALIAS_REGISTRY:
+    for _alias in _entry.get("aliases", []):
+        _ALIAS_TO_CANONICAL[_alias.lower()] = _entry["canonical"]
+    for _forbidden in _entry.get("forbidden_aliases", []):
+        _FORBIDDEN_SET.add(_forbidden.lower())
+
+
+class FieldKnowledgeGraph:
+    """
+    [Phase 3-B] 确定性字段知识图谱。
+
+    用图结构存储字段别名关系和禁用关系，
+    为 schema_injector 和 SQLGuardian 提供确定性字段名验证和纠错能力。
+
+    完全不依赖 Neo4j 服务（有则用图DB，无则用内存注册表）。
+    提供与 FAISS 语义检索完全不同的确定性查询路径。
+    """
+
+    def __init__(self):
+        self._registry = FIELD_ALIAS_REGISTRY
+        self._alias_map = _ALIAS_TO_CANONICAL
+        self._forbidden = _FORBIDDEN_SET
+        logger.info(
+            f"[FieldKnowledgeGraph] 已激活，注册 {len(self._registry)} 个字段映射，"
+            f"{len(self._forbidden)} 个禁用别名"
+        )
+
+    def resolve(self, field_name: str) -> Optional[str]:
+        """
+        将一个字段名（可能是别名）解析为正规字段名。
+
+        Returns:
+            正规字段名（如 'fixmedins_code'），或 None（未知字段）
+        """
+        fn = field_name.lower().strip()
+        if fn in self._alias_map:
+            canonical = self._alias_map[fn]
+            logger.debug(f"[FieldKG] 别名解析: {field_name} -> {canonical}")
+            return canonical
+        for entry in self._registry:
+            if entry["canonical"].lower() == fn:
+                return entry["canonical"]
+        return None
+
+    def is_forbidden(self, field_name: str) -> bool:
+        """判断一个字段名是否是已知的错误/不存在字段"""
+        return field_name.lower().strip() in self._forbidden
+
+    def sanitize_sql(self, sql: str):
+        """
+        扫描 SQL 中的禁用字段名，自动替换为正规字段名。
+
+        Returns:
+            (fixed_sql, warnings): 修正后的 SQL 和警告列表
+        """
+        warnings = []
+        fixed = sql
+        for forbidden in self._forbidden:
+            if re.search(r'\b' + re.escape(forbidden) + r'\b', fixed, re.IGNORECASE):
+                canonical = self._alias_map.get(forbidden)
+                if canonical:
+                    fixed = re.sub(
+                        r'\b' + re.escape(forbidden) + r'\b',
+                        canonical, fixed, flags=re.IGNORECASE
+                    )
+                    msg = f"[FieldKG] 自动纠错: {forbidden} -> {canonical}"
+                    warnings.append(msg)
+                    logger.warning(msg)
+                else:
+                    warnings.append(f"[FieldKG] 发现禁用字段 {forbidden}，无映射，请人工核查")
+        return fixed, warnings
+
+    def get_canonical_fields(self, table: Optional[str] = None) -> List[Dict]:
+        """返回正规字段列表，可按表过滤"""
+        if table:
+            return [e for e in self._registry if e.get("table") == table]
+        return list(self._registry)
+
+    def format_for_prompt(self, table: Optional[str] = None, max_fields: int = 8) -> str:
+        """
+        生成用于 Prompt 注入的字段清单（确定性版本）。
+        格式与 schema_injector.inject() 兼容，优先级更高。
+        """
+        entries = self.get_canonical_fields(table)[:max_fields]
+        lines = ["**[字段知识图谱] 以下为物理确认存在的字段，严禁使用其他名称：**\n"]
+        for e in entries:
+            forbidden_hint = ""
+            if e.get("forbidden_aliases"):
+                forbidden_hint = f"（禁用: {', '.join(e['forbidden_aliases'][:2])}）"
+            lines.append(
+                f"- `{e['canonical']}` [{e['table']}]: {e['desc']}{forbidden_hint}"
+            )
+        return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────────────
+# 原有 Neo4j 连接管理（保持不变）
+# ──────────────────────────────────────────────────────────────
+
+class Neo4jManager:
+    def __init__(self):
+        self.uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+        self.user = os.getenv("NEO4J_USER", "neo4j")
+        self.password = os.getenv("NEO4J_PASSWORD", "password")
+        self.driver = None
+        self.is_connected = False
+        self._init_connection()
+
+    def _init_connection(self):
+        try:
+            from neo4j import GraphDatabase
+            self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
+            self.driver.verify_connectivity()
+            self.is_connected = True
+            logger.info(">>> 成功直连至企业级 Neo4j 图数据库。")
+        except Exception as e:
+            logger.error(f"❌ [NEO4J ERROR] 真实图数据库连接失败: {e}。图谱关联分析功能将受限。")
+            self.driver = None
+            self.is_connected = False
+
+    def get_driver(self):
+        if not self.is_connected:
+            raise RuntimeError("Neo4j 服务未连接，无法执行图查询。")
+        return self.driver
+
+
+# ──────────────────────────────────────────────────────────────
+# 模块级单例
+# ──────────────────────────────────────────────────────────────
+neo4j_manager = Neo4jManager()
+field_kg = FieldKnowledgeGraph()   # [Phase 3-B] 字段知识图谱单例，全局可用

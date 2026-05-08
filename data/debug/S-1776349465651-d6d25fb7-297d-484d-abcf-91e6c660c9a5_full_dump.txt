@@ -1,0 +1,19 @@
+=== HSA Session Debug Dump ===
+Session ID: S-1776349465651-d6d25fb7-297d-484d-abcf-91e6c660c9a5
+Message Count: 2
+Timestamp: 2026-04-16T22:25:40.504794
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近1年高风险case
+
+--- [00001] AIMessage ---
+Content: [[[AUDIT_REPORT_V2]]]
+<StatGrid>
+  <Stat label="涉及金额" value="0元" />
+  <Stat label="异常人次" value="0例" />
+</StatGrid>
+
+经系统深度检索，当前审计账期内未发现符合条件的违规线索。
+[[[【业务稽核维度】]]]
+

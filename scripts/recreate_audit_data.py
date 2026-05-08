@@ -1,15 +1,14 @@
-from clickhouse_driver import Client
+import clickhouse_connect
 import random
 from datetime import datetime, timedelta
 
 def recreate_and_seed():
-    client = Client(host='127.0.0.1', port=9000)
+    client = clickhouse_connect.get_client(host='127.0.0.1', port=8123)
     
     # 1. Drop existing table
     print("Dropping existing table fqz_all_yy_yd_1...")
-    client.execute("DROP TABLE IF EXISTS default.fqz_all_yy_yd_1")
+    client.command("DROP TABLE IF EXISTS default.fqz_all_yy_yd_1")
     
-    # 2. Create table with correct schema (No nullable in keys for ClickHouse 26.x)
     print("Creating table fqz_all_yy_yd_1 with correct schema...")
     create_sql = """
     CREATE TABLE default.fqz_all_yy_yd_1 (
@@ -23,7 +22,7 @@ def recreate_and_seed():
     PARTITION BY admdvs
     ORDER BY (fixmedins_code, setl_time)
     """
-    client.execute(create_sql)
+    client.command(create_sql)
     print("Table created successfully.")
 
     # 3. Seed 100 rows for April 2026
@@ -63,12 +62,13 @@ def recreate_and_seed():
         })
 
 
-    insert_sql = "INSERT INTO default.fqz_all_yy_yd_1 (fixmedins_code, fixmedins_name, admdvs, medfee_sumamt, fund_pay_sumamt, setl_time) VALUES"
-    client.execute(insert_sql, rows)
+    insert_data = [[r['fixmedins_code'], r['fixmedins_name'], r['admdvs'], r['medfee_sumamt'], r['fund_pay_sumamt'], r['setl_time']] for r in rows]
+    client.insert('default.fqz_all_yy_yd_1', insert_data, column_names=['fixmedins_code', 'fixmedins_name', 'admdvs', 'medfee_sumamt', 'fund_pay_sumamt', 'setl_time'])
     print("Successfully seeded 100 rows.")
 
     # 4. Verify count
-    count = client.execute("SELECT count(*) FROM default.fqz_all_yy_yd_1")[0][0]
+    count_res = client.query("SELECT count(*) FROM default.fqz_all_yy_yd_1")
+    count = count_res.result_rows[0][0]
     print(f"Final Row Count in fqz_all_yy_yd_1: {count}")
 
 if __name__ == "__main__":

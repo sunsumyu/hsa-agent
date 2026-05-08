@@ -24,3 +24,4 @@ Thumbs.db
 !llm_registry.json
 !llm_providers.json
 !requirements.txt
+*.db

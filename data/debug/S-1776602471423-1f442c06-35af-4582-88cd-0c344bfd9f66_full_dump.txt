@@ -1,0 +1,18 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776602471423-1f442c06-35af-4582-88cd-0c344bfd9f66
+Message Count: 2
+Timestamp: 2026-04-19T20:42:47.249307
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近2年高风险case
+
+--- [00001] AIMessage ---
+Content: # ⚖️ 审计逻辑回流 (逻辑拒绝)
+
+**首席判罚**: REJECT
+**拒绝理由**: SQL 语法错误导致执行失败，无法获取原始数据。【业务稽核维度】 函数在 ClickHouse 中不支持 [审计逻辑] 和 SEPARATOR 参数。
+**改进建议**: 建议改用 ClickHouse 支持的字符串聚合函数，例如 `arrayStringConcat(groupArray(【业务稽核维度】), ', ')` 替代 【业务稽核维度】。
+
+*注：由于主审官多次拦截生成的 SQL 逻辑，系统已标记该链路为异常，请手动干预或检查百科语义字典。*
+

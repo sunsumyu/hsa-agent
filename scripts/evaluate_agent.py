@@ -1,153 +1,110 @@
 import os
 import sys
-import pydantic
-from loguru import logger
-
-# [核心补丁] 确保项目根目录在 PYTHONPATH 中，以便正确加载 tests 模块
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-    logger.info(f"项目根路径已注入: {project_root}")
-
-# [核心补丁] 修复 2026 年 LangChain 0.3+ 移除 pydantic_v1 导致的所有旧版模型驱动崩溃
-try:
-    import langchain_core
-    if "langchain_core.pydantic_v1" not in sys.modules:
-        sys.modules["langchain_core.pydantic_v1"] = pydantic.v1
-        logger.info("已在评测流程中成功建立 Pydantic v1 桥接层。")
-except Exception as e:
-    logger.warning(f"评测流补丁注入异常: {e}")
-
-import json
 import asyncio
-from dotenv import load_dotenv
-print("DEBUG: Importing DeepEval...")
-from deepeval import evaluate
-from deepeval.test_case import LLMTestCase
-print("DEBUG: Importing metrics...")
-from tests.eval.metrics import (
-    get_hsa_evidence_chain_metric, 
-    HSANumericalPrecisionMetric,
-    get_hsa_faithfulness_metric,
-    get_hsa_answer_relevance_metric
-)
-print("DEBUG: Imports finished.")
+import json
+from loguru import logger
+from typing import Dict, List, Any
 
-# 强制切换到沙箱数据库环境
-os.environ["CLICKHOUSE_DB"] = "hsa_sandbox"
-load_dotenv(override=True)
+# 环境初始化
+sys.path.append(os.getcwd())
+os.environ["HF_HOME"] = "E:\\hf_cache"
 
-import argparse
+from app.agent_graph import workflow
+from app.llm_judge import audit_judge
+from app.model_manager import model_manager
 
-from app.agent_graph import get_graph_executor
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-
-async def run_evaluation(model_id: str = None):
-    logger.info(f"正在启动医保稽核 Multi-Agent Graph 自动化评测流程 [模型: {model_id or '默认'}]...")
+class HSAArenaEvaluator:
+    """[V53.0] HSA 审计大模型竞技场：Win Rate 胜率对比工具"""
     
-    # 1. 加载金标数据集
-    dataset_path = "tests/eval/golden_dataset.json"
-    if not os.path.exists(dataset_path):
-        logger.error(f"找不到金标数据集: {dataset_path}")
-        return None
-    
-    with open(dataset_path, "r", encoding="utf-8") as f:
-        golden_data = json.load(f)
-
-    # 2. 初始化 Graph 执行器
-    executor, resolved_model_id = get_graph_executor(model_id=model_id)
-    logger.info(f"物理图节点已并网: {resolved_model_id}")
-
-    test_cases = []
-
-    # 3. 运行 Graph 并收集结果
-    for i, item in enumerate(golden_data):
-        input_text = item["input"]
-        logger.info(f"正在运行案例 {i+1}/{len(golden_data)}: {input_text}")
-        
-        try:
-            # 执行 Graph
-            # 注意：LangGraph 的输入是初始状态
-            state = {
-                "messages": [HumanMessage(content=input_text)],
-                "model_id": resolved_model_id
+    def __init__(self):
+        self.cases = [
+            {
+                "id": "CASE_001_COMPLEX",
+                "query": "审计患者 P001 的重复收费情况。注意：该患者在手术期间使用了大量同类耗材。",
+                "target": "识别出由于手术复杂性导致的合法合并收费，而非误报。"
+            },
+            {
+                "id": "CASE_002_LOGIC",
+                "query": "核查是否存在分解住院行为（同一患者 15 天内因相同诊断再次入院）。",
+                "target": "不仅要匹配日期，还要分析诊断代码的语义相似度。"
             }
-            # 使用同步调用简化评测循环（LangGraph invoke 是同步的，除非用了 Async 版本）
-            response = executor.invoke(state)
+        ]
+        self.stats = {"model_a_wins": 0, "model_b_wins": 0, "ties": 0}
+
+    async def run_single_track(self, model_id: str, query: str) -> str:
+        """运行单条审计流水线"""
+        # [V53.5] 强制指定模型 ID 用于 Arena 评测
+        config = {"configurable": {"thread_id": f"eval_{model_id}", "model_override": model_id}}
+        inputs = {"messages": [("user", query)], "session_id": f"eval_{model_id}"}
+        
+        # 记录执行过程
+        logger.info(f"🚀 [ARENA] 模型 {model_id} 正在处理案例...")
+        final_state = await workflow.ainvoke(inputs, config=config)
+        return final_state["messages"][-1].content
+
+    async def judge_pair(self, query: str, output_a: str, output_b: str) -> str:
+        """调用 LLM Judge 进行 Pair-wise 对比判罚"""
+        judge_llm = model_manager.get_llm_by_role("planner_heavy")
+        
+        prompt = f"""
+        你是一位资深医保审计专家，现在请你对比两份由 AI 生成的审计报告，并判定哪一份更专业、更准确。
+        
+        ### 原始需求：
+        {query}
+        
+        ### 报告 A:
+        {output_a}
+        
+        ### 报告 B:
+        {output_b}
+        
+        ### 判罚准则：
+        1. 逻辑性：是否识别出了潜在的误报因素？
+        2. 证据力：SQL 描述和数值提取是否清晰？
+        3. 建议：给出的审计结论是否具备可操作性？
+        
+        请输出判定结果：[[MODEL_A_WINS]], [[MODEL_B_WINS]], 或 [[TIE]]。并给出简要理由。
+        """
+        
+        response = await judge_llm.ainvoke(prompt)
+        content = response.content
+        if "[[MODEL_A_WINS]]" in content: return "A"
+        if "[[MODEL_B_WINS]]" in content: return "B"
+        return "TIE"
+
+    async def evaluate_all(self):
+        logger.info("=== 🏆 HSA 审计大模型竞技场 (Arena) 开赛 ===")
+        
+        for case in self.cases:
+            logger.info(f"\n📍 正在评测案例: {case['id']}")
             
-            messages = response.get("messages", [])
-            if not messages:
-                logger.warning(f"案例 {i+1} 返回了空的消息列表")
-                continue
-                
-            # 最终回复通常是最后一条消息
-            actual_output = str(messages[-1].content)
+            # 运行双轨对比 (模拟 Model A = Qwen, Model B = DeepSeek)
+            # 在实际生产中，我们会在这里切换实际的模型配置
+            output_a = await self.run_single_track("qwen-plus", case["query"])
+            output_b = await self.run_single_track("deepseek-v3", case["query"])
             
-            # 提取执行轨迹作为检索上下文 (Retrieval Context)
-            # 我们记录所有的工具调用和返回，供 Faithfulness 指标评估真实性
-            retrieval_context = []
-            for msg in messages:
-                if isinstance(msg, AIMessage) and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        retrieval_context.append(f"[Expert Task] Tool: {tc['name']} Args: {tc['args']}")
-                elif isinstance(msg, ToolMessage):
-                    retrieval_context.append(f"[Expert Evidence] Result: {msg.content}")
+            # 判罚
+            winner = await self.judge_pair(case["query"], output_a, output_b)
             
-            # 构建 DeepEval 测试用例
-            test_case = LLMTestCase(
-                input=input_text,
-                actual_output=actual_output,
-                expected_output=item.get("expected_output"),
-                context=[item.get("context")],
-                retrieval_context=retrieval_context
-            )
-            test_cases.append(test_case)
-        except Exception as e:
-            logger.error(f"案例 {i+1} 运行并推导失败: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            if winner == "A":
+                self.stats["model_a_wins"] += 1
+                logger.success(f"🚩 判罚结果: Model A (Baseline) 胜出")
+            elif winner == "B":
+                self.stats["model_b_wins"] += 1
+                logger.success(f"🚩 判罚结果: Model B (Challenger) 胜出")
+            else:
+                self.stats["ties"] += 1
+                logger.info(f"🚩 判罚结果: 双方平局")
 
-    if not test_cases:
-        logger.warning("没有成功生成的测试用例，跳过打分。")
-        return None
-
-    # 4. 执行指标评测
-    logger.info(f"Agent [{resolved_model_id}] 运行完成，开始进行指标打分...")
-    
-    evidence_chain_metric = get_hsa_evidence_chain_metric()
-    precision_metric = HSANumericalPrecisionMetric()
-    faithfulness_metric = get_hsa_faithfulness_metric()
-    relevance_metric = get_hsa_answer_relevance_metric()
-
-    # 使用 DeepEval 批量评估
-    metrics = [evidence_chain_metric, precision_metric, faithfulness_metric, relevance_metric]
-    import io
-    from contextlib import redirect_stdout
-    
-    results = None
-    f = io.StringIO()
-    try:
-        with redirect_stdout(f):
-            results = evaluate(
-                test_cases=test_cases,
-                metrics=metrics
-            )
-    except Exception as e:
-        logger.warning(f"指标打分过程发生异常 (已尝试规避渲染冲突): {e}")
-        if not results:
-            # 兜底：如果连评估逻辑都报错了，记录详细信息
-            logger.error(f"DeepEval 评估内核报错: {e}")
-
-    logger.success(f"模型 {resolved_model_id} 评测任务结束。")
-    return {
-        "model_id": resolved_model_id,
-        "results": results,
-        "test_cases_count": len(test_cases)
-    }
+        # 计算 Win Rate
+        total = len(self.cases)
+        win_rate = (self.stats["model_b_wins"] / total) * 100
+        logger.info("\n=== 📊 最终竞技场战报 ===")
+        print(f"Model A Wins: {self.stats['model_a_wins']}")
+        print(f"Model B Wins: {self.stats['model_b_wins']}")
+        print(f"Ties: {self.stats['ties']}")
+        print(f"挑战组 (DeepSeek) 胜率: {win_rate:.2f}%")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="医保稽核 Agent 自动化评测工具")
-    parser.add_argument("--model", type=str, help="指定待测模型 ID (对应 llm_providers.json 中的 key)")
-    args = parser.parse_args()
-    
-    asyncio.run(run_evaluation(model_id=args.model))
+    arena = HSAArenaEvaluator()
+    asyncio.run(arena.evaluate_all())

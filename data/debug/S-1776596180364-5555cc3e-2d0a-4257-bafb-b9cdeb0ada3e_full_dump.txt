@@ -1,0 +1,18 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776596180364-5555cc3e-2d0a-4257-bafb-b9cdeb0ada3e
+Message Count: 2
+Timestamp: 2026-04-19T18:57:18.166562
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近2年高风险case
+
+--- [00001] AIMessage ---
+Content: ### 🚨 审计取证链路物理中断
+
+**故障原因**: 数据库积极拒绝连接 (Refused)
+**物理特征**: 'NoneType' object has no attribute 'reason'...
+
+> [!CAUTION]
+> 检测到 ClickHouse (8123 端口) 物理不可达。系统已自动停止推演，请核对数仓服务状态。
+

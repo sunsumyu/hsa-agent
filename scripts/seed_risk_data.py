@@ -1,19 +1,18 @@
-from clickhouse_driver import Client
+import clickhouse_connect
 import random
 from datetime import datetime, timedelta
 
 def generate_risk_data():
-    client = Client(host='127.0.0.1', port=9000)
+    client = clickhouse_connect.get_client(host='127.0.0.1', port=8123)
     
     # Tables to populate
     # 1. fqz_all_yy_yd_1 (Settlement Detail)
     # 2. fqz_ptzy_hosp (Hospitalization Summary)
     # 3. fqz_ztk_psn_yearly (Patient Yearly Stats)
 
-    print("Cleaning up previous audit data...")
-    client.execute("TRUNCATE TABLE IF EXISTS default.fqz_all_yy_yd_1")
-    client.execute("TRUNCATE TABLE IF EXISTS default.fqz_ptzy_hosp")
-    client.execute("TRUNCATE TABLE IF EXISTS default.fqz_ztk_psn_yearly")
+    client.command("TRUNCATE TABLE IF EXISTS default.fqz_all_yy_yd_1")
+    client.command("TRUNCATE TABLE IF EXISTS default.fqz_ptzy_hosp")
+    client.command("TRUNCATE TABLE IF EXISTS default.fqz_ztk_psn_yearly")
 
     hospitals = [
         ("H001", "广州市第一人民医院"),
@@ -110,18 +109,17 @@ def generate_risk_data():
     })
 
     # Combine and Insert
-    all_settlements = normal_rows + extreme_rows + split_rows + self_pay_rows
-    insert_sql = "INSERT INTO default.fqz_all_yy_yd_1 (fixmedins_code, fixmedins_name, admdvs, medfee_sumamt, fund_pay_sumamt, setl_time) VALUES"
-    client.execute(insert_sql, all_settlements)
+    all_settlements = [[r['fixmedins_code'], r['fixmedins_name'], r['admdvs'], r['medfee_sumamt'], r['fund_pay_sumamt'], r['setl_time']] for r in (normal_rows + extreme_rows + split_rows + self_pay_rows)]
+    client.insert('default.fqz_all_yy_yd_1', all_settlements, column_names=['fixmedins_code', 'fixmedins_name', 'admdvs', 'medfee_sumamt', 'fund_pay_sumamt', 'setl_time'])
     
     print(f"Total settlements inserted into fqz_all_yy_yd_1: {len(all_settlements)}")
 
-    insert_psn_sql = "INSERT INTO default.fqz_ztk_psn_yearly (setl_rq, certno, psn_name, admdvs, provice_code, jzcs, jzcs_zy, medfee_sumamt, fund_pay_sumamt, acct_pay, cash_payamt, ipt_days_hj, crt_time) VALUES"
-    client.execute(insert_psn_sql, frequency_rows)
+    psn_data = [[r['setl_rq'], r['certno'], r['psn_name'], r['admdvs'], r['provice_code'], r['jzcs'], r['jzcs_zy'], r['medfee_sumamt'], r['fund_pay_sumamt'], r['acct_pay'], r['cash_payamt'], r['ipt_days_hj'], r['crt_time']] for r in frequency_rows]
+    client.insert('default.fqz_ztk_psn_yearly', psn_data, column_names=['setl_rq', 'certno', 'psn_name', 'admdvs', 'provice_code', 'jzcs', 'jzcs_zy', 'medfee_sumamt', 'fund_pay_sumamt', 'acct_pay', 'cash_payamt', 'ipt_days_hj', 'crt_time'])
     print("Frequency anomaly row inserted.")
 
-    insert_hosp_sql = "INSERT INTO default.fqz_ptzy_hosp (setl_rq, fixmedins_code, fixmedins_name, medinslv, medins_natu, provice_code, admdvs, medfee_sumamt, fund_pay_sumamt, acct_pay, cash_payamt, ipt_days_hj, crt_time) VALUES"
-    client.execute(insert_hosp_sql, bed_hanging_rows)
+    hosp_data = [[r['setl_rq'], r['fixmedins_code'], r['fixmedins_name'], r['medinslv'], r['medins_natu'], r['provice_code'], r['admdvs'], r['medfee_sumamt'], r['fund_pay_sumamt'], r['acct_pay'], r['cash_payamt'], r['ipt_days_hj'], r['crt_time']] for r in bed_hanging_rows]
+    client.insert('default.fqz_ptzy_hosp', hosp_data, column_names=['setl_rq', 'fixmedins_code', 'fixmedins_name', 'medinslv', 'medins_natu', 'provice_code', 'admdvs', 'medfee_sumamt', 'fund_pay_sumamt', 'acct_pay', 'cash_payamt', 'ipt_days_hj', 'crt_time'])
     print("Bed-hanging anomaly row inserted.")
 
 if __name__ == "__main__":

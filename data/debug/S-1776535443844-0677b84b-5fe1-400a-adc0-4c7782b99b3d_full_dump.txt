@@ -1,0 +1,12 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776535443844-0677b84b-5fe1-400a-adc0-4c7782b99b3d
+Message Count: 2
+Timestamp: 2026-04-19T02:06:26.344589
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近2年高风险case
+
+--- [00001] AIMessage ---
+Content: 
+

@@ -1,0 +1,17 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776778379175-2c567817-c58a-4065-a6eb-977007bca1ae
+Message Count: 2
+Timestamp: 2026-04-21T21:39:42.363268
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近2年高风险case
+
+--- [00001] AIMessage ---
+Content: [[[STATUS: 审计链路已挂起，正在等待人工业务指导...]]]
+
+
+
+> [!IMPORTANT]
+> **审计链路中断**: 模型由于逻辑过于复杂请求人工接管。请在下方输入您的业务指导意见。
+

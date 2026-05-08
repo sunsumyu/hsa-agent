@@ -1,0 +1,30 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776353246857-f7ce15af-2789-437e-8e54-6ba00183b504
+Message Count: 2
+Internal Steps (Thoughts): 12
+Timestamp: 2026-04-16T23:29:56.901052
+=============================
+
+--- 🧩 INTERNAL STEPS (Shadow Reasoning) ---
+[00] Expert deepseek-r1 generated a response.
+[01] Expert deepseek-r1 generated a response.
+[02] Expert deepseek-r1 generated a response.
+[03] Expert deepseek-r1 generated a response.
+[04] Expert deepseek-r1 generated a response.
+[05] Expert deepseek-r1 generated a response.
+[06] Final Thought: 
+[07] Final Thought: 
+[08] Expert deepseek-r1 generated a response.
+[09] Expert deepseek-r1 generated a response.
+[10] Expert deepseek-r1 generated a response.
+[11] Final Thought: 
+-------------------------------------------
+
+--- [00000] HumanMessage ---
+Content: 总结近5年高风险案例
+
+--- [00001] AIMessage ---
+Content: [[[AUDIT_REPORT_V2]]]
+经系统全局多维穿透，当前选定维度内均未检出符合规则库特征的违规线索。
+[[[【业务稽核维度】]]]
+

@@ -1,0 +1,18 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776626992074-a9b0ae30-5d5a-41fd-ba04-82f950e0177f
+Message Count: 2
+Timestamp: 2026-04-20T03:30:57.601548
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近 2 年高风险 Case
+
+--- [00001] AIMessage ---
+Content: ### 🚨 审计取证链路物理中断
+
+**原始故障**: 物理审计拒绝：物理语法解析失败：Invalid expression / Unexpected token. Line 1, Col: 70.
+  好的，为了更好地帮助您编写正确的 SQL [4m查询，请提供具体的审计任务计划中的业务逻辑解析和重点关注对象，以及异常特征。以下是几个示例供参考：[...
+
+> [!CAUTION]
+> **物理执行受限 (Degraded Mode)**：由于达到最大重试上限 (3 次) 且数据库积极拒绝，取证回路已物理熔断。请检查 ClickHouse 引擎负载或网络连通性。
+

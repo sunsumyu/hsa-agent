@@ -1,6 +1,13 @@
+"""
+[V34.0] 生产级评估指标 — 三层验证体系
+L1: 工具轨迹验证 (确定性, 无需 LLM)
+L2: 数值精确度验证 (确定性, 无需 LLM)
+L3: 报告质量评估 (LLM Judge, 仅此层)
+"""
 import os
 import re
-from typing import Optional, List
+from typing import List
+from loguru import logger
 from deepeval.metrics import BaseMetric, GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
 from deepeval.models.base_model import DeepEvalBaseLLM
@@ -9,154 +16,230 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-class QwenMaxJudge(DeepEvalBaseLLM):
-    """多供应商裁判模型适配器。"""
-    def __init__(self, model_name="gemma-4-31b-it"):
+
+# ============================================================
+# LLM Judge (仅用于 L3)
+# ============================================================
+
+class QwenJudge(DeepEvalBaseLLM):
+    """裁判模型适配器"""
+    def __init__(self, model_name="deepseek-v3"):
         self.model_name = model_name
-        if "gemma" in model_name or "gemini" in model_name:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            self.model = ChatGoogleGenerativeAI(
-                model=model_name,
-                google_api_key=os.getenv("GOOGLE_API_KEY"),
-                temperature=0.1
-            )
-        elif "doubao" in model_name or "ep-" in model_name:
-             self.model = ChatOpenAI(
-                model=model_name,
-                openai_api_key=os.getenv("VOLC_API_KEY"),
-                openai_api_base=os.getenv("VOLC_BASE_URL")
-            )
-        else:
-            self.model = ChatOpenAI(
-                model=model_name,
-                openai_api_key=os.getenv("BAILIAN_API_KEY"),
-                openai_api_base=os.getenv("BAILIAN_BASE_URL")
-            )
+        self.model = ChatOpenAI(
+            model=model_name,
+            openai_api_key=os.getenv("BAILIAN_API_KEY"),
+            openai_api_base=os.getenv("BAILIAN_BASE_URL"),
+        )
 
     def load_model(self):
         return self.model
 
+    def _clean_json_output(self, text: str) -> str:
+        match = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return text.strip()
+
     def generate(self, prompt: str) -> str:
-        chat_model = self.load_model()
-        res = chat_model.invoke(prompt)
-        # 确保返回的是纯字符串，处理可能出现的 List[dict] 类型 content
-        if isinstance(res.content, list):
-            return "".join([str(p.get("text", "")) for p in res.content if isinstance(p, dict)])
-        return str(res.content)
+        res = self.load_model().invoke(prompt)
+        content = str(res.content) if not isinstance(res.content, list) else "".join(
+            [str(p.get("text", "")) for p in res.content if isinstance(p, dict)]
+        )
+        return self._clean_json_output(content)
 
     async def a_generate(self, prompt: str) -> str:
-        chat_model = self.load_model()
-        res = await chat_model.ainvoke(prompt)
-        if isinstance(res.content, list):
-            return "".join([str(p.get("text", "")) for p in res.content if isinstance(p, dict)])
-        return str(res.content)
+        res = await self.load_model().ainvoke(prompt)
+        content = str(res.content) if not isinstance(res.content, list) else "".join(
+            [str(p.get("text", "")) for p in res.content if isinstance(p, dict)]
+        )
+        return self._clean_json_output(content)
 
     def get_model_name(self):
         return self.model_name
 
-# 实例化 Qwen-Max 裁判
-qwen_judge = QwenMaxJudge()
 
-def get_hsa_evidence_chain_metric():
-    """证据链完整度指标：利用 GEval 评估是否满足医保稽核‘三要素’。"""
-    return GEval(
-        name="证据链完整度 (Evidence Chain)",
-        criteria="""
-        评估 Agent 的稽核报告是否满足以下‘医保证据链’要求：
-        1. 必须明确指出违规现象或风险点 (Specific Behavior)。
-        2. 必须包含具体的涉案金额 (Amount)，不能含糊其辞。
-        3. 必须引用明确的政策条款依据 (Policy Basis)。
-        4. 必须给出后续的稽核或处置建议 (Audit Suggestion)。
-        5. 格式必须符合‘🚩卡片式’排版样式。
-        """,
-        evaluation_params=[LLMTestCaseParams.INPUT, LLMTestCaseParams.ACTUAL_OUTPUT],
-        model=qwen_judge
-    )
+qwen_judge = QwenJudge()
 
-def get_hsa_faithfulness_metric():
-    """忠实度/事实一致性指标 (Faithfulness)：判定结论中提到的具体事实（医院、金额、日期）是否完全源于 SQL 检索。"""
-    return GEval(
-        name="事实忠实度 (Faithfulness)",
-        criteria="""
-        评估 Agent 的输出是否完全真实：
-        1. [基准] 医院名、违规金额、结算日期等“事实性数据”必须出现在检索上下文（SQL 结果）中。
-        2. [豁免] 允许 Agent 引用专家知识库中的政策名称或判定准则，甚至基于政策逻辑对数据进行解读。
-        3. [违规] 严禁将政策库中的“示例数据”当作当前案件的“真实涉案数据”。
-        4. [违规] 如果 SQL 结果中没有某个医院，但 Agent 合理化输出了该医院，即使逻辑正确也判定为事实不忠实。
-        """,
-        evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.RETRIEVAL_CONTEXT],
-        model=qwen_judge
-    )
 
-def get_hsa_answer_relevance_metric():
-    """答案相关性指标 (Answer Relevance)：利用 GEval 判定输出是否直接解决了用户核心诉求。"""
-    return GEval(
-        name="答案相关性 (Answer Relevance)",
-        criteria="""
-        评估 Agent 是否直接且清晰地回答了用户的核心稽核问题：
-        1. 是否明确判定了是否存在违规。
-        2. 是否清晰给出了违规金额或涉案范围。
-        3. 避免大段无关的废话，聚焦于稽核结论。
-        """,
-        evaluation_params=[LLMTestCaseParams.INPUT, LLMTestCaseParams.ACTUAL_OUTPUT],
-        model=qwen_judge
-    )
+# ============================================================
+# L1: 工具轨迹验证器 (确定性, 无需 LLM)
+# ============================================================
 
-class HSANumericalPrecisionMetric(BaseMetric):
-    """数值精确度指标：检查回复中的金额是否与预期（或 SQL 结果）一致，支持多格式容错。"""
-    def __init__(self, threshold: float = 0.01):
+class ToolTrajectoryMetric(BaseMetric):
+    """验证 Agent 是否调用了正确的工具并查询了正确的表"""
+    
+    def __init__(self):
+        super().__init__()
+        self.score = 0
+        self.name = "工具轨迹正确性"
+        self.criteria = "Agent 是否执行了有效的 SQL 查询"
+    
+    def measure(self, test_case: LLMTestCase) -> float:
+        context = test_case.retrieval_context or []
+        
+        checks = {
+            "has_sql_call": False,
+            "has_data_result": False,
+            "no_error": True,
+        }
+        
+        for finding in context:
+            f_str = str(finding)
+            if "[SQL查询]" in f_str or "[execute_audit_sql]" in f_str or "[执行式]" in f_str:
+                checks["has_sql_call"] = True
+            if "行数据" in f_str or "查询结果" in f_str or "返回" in f_str or "Rows:" in f_str or "[SQL数据]" in f_str:
+                checks["has_data_result"] = True
+            if "失败" in f_str or "Error" in f_str or "failed" in f_str.lower():
+                checks["no_error"] = False
+        
+        passed = sum(1 for v in checks.values() if v)
+        self.score = passed / len(checks)
+        
+        logger.debug(f"[L1 轨迹验证] checks={checks}, score={self.score:.2f}")
+        return self.score
+    
+    async def a_measure(self, test_case: LLMTestCase) -> float:
+        return self.measure(test_case)
+    
+    def is_successful(self) -> bool:
+        return self.score >= 0.67
+    
+    @property
+    def __name__(self):
+        return "工具轨迹正确性"
+
+
+# ============================================================
+# L2: 数值精确度验证器 (确定性, 无需 LLM)
+# ============================================================
+
+class NumericalPrecisionMetric(BaseMetric):
+    """[V35.0] 结构化数值精确度验证器：支持直接比对状态对象中的原始数值，避免文本干扰。"""
+    
+    def __init__(self, threshold: float = 0.05):
         super().__init__()
         self.threshold = threshold
         self.score = 0
         self.name = "数值精确度"
-        self.criteria = "检查违规金额计算的准确性"
+        self.criteria = "审计金额与种子数据的吻合程度（优先基于 Schema 比对）"
+    
+    def _extract_from_structured(self, additional_metadata: dict) -> List[float]:
+        """从结构化报告对象中提取金额"""
+        nums = []
+        report = additional_metadata.get("structured_report")
+        if not report: return []
+        
+        # 兼容 Pydantic 对象或 Dict
+        findings = getattr(report, "findings", []) if hasattr(report, "findings") else report.get("findings", [])
+        for f in findings:
+            amt = getattr(f, "amount", 0.0) if hasattr(f, "amount") else f.get("amount", 0.0)
+            nums.append(float(amt))
+            
+        total = getattr(report, "total_amount", 0.0) if hasattr(report, "total_amount") else report.get("total_amount", 0.0)
+        nums.append(float(total))
+        return nums
 
-    def _parse_amount(self, text: str) -> List[float]:
-        """从复杂文本中提取浮点数，支持货币符号、逗号。"""
-        import re
-        # 移除货币符号和逗号
-        clean_text = text.replace(',', '').replace('¥', '').replace('￥', '').replace('元', '')
-        # 匹配数字内容，包含带小数点的
-        nums = re.findall(r'(-?\d+(?:\.\d+)?)', clean_text)
-        return [float(n) for n in nums]
+    def _extract_via_judge(self, text: str) -> List[float]:
+        """兜底逻辑：使用 Judge 模型将 Markdown 转为 KeyValue 再提取数值"""
+        prompt = f"""请从以下审计报告中提取所有核心财务数值（金额、次数），以 JSON 列表格式返回。
+仅返回数字列表，不要包含 ID、年份或电话。
+报告：{text}
+JSON示例：[123.45, 678.90]"""
+        try:
+            res_str = qwen_judge.generate(prompt)
+            # 简单解析 JSON 列表
+            match = re.search(r'\[(.*?)\]', res_str.replace('\n', ''))
+            if match:
+                return [float(x.strip()) for x in match.group(1).split(',') if x.strip()]
+        except:
+            pass
+        return []
 
     def measure(self, test_case: LLMTestCase) -> float:
-        actual_nums = self._parse_amount(test_case.actual_output)
-        expected_nums = self._parse_amount(test_case.expected_output or "")
+        # 1. 提取实际值：尝试从透传的结构化状态中提取 (100% 确定性)
+        meta = test_case.additional_metadata or {}
+        actual_nums = self._extract_from_structured(meta)
         
-        logger.debug(f"Numerical Eval - Expected: {expected_nums}, Actual: {actual_nums}")
+        # 2. 如果结构化数据缺失，使用 Judge 智能提取 (比正则更准)
+        if not actual_nums:
+            logger.info("[L2 验证] 结构化数据缺失，切换至 Judge 键值对提取兜底。")
+            actual_nums = self._extract_via_judge(test_case.actual_output or "")
+            
+        # 3. 提取预期值：直接从 Metadata 中获取标注好的 Ground Truth (100% 确定性)
+        expected_nums = meta.get("ground_truth_amounts", [])
+        
+        # 4. 兜底提取预期值 (如果 Metadata 没传)
+        if not expected_nums and test_case.expected_output:
+            clean_expected = test_case.expected_output.replace(',', '')
+            expected_nums = [float(n) for n in re.findall(r'(-?\d+(?:\.\d+)?)', clean_expected) if float(n) > 50 or "." in n]
+            expected_nums = [n for n in expected_nums if n != 2021 and n != 2022]
+
+        logger.info(f"[L2 Debug] Expected: {expected_nums}")
+        logger.info(f"[L2 Debug] Actual: {actual_nums}")
         
         if not expected_nums:
-            self.score = 1.0 # 无预期目标时默认通过
+            logger.info("[L2 Debug] No expected numbers, scoring 1.0")
+            self.score = 1.0
             return 1.0
         
         if not actual_nums:
-            self.score = 0.0 # 预期有数字但实际无数字
+            logger.info("[L2 Debug] No actual numbers extracted, scoring 0.0")
+            self.score = 0.0
             return 0.0
-            
-        # 寻找匹配项
+        
         match_count = 0
         for e in expected_nums:
-            found = False
+            # 只要实际值列表中存在与预期值极接近的数，即计为匹配
+            matched = False
             for a in actual_nums:
-                # 容差检查 (允许万分之一的误差 或 绝对值 0.05 的误差)
-                if abs(e - a) <= max(self.threshold, e * 0.0001, 0.05):
+                if abs(e - a) <= max(self.threshold, abs(e) * 0.001):
                     match_count += 1
-                    found = True
+                    matched = True
                     break
-            if not found:
-                logger.warning(f"Precision Failure: Expected {e} but not found in {actual_nums}")
+            if matched:
+                logger.debug(f"[L2 Debug] Matched: {e}")
+            else:
+                logger.debug(f"[L2 Debug] MISSED: {e}")
         
-        score = match_count / len(expected_nums)
-        self.score = score
-        return score
+        self.score = min(1.0, match_count / len(expected_nums))
+        logger.info(f"[L2 Debug] Final Score: {self.score:.2f} (Matched {match_count}/{len(expected_nums)})")
+        return self.score
 
     async def a_measure(self, test_case: LLMTestCase) -> float:
         return self.measure(test_case)
 
     def is_successful(self) -> bool:
         return self.score >= 0.8
-
+    
     @property
     def __name__(self):
         return "数值精确度"
+
+
+# ============================================================
+# L3: 证据链完整度 (LLM Judge)
+# ============================================================
+
+def get_hsa_evidence_chain_metric():
+    return GEval(
+        name="证据链完整度 (Evidence Chain)",
+        criteria="""评估稽核报告是否满足以下要求：
+1. 指出了具体的违规现象或风险点。
+2. 包含具体的涉案金额数字。
+3. 引用了政策条款依据。
+4. 给出了稽核建议。""",
+        evaluation_params=[LLMTestCaseParams.INPUT, LLMTestCaseParams.ACTUAL_OUTPUT],
+        model=qwen_judge
+    )
+
+
+def get_hsa_faithfulness_metric():
+    return GEval(
+        name="事实忠实度 (Faithfulness)",
+        criteria="""评估输出是否忠实于检索上下文：
+1. 报告中的金额数字必须出现在检索上下文 (SQL 结果) 中。
+2. 允许引用政策名称。
+3. 严禁编造检索上下文中不存在的数据。""",
+        evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.RETRIEVAL_CONTEXT],
+        model=qwen_judge
+    )

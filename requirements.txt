@@ -12,3 +12,5 @@ sentence-transformers==2.7.0
 deepeval==0.21.42
 langchain-google-genai==1.0.3
 google-generativeai==0.5.2
+markitdown==0.0.1a2
+langgraph==0.0.39

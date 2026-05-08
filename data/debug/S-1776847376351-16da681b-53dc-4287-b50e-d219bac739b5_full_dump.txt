@@ -1,0 +1,16 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776847376351-16da681b-53dc-4287-b50e-d219bac739b5
+Message Count: 2
+Timestamp: 2026-04-22T16:43:47.833262
+=============================
+
+--- [00000] HumanMessage ---
+Content: 最近2年高风险
+
+--- [00001] AIMessage ---
+Content: # 🔍 医保基金大数据稽核报告 (V60.0)
+
+**审计总评**: 在设定的灵敏度阈值下，未发现异常聚集模式，无违规情况。
+
+**涉及金额**: ¥0.00
+

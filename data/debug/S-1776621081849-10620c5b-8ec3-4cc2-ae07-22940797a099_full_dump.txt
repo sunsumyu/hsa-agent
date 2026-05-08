@@ -1,0 +1,17 @@
+=== HSA Session Deep Debug Dump ===
+Session ID: S-1776621081849-10620c5b-8ec3-4cc2-ae07-22940797a099
+Message Count: 2
+Timestamp: 2026-04-20T01:53:07.692612
+=============================
+
+--- [00000] HumanMessage ---
+Content: 总结近 2 年高风险 Case
+
+--- [00001] AIMessage ---
+Content: ### 🚨 审计取证链路物理中断
+
+**原始故障**: 物理审计拒绝：物理类型拦截：字段 【业务稽核维度】 以 String 存储。请使用 toInt32OrZero(【业务稽核维度】) 转换后再聚合。。...
+
+> [!CAUTION]
+> **物理执行受限 (Degraded Mode)**：由于达到最大重试上限 (3 次) 且数据库积极拒绝，取证回路已物理熔断。请检查 ClickHouse 引擎负载或网络连通性。
+

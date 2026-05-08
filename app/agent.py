@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage
 from langchain_community.vectorstores import FAISS
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -131,32 +132,60 @@ def get_tools():
 
 # 导出动态构建函数，支持根据前端 model_id 实时切换算力
 def get_executor(model_id: str = None):
-    # 通过管理器获取对应的（且带回退能力的）LLM
-    is_expert = False
+    # [V33.6 架构归一化] 切换至 hardened AgentGraph
+    from app.agent_graph import AgentGraph
+    
+    config = None
     if model_id:
-        dynamic_llm, resolved_id = model_manager.get_adaptive_llm(model_id=model_id, require_tools=True)
-        # 识别是否为本地 LoRA 专家模型
-        config = model_manager.providers.get(model_id, {})
-        if config.get("provider") == "local_lora" or os.getenv("AUDIT_LORA_PATH"):
-            is_expert = True
-            logger.info("检测到专家算力流入，切换至 Slim-Prompt 引导模式。")
-    else:
-        dynamic_llm = get_llm()
-        resolved_id = "default"
+        config = model_manager.providers.get(model_id)
+        
+    # 构建 Graph 实例
+    graph_instance = AgentGraph(model_id=model_id)
+    hardened_app = graph_instance.compile()
     
-    # 构建动态 Agent
-    current_tools = get_tools()
-    
-    # 获取动态 Schema 并注入 Prompt
-    schema_info = list_tables.invoke("all")
-    current_prompt = get_prompt(expert_mode=is_expert, schema_info=schema_info)
-    
-    # 解析 Prompt 变量 (如果有 {schema_info} 占位符)
-    try:
-        # LangChain 的 ChatPromptTemplate 需要处理变量
-        formatted_prompt = current_prompt.partial(schema_info=schema_info)
-    except Exception:
-        formatted_prompt = current_prompt
+    # 模拟 AgentExecutor 的接口以实现零偏差迁移
+    class GraphExecutorWrapper:
+        def __init__(self, app, model_id):
+            self.app = app
+            self.model_id = model_id
+            
+        async def ainvoke(self, inputs: dict, config: dict = None):
+            # 将 ainvokes 的参数映射到 Graph 的 State
+            # Graph 期望 { "messages": [...], "findings": [], ... }
+            human_msg = inputs.get("input", "")
+            chat_history = inputs.get("chat_history", [])
+            
+            # 合并历史消息
+            initial_state = {
+                "messages": chat_history + [HumanMessage(content=human_msg)],
+                "tasks": [],
+                "sql_query": "",
+                "raw_data": "",
+                "audit_findings": [],
+                "structured_report": None,
+                "metadata": {"user_id": "audit_system"},
+                "session_id": "api_session",
+                "error_log": "",
+                "retry_count": 0
+            }
+            
+            # 设置递归限制
+            run_config = config or {"recursion_limit": 50}
+            if "recursion_limit" not in run_config:
+                run_config["recursion_limit"] = 50
+                
+            final_state = await self.app.ainvoke(initial_state, run_config)
+            
+            # 提取最后一条消息作为 output
+            msgs = final_state.get("messages", [])
+            output = ""
+            if msgs:
+                output = msgs[-1].content
+                
+            return {
+                "output": output,
+                "intermediate_steps": [] # Graph 不再暴露中间步骤以保护隐私
+            }
 
-    dynamic_agent = create_openai_tools_agent(dynamic_llm, current_tools, formatted_prompt)
-    return AgentExecutor(agent=dynamic_agent, tools=current_tools, verbose=True, return_intermediate_steps=True), resolved_id
+    executor = GraphExecutorWrapper(hardened_app, model_id)
+    return executor, model_id or "default"
