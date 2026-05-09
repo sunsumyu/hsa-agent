@@ -99,16 +99,26 @@ class AuditRuleEngine:
         # [算子 5] 跨机构同日结算（疑似挂名）
         # [算子 3] 跨机构重复住院（同一参保人在不同医院、时间重叠的住院记录）
         "CROSS_HOSPITAL_OVERLAP": """
-            SELECT
-                psn_no,
-                toDate(setl_time)              AS setl_date,
-                count(DISTINCT fixmedins_code) AS hospital_count,
-                groupArray(fixmedins_name)     AS hospitals,
-                sum(medfee_sumamt)             AS total_amount
-            FROM {table}
-            WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
-            GROUP BY psn_no, setl_date
-            HAVING hospital_count > 1
+            SELECT psn_no, 
+                   prev_hosp as hospital_a, fixmedins_name as hospital_b,
+                   prev_start as start_a, prev_end as end_a,
+                   start_date as start_b, end_date as end_b,
+                   medfee_sumamt as fee_b
+            FROM (
+                SELECT psn_no, fixmedins_name, fixmedins_code, start_date, end_date, medfee_sumamt,
+                       lagInFrame(end_date) OVER w AS prev_end,
+                       lagInFrame(start_date) OVER w AS prev_start,
+                       lagInFrame(fixmedins_name) OVER w AS prev_hosp,
+                       lagInFrame(fixmedins_code) OVER w AS prev_hosp_code
+                FROM {table}
+                WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
+                  AND start_date IS NOT NULL AND end_date IS NOT NULL
+                WINDOW w AS (PARTITION BY psn_no ORDER BY start_date)
+            )
+            WHERE prev_end IS NOT NULL 
+              AND prev_hosp_code != fixmedins_code
+              AND start_date <= prev_end  -- 核心判定：当前入院在上次出院之前（时间重叠）
+            ORDER BY fee_b DESC
             LIMIT {limit}
         """,
 

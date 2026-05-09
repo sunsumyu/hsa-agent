@@ -206,11 +206,30 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     response = await llm.ainvoke(prompt, config=obs_config)
     _record_usage_with_budget(role, response, actual_model, prompt=prompt)
     content = str(response.content)
-
     cognitive_memory_manager.add_message(state.get("session_id", "default"), response)
 
-    tasks = [re.sub(r'^[\-\*123\.]\s*', '', line).strip() for line in content.split("\n") if line.strip().startswith(("-", "*", "1.", "2.", "3."))]
-    return {"tasks": tasks[:3], "messages": [response], "retry_count": 0, "complexity": complexity}
+    # [V65.0 POE] 结构化解析方法论与任务清单
+    methodology = ""
+    tasks = []
+    
+    if "### METHODOLOGY" in content:
+        parts = content.split("### TASKS")
+        meth_part = parts[0].replace("### METHODOLOGY", "").strip()
+        methodology = meth_part
+        if len(parts) > 1:
+            task_part = parts[1].strip()
+            tasks = [re.sub(r'^[\-\*123\.]\s*', '', line).strip() for line in task_part.split("\n") if line.strip().startswith(("-", "*", "1.", "2.", "3."))]
+    else:
+        # 兼容旧格式
+        tasks = [re.sub(r'^[\-\*123\.]\s*', '', line).strip() for line in content.split("\n") if line.strip().startswith(("-", "*", "1.", "2.", "3."))]
+
+    return {
+        "tasks": tasks[:3], 
+        "methodology": methodology,
+        "messages": [response], 
+        "retry_count": 0, 
+        "complexity": complexity
+    }
 
 async def sqlexec_node(state: AuditState, config: RunnableConfig):
     """
@@ -276,8 +295,11 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     
     prompt = CODER_PROMPT.format_messages(
         messages=state["messages"], 
+        ontology=ontology,
         schema_info=f"{ontology}\n\n请使用 lookup_medical_schema 技能按需查询字段",
-        tasks="\n".join(tasks_list), experiences=mem_context, semantic_dict=""
+        methodology=state.get("methodology", ""),
+        tasks="\n".join(tasks_list), 
+        experiences=mem_context
     )
     
     if retry > 0 and state.get("error_log"):
@@ -382,7 +404,25 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     else:
         clean_data = str(raw_data_str)
 
-    hard_sum, hard_count, _ = booster.calculate_hard_metrics(clean_data)
+    from app.booster import booster, DataExtractionError
+
+    try:
+        hard_sum, hard_count, _ = booster.calculate_hard_metrics(clean_data)
+    except DataExtractionError as e:
+        logger.error(f"🚨 [State Desync] 强约束拦截：数据解析层熔断 -> {e}")
+        # 【V62.0 状态单向约束】如果取不到真实数据，直接把错误推回给状态机，绝对不能进入 LLM 结论生成
+        return {
+            "error_log": f"数据解析失败: {e}",
+            "retry_count": state.get("retry_count", 0) + 1,
+            # [不再兜底 0，而是生成显式的错误报告]
+            "structured_report": AuditReport(
+                summary="❌ [系统级故障] 证据提取失败。上游物理探针未能传递合法的数据载荷，出于安全隔离策略，终止报告渲染。",
+                findings=[],
+                total_amount=0.0,
+                finding_count=0,
+                risk_level="高"
+            )
+        }
 
     # ── Step 2: 解析原始数据为结构化 List[Dict]（供渲染器生成证据表格） ───
     # [ISS-006 Fix] 双轨解析：JSON 优先 + ast.literal_eval 兜底（兼容 datetime 等 Python 原生类型）
