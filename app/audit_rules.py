@@ -22,10 +22,17 @@ class AuditRuleEngine:
                 A.det_item_fee_sumamt AS amount,
                 A.setl_time           AS setl_time
             FROM fqz_fymx_test1 A
-            JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code
+            LEFT JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code
             WHERE A.setl_time >= '2024-01-01 00:00:00' AND A.setl_time <= '2024-12-31 23:59:59'
               AND A.gend = '1' -- 男性患者
-              AND C.nat_hi_druglist_memo LIKE '%限女性%' -- 核心：摒弃模糊匹配，基于三大目录备注精准拦截
+              -- [V76.3] 工业级健壮逻辑：联合物理限制字段与多维名称关键词校验
+              AND (
+                  C.nat_hi_druglist_memo LIKE '%限女性%' 
+                  OR A.hilist_name LIKE '%妇科%' 
+                  OR A.hilist_name LIKE '%产科%' 
+                  OR A.hilist_name LIKE '%子宫%'
+                  OR A.hilist_name LIKE '%阴道%'
+              )
             ORDER BY A.det_item_fee_sumamt DESC
             LIMIT {limit}
         """,
@@ -40,8 +47,8 @@ class AuditRuleEngine:
                 count() as purchase_count,
                 min(setl_time) as first_purchase,
                 max(setl_time) as last_purchase,
-                sum(medfee_sumamt) as total_amount,
-                sum(fund_pay_sumamt) as total_fund_paid
+                sum(medfee_sumamt) as sum_medfee_sumamt,
+                sum(fund_pay_sumamt) as sum_fund_pay_sumamt
             FROM {table}
             WHERE med_type = '定点药店购药'
               AND toYear(toDateTime(setl_time)) = 2024
@@ -57,14 +64,14 @@ class AuditRuleEngine:
                 psn_no,
                 count(DISTINCT fixmedins_code) as store_count,
                 count() as total_purchases,
-                sum(medfee_sumamt) as total_amount,
-                sum(fund_pay_sumamt) as total_fund_paid
+                sum(medfee_sumamt) as sum_medfee_sumamt,
+                sum(fund_pay_sumamt) as sum_fund_pay_sumamt
             FROM {table}
             WHERE med_type = '定点药店购药'
               AND toYear(toDateTime(setl_time)) = 2024
             GROUP BY psn_no
-            HAVING store_count >= 5 AND total_fund_paid > 5000
-            ORDER BY total_fund_paid DESC
+            HAVING store_count >= 5 AND sum_fund_pay_sumamt > 5000
+            ORDER BY sum_fund_pay_sumamt DESC
             LIMIT {limit}
         """,
         
@@ -117,15 +124,15 @@ class AuditRuleEngine:
             SELECT
                 psn_no,
                 setl_id,
-                toDate(setl_time)       AS setl_date,
-                fixmedins_name          AS hospital,
+                toDate(setl_time)       AS setl_time_date,
+                fixmedins_name          AS fixmedins_name,
                 count()                 AS item_count,
-                sum(det_item_fee_sumamt) AS total_fee
+                sum(det_item_fee_sumamt) AS sum_det_item_fee
             FROM fqz_fymx_test1
             WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
-            GROUP BY psn_no, setl_id, setl_date, fixmedins_code, fixmedins_name
+            GROUP BY psn_no, setl_id, setl_time_date, fixmedins_code, fixmedins_name
             HAVING item_count > 50  -- 聚焦于单次就诊内的极端明细记录
-            ORDER BY item_count DESC, total_fee DESC
+            ORDER BY item_count DESC, sum_det_item_fee DESC
             LIMIT {limit}
         """,
         

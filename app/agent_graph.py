@@ -9,6 +9,7 @@ import asyncio
 import sys
 
 from app.usage_tracker import usage_tracker
+from app.compressor import trace_compressor
 from app.model_manager import model_manager
 from app.neo4j_manager import field_kg, neo4j_manager
 from app.prompts import PLANNER_PROMPT, CODER_PROMPT, ANALYST_PROMPT, REPORTER_PROMPT, AUDITOR_PROMPT
@@ -370,7 +371,7 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                         # [V65.0] 记录临时表名，供后续 Coder 引用
                         state["temp_table"] = res["temp_table"]
                         
-                    if res.get("status") == "ERROR" or "error" in res:
+                    if res.get("status") == "ERROR" or "error_message" in res:
                         has_error = True
                         error_msg = res.get("error_message") or res.get("error")
                     else:

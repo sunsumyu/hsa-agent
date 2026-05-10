@@ -24,6 +24,7 @@ load_dotenv()
 
 class EnrichedChatOpenAI(ChatOpenAI):
     """[V40.0] 财务加固型 ChatModel：物理拦截响应并补全缺失的 Token 用量数据"""
+    endpoint_id: str = "unknown" # [V77.0] 明确定义字段，防止 Pydantic 校验失败
     
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
         try:
@@ -31,20 +32,24 @@ class EnrichedChatOpenAI(ChatOpenAI):
             self._enrich_result(result, messages)
             return result
         except Exception as e:
-            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            # [V75.0] 统一物理 ID 追踪：使用 endpoint_id 而不是模糊的 model_name
+            m_id = getattr(self, 'endpoint_id', getattr(self, 'model_name', 'unknown'))
             err_msg = str(e)
             
-            # [V66.1] 瞬时 429 物理自愈：原地退让并重试，最多 2 次
-            if "429" in err_msg or "limit" in err_msg.lower():
+            fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
+            is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
+            
+            if not is_fatal and ("429" in err_msg or "limit" in err_msg.lower()):
                 import asyncio
                 retry_count = getattr(self, '_rate_limit_retry', 0)
                 if retry_count < 2:
                     self._rate_limit_retry = retry_count + 1
-                    wait_time = (retry_count + 1) * 2 # 2s, 4s
-                    logger.warning(f"⏳ [RateLimit-Retry] 节点 {m_id} 触发限速，等待 {wait_time}s 后进行第 {retry_count+1} 次重试...")
+                    wait_time = (retry_count + 1) * 2 
+                    logger.warning(f"⏳ [RateLimit-Retry] 节点 {m_id} 触发限速，等待 {wait_time}s 后重试...")
                     await asyncio.sleep(wait_time)
                     return await self._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
             
+            logger.error(f"⛔ [FATAL_QUOTA] 物理节点 {m_id} 彻底封死，触发切流: {err_msg}")
             endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
@@ -57,7 +62,10 @@ class EnrichedChatOpenAI(ChatOpenAI):
             m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
             err_msg = str(e)
             
-            if "429" in err_msg or "limit" in err_msg.lower():
+            fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
+            is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
+            
+            if not is_fatal and ("429" in err_msg or "limit" in err_msg.lower()):
                 import time
                 retry_count = getattr(self, '_rate_limit_retry_sync', 0)
                 if retry_count < 2:
@@ -67,11 +75,20 @@ class EnrichedChatOpenAI(ChatOpenAI):
                     time.sleep(wait_time)
                     return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
+            logger.error(f"⛔ [FATAL_QUOTA_SYNC] 节点 {m_id} 额度枯竭，触发切流: {err_msg}")
             endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
     def _enrich_result(self, result, messages):
-        """物理注入逻辑封装"""
+        # [V72.0] Anti-Chat Guard: 物理过滤闲聊废话
+        content = str(result.generations[0].message.content)
+        chatty_keywords = ["你好", "很高兴为您服务", "我是一个大语言模型", "作为一个AI", "有什么可以帮您", "抱歉"]
+        if any(kw in content for kw in chatty_keywords) and len(content) < 300:
+            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            logger.warning(f"🚫 [ANTI_CHAT] 节点 {m_id} 输出了闲聊废话，强行判定为失败并切流。")
+            endpoint_pool_manager.record_failure(m_id, "Detected conversational chatty response.")
+            raise ValueError(f"Chatty response detected from {m_id}")
+
         prompt_text = "".join([str(m.content) for m in messages if hasattr(m, "content")])
         
         for gen in result.generations:
@@ -257,15 +274,17 @@ class ModelManager:
                     streaming=True
                 )
             else:
-                return EnrichedChatOpenAI(
+                llm = EnrichedChatOpenAI(
                     model=model_name,
                     openai_api_key=api_key,
                     openai_api_base=base_url,
                     temperature=temperature,
                     timeout=60.0,
                     streaming=True,
-                    default_headers=default_headers
+                    default_headers=default_headers,
+                    endpoint_id=name # [V77.0] 在初始化时传入，符合 Pydantic 规范
                 )
+                return llm
         except Exception as e:
             logger.error(f"LLM 实例化失败: {name} | {e}")
             return None
@@ -325,14 +344,22 @@ class ModelManager:
             ep = next((e for e in pool.endpoints if e.id == m_id), None)
             
             if ep:
+                # [V76.2] 物理前置校验：如果节点已在黑名单，严禁发起主动嗅探，防止产生噪音
+                state = endpoint_pool_manager.states.get(m_id)
+                if state and state.is_cooling:
+                    logger.warning(f"🚷 [Proactive-Probe] 节点 {m_id} 仍在冷冻期，直接跳过寻址。")
+                    return await self.get_llm_by_role(role, retry_count + 1, config)
+
                 logger.info(f"🔍 [Proactive-Probe] 正在验证角色 {role} 的首选节点: {m_id}...")
                 probe_llm = self._create_llm(m_id, ep)
+                # 注入 ID 以确保探测失败也能精准熔断
+                probe_llm.endpoint_id = m_id 
                 await probe_llm.ainvoke([HumanMessage(content="1")], config={"timeout": 3.0})
                 logger.info(f"✨ [Proactive-Probe] 节点 {m_id} 存活确认")
         except Exception as e:
             err_msg = str(e)
-            if any(sig in err_msg.lower() for sig in ["429", "quota", "limit", "rate", "体验模式"]):
-                logger.warning(f"⛔ [Proactive-Probe] 检测到节点 {m_id} 配额枯竭，立即执行 2 小时长效熔断。")
+            if any(sig in err_msg.lower() for sig in ["429", "quota", "limit", "rate", "体验模式", "chatty"]):
+                logger.warning(f"⛔ [Proactive-Probe] 节点 {m_id} 验证失败（配额/闲聊拦截），触发全局熔断。")
                 endpoint_pool_manager.record_failure(m_id, err_msg)
                 return await self.get_llm_by_role(role, retry_count + 1, config)
             else:

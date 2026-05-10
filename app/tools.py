@@ -70,7 +70,11 @@ async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return
         return "MySQL 暂不支持在此路径执行。"
     except Exception as e:
         logger.error(f"[SQL_EXEC_ERROR] {e}")
-        return f"查询失败: {e}"
+        return {
+            "status": "ERROR",
+            "error_message": str(e),
+            "sql_logic": sql
+        }
 
 # ──────────────────────────────────────────────────────────
 # 暴露给 Agent 的工具集 (Decorated Tools)

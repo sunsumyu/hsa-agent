@@ -327,6 +327,8 @@ async def run_one(case: dict, judge_llm) -> dict:
     eval_res = {"total": "N/A", "scores": {}, "advice": "parse error"}
 
     try:
+        # [V73.1] 修复 BUG：必须 await 异步函数才能解包
+        judge_llm, j_model = await model_manager.get_llm_by_role("planner_heavy")
         res     = await judge_llm.ainvoke(judge_input)
         content = str(res.content)
 
@@ -486,26 +488,15 @@ async def main():
     print(f"  NOTE  : Full Prompt + Response printed for every node call")
     print(SEP)
 
-    judge_llm, judge_model = model_manager.get_adaptive_llm(model_id="doubao-pro-32k")
-    print(f"  [OK] Judge Model: {judge_model}\n")
+    # [V73.0] 裁判模型已移至 run_one 内部动态获取，实现故障秒切
+    print(f"  [OK] Judge Strategy: Dynamic Failover Enabled\n")
 
-    # 重置黑名单 (In-process fix for performance and encoding safety)
-    try:
-        stats_path = 'data/usage_stats.json'
-        if os.path.exists(stats_path):
-            with open(stats_path, 'r', encoding='utf-8-sig') as f:
-                d = json.load(f)
-            d['blacklist_expiry'] = {}
-            d['stability_scores'] = {}
-            with open(stats_path, 'w', encoding='utf-8') as f:
-                json.dump(d, f, ensure_ascii=False, indent=2)
-            logger.info("✅ [算力治理] 启动时已重置全量黑名单")
-    except Exception as e:
-        logger.warning(f"⚠️ 启动重置黑名单失败: {e}")
+    # [V74.1] 物理持久化：不再启动时清空黑名单，确保坏掉的模型（如 V3）被持久锁定。
+    logger.info("🛡️ [算力治理] 启动时保留历史黑名单状态，防止报废模型复活。")
 
     results = []
     for case in TEST_CASES:
-        r = await run_one(case, judge_llm)
+        r = await run_one(case, None) # judge_llm 内部动态生成
         results.append(r)
         await asyncio.sleep(2)
 

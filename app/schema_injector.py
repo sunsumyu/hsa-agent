@@ -45,23 +45,29 @@ from loguru import logger
 # ──────────────────────────────────────────────────────────
 BUILTIN_FIELD_SEEDS: List[Dict] = [
     # 主要核查表字段
-    {"field": "fixmedins_code",   "alias": ["hosp_code", "医院编码", "机构编码"], "desc": "医疗机构唯一编码（不能用 hosp_code，该字段不存在）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["医院", "机构", "医疗机构", "医保定点"]},
+    {"field": "fixmedins_code",   "alias": ["医院编码", "机构编码"], "desc": "医疗机构唯一编码（物理字段，严禁猜测为 hosp_code）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["医院", "机构", "医疗机构", "医保定点"]},
     {"field": "fixmedins_name",   "alias": ["医院名称", "机构名称"], "desc": "医疗机构名称", "table": "fqz_gz_jzsj_all_ql", "keywords": ["医院", "机构", "医院名"]},
     {"field": "psn_no",           "alias": ["参保人ID", "患者编号"], "desc": "参保人唯一标识（主要关联字段）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["参保人", "患者", "人员", "个人"]},
     {"field": "psn_name",         "alias": ["姓名", "患者姓名"], "desc": "参保人姓名（存在乱码，建议仅用于展示）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["姓名", "患者姓名", "人员姓名"]},
-    {"field": "gend",             "alias": ["性别", "gender"], "desc": "性别代码：1=男，2=女（用于性别冲突核查）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["性别", "男", "女", "妇科", "性别冲突"]},
+    {"field": "gend",             "alias": ["性别"], "desc": "性别代码：1=男，2=女（必须使用此物理字段，严禁猜测为 gender）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["性别", "男", "女", "妇科", "性别冲突"]},
     {"field": "dise_name",        "alias": ["疾病名称", "诊断", "病名"], "desc": "主要诊断名称（用于性别冲突、疾病筛查）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["诊断", "疾病", "病名", "妇科", "男科", "子宫", "前列腺"]},
     {"field": "start_date",       "alias": ["入院日期", "开始日期"], "desc": "住院开始日期（用于住院时间段计算）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["入院", "住院开始", "住院时间", "重复住院", "分解住院"]},
     {"field": "end_date",         "alias": ["出院日期", "结束日期"], "desc": "住院结束日期（用于住院时间段计算）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["出院", "住院结束", "住院时间", "重复住院", "分解住院"]},
     {"field": "setl_time",        "alias": ["结算时间", "结算日期"], "desc": "医疗费用结算时间", "table": "fqz_gz_jzsj_all_ql", "keywords": ["结算", "时间", "日期", "同一天"]},
     {"field": "setl_id",          "alias": ["结算ID", "结算流水号"], "desc": "结算流水唯一标识", "table": "fqz_gz_jzsj_all_ql", "keywords": ["结算ID", "流水", "唯一", "去重"]},
-    {"field": "medfee_sumamt",    "alias": ["医疗总费用", "费用总额", "金额"], "desc": "医疗总费用（含自费和医保报销）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["费用", "金额", "总额", "报销", "花费"]},
+    {"field": "medfee_sumamt",    "alias": ["医疗总费用", "结算金额"], "desc": "医疗总费用（必须使用此物理字段，严禁猜测为 total_fee 或 total_amount）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["费用", "金额", "总额", "报销", "花费"]},
     {"field": "fund_pay_sumamt",  "alias": ["医保支付", "基金支付", "报销金额"], "desc": "医保基金实际支付金额（核查骗保的核心字段）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["医保支付", "基金", "报销", "骗保", "违规金额"]},
     {"field": "med_type",         "alias": ["就医类型", "医疗类型"], "desc": "就医类型：定点药店购药、门诊、住院等", "table": "fqz_gz_jzsj_all_ql", "keywords": ["类型", "药店", "门诊", "住院", "购药"]},
     {"field": "addr",             "alias": ["地址", "联系地址"], "desc": "参保人地址（用于聚集性就医网络分析）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["地址", "联系", "共用", "聚集"]},
     {"field": "certno",           "alias": ["身份证号", "证件号"], "desc": "证件号（存在乱码，建议使用 psn_no）", "table": "fqz_gz_jzsj_all_ql", "keywords": ["身份证", "证件", "实名"]},
     # 统计分析表
     {"field": "vix",              "alias": ["变异指数"], "desc": "医疗机构变异指数（越高表示异常程度越大）", "table": "fqz_all_yy_yd_1", "keywords": ["变异", "离散", "异常", "机构风险"]},
+    # [V68.8] 目录与明细扩展字段（用于性别冲突等精准核查）
+    {"field": "nat_hi_druglist_memo", "alias": ["目录备注", "限用说明"], "desc": "国家医保目录限定支付范围备注", "table": "fqz_drug_mcs_info_list", "keywords": ["备注", "限女性", "限儿童", "支付范围"]},
+    {"field": "hilist_name",          "alias": ["目录名称", "药品名称"], "desc": "医保目录项目名称", "table": "fqz_fymx_test1", "keywords": ["药品", "项目", "名称"]},
+    {"field": "hilist_code",          "alias": ["目录编码", "项目编码"], "desc": "医保目录项目编码", "table": "fqz_fymx_test1", "keywords": ["编码", "代码"]},
+    {"field": "med_list_code",        "alias": ["通用目录编码"], "desc": "国家统一医保目录编码", "table": "fqz_drug_mcs_info_list", "keywords": ["目录编码", "国家编码"]},
+    {"field": "det_item_fee_sumamt",  "alias": ["明细金额", "项目金额"], "desc": "费用明细条目金额", "table": "fqz_fymx_test1", "keywords": ["金额", "明细"]},
 ]
 
 

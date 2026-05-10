@@ -99,30 +99,43 @@ class SQLGuardian:
     @staticmethod
     def _validate_column_existence(expression):
         """
-        遍历 AST，确保所有字段名在白名单或知识图谱中存在。
+        遍历 AST，确保所有字段名在白名单、知识图谱或当前 SQL 定义的别名中存在。
         """
         from app.neo4j_manager import field_kg
         from app.schema_injector import BUILTIN_FIELD_SEEDS
         
-        # 构建一个临时的全局字段白名单（后续可升级为从 ClickHouse 实时同步）
+        # 1. 构建全局物理字段白名单
         whitelist = {f["canonical"].lower() for f in field_kg.get_canonical_fields()}
         whitelist.update({f["field"].lower() for f in BUILTIN_FIELD_SEEDS})
         
-        # 常见聚合函数和关键字放行
-        common_ignore = {"count", "sum", "avg", "min", "max", "arraystringconcat", "groupuniqarray"}
+        # 2. 动态提取当前 SQL 中的别名 (Alias)
+        # 例如：SELECT toDate(setl_time) AS setl_date 中的 setl_date
+        local_aliases = set()
+        for alias in expression.find_all(exp.Alias):
+            local_aliases.add(alias.alias.lower())
+        
+        # 3. 常见聚合函数和关键字放行
+        common_ignore = {"count", "sum", "avg", "min", "max", "arraystringconcat", "groupuniqarray", "any"}
 
         for node in expression.walk():
             if isinstance(node, exp.Column):
                 col_name = node.name.lower()
-                # 如果字段名不包含在白名单中，且不是聚合函数/虚拟列
-                if col_name not in whitelist and col_name not in common_ignore:
-                    # 尝试用 FieldKG 再次解析，看是否是漏网之鱼
-                    resolved = field_kg.resolve(col_name)
-                    if not resolved:
-                        logger.error(f"[SECURITY] 发现物理不存在的幻觉字段: {col_name}")
-                        raise SecurityViolationError(
-                            f"物理拦截：字段 `{col_name}` 不存在于生产数据库中。严禁猜测字段名，请调用 lookup_medical_schema 工具确认。"
-                        )
+                
+                # 校验优先级：物理白名单 > 动态别名 > 聚合函数 > FieldKG 兜底
+                if col_name in whitelist:
+                    continue
+                if col_name in local_aliases:
+                    continue
+                if col_name in common_ignore:
+                    continue
+                
+                # 尝试用 FieldKG 再次解析（处理可能漏掉的物理别名映射）
+                resolved = field_kg.resolve(col_name)
+                if not resolved:
+                    logger.error(f"[SECURITY] 发现物理不存在的幻觉字段: {col_name}")
+                    raise SecurityViolationError(
+                        f"物理拦截：字段 `{col_name}` 既不是物理列也不是合法别名。严禁猜测字段名，请仅使用 Physical Blueprint 中提供的字段。"
+                    )
 
     @staticmethod
     def _refine_sql_traps(expression):
