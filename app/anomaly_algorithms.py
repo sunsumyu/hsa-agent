@@ -69,11 +69,11 @@ class AnomalyDetector:
     }
 
     @staticmethod
-    def get_algorithm_sql(algo_id: str, params: Dict[str, Any] = {}) -> str:
+    def get_algorithm_sql(algo_id: str, params: Dict[str, Any] = {}, extra_filters: Optional[Dict[str, str]] = None) -> str:
         """根据算法 ID 与参数动态生成取证 SQL"""
         template = AnomalyDetector.ALGORITHMS.get(algo_id.upper())
         if not template:
-            logger.error(f">>> [AnomalyDetector] 未定义的算法算子: {algo_id}")
+            logger.debug(f">>> [AnomalyDetector] 算子 {algo_id} 不在算法库")
             return ""
         
         # 参数处理
@@ -86,6 +86,37 @@ class AnomalyDetector:
         limit = params.get("limit", 50)
         
         sql = template.format(table=table_name, threshold=threshold, limit=limit)
+
+        # [V66.2] 动态过滤器注入：防止算法扫描全库导致 429 或 爆炸
+        if extra_filters:
+            from app.audit_rules import rule_engine
+            # 借用 RuleEngine 的注入逻辑（如果它是静态的或可访问的）
+            # 由于逻辑较复杂，这里做一个简单的 WHERE 注入
+            filter_clauses = []
+            for k, v in extra_filters.items():
+                val = str(v).replace("'", "''")
+                if not any(val.upper().startswith(op) for op in ['=', '>', '<', 'LIKE']):
+                    filter_clauses.append(f"{k} = '{val}'")
+                else:
+                    filter_clauses.append(f"{k} {v}")
+            
+            if filter_clauses:
+                where_patch = " AND ".join(filter_clauses)
+                if "WHERE" in sql.upper():
+                    sql = re.sub(r"(WHERE\s+)", rf"\1 ({where_patch}) AND ", sql, flags=re.IGNORECASE)
+                else:
+                    # 寻找第一个 GROUP BY 或 ORDER BY 之前插入
+                    insert_pos = -1
+                    for marker in [r"\bGROUP\s+BY\b", r"\bORDER\s+BY\b", r"\bLIMIT\b"]:
+                        m = re.search(marker, sql, re.IGNORECASE)
+                        if m and (insert_pos == -1 or m.start() < insert_pos):
+                            insert_pos = m.start()
+                    
+                    if insert_pos != -1:
+                        sql = sql[:insert_pos] + f" WHERE {where_patch} " + sql[insert_pos:]
+                    else:
+                        sql += f" WHERE {where_patch}"
+        
         return sql
 
     @staticmethod

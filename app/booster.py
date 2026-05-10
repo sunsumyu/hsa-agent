@@ -55,21 +55,27 @@ class PrecisionBooster:
             
             # 2. 尝试 JSON 解析
             if not rows_data:
-                kv_pattern = re.compile(r"['\"](?P<key>[^'\"]+)['\"]\s*:\s*(?:Decimal\(')?(?P<val>[\d\.\-]+)(?:\')?")
+                # [V65.6] 升级正则：支持字符串、数字、以及 Decimal 包装器
+                kv_pattern = re.compile(r"['\"](?P<key>[^'\"]+)['\"]\s*:\s*(?:Decimal\(')?(?P<val>[^'\"},]+)(?:\')?")
                 for item_match in re.finditer(r"\{([^{}]+)\}", raw_data_str):
                     row_str = item_match.group(1)
                     row_dict = {}
                     for kv_match in kv_pattern.finditer(row_str):
                         key = kv_match.group('key').lower()
+                        val = kv_match.group('val').strip().strip("'").strip('"')
                         try:
-                            row_dict[key] = float(kv_match.group('val'))
-                        except: continue
+                            # 尝试转数字，转不了则保留原样字符串
+                            if re.match(r"^-?\d+(\.\d+)?$", val):
+                                row_dict[key] = float(val)
+                            else:
+                                row_dict[key] = val
+                        except: 
+                            row_dict[key] = val
                     if row_dict: rows_data.append(row_dict)
 
-            # [V62.0 强校验门禁]
-            if not rows_data:
-                # 废除原有的 re.findall 兜底逻辑
-                raise DataExtractionError("无法从输入流中提取出结构化的金额或数值。载荷可能被截断或格式不规范。")
+            # [V65.6 强校验门禁：只要有行记录，就不触发熔断]
+            if not rows_data and raw_data_str.strip() not in ["[]", ""]:
+                raise DataExtractionError("无法从输入流中提取出结构化的记录载荷。")
 
             evidence_items = []
             total_sum = 0.0
@@ -78,16 +84,19 @@ class PrecisionBooster:
                 best_val = 0.0
                 best_score = -1
                 for k, v in row.items():
-                    score = 0
-                    if any(ak in k for ak in amount_keys): score = 30
-                    elif any(ck in k for ck in count_keys): score = 15
-                    if score > best_score:
-                        best_score, best_val = score, v
+                    # 仅针对数字类型进行评分和金额提取
+                    if isinstance(v, (int, float)):
+                        score = 0
+                        if any(ak in k for ak in amount_keys): score = 30
+                        elif any(ck in k for ck in count_keys): score = 15
+                        if score > best_score:
+                            best_score, best_val = score, float(v)
                 
                 total_sum += best_val
                 evidence_items.append(best_val)
                 for k, v in row.items():
-                    if v != best_val and v > 0: evidence_items.append(v)
+                    if isinstance(v, (int, float)):
+                        if v != best_val and v > 0: evidence_items.append(float(v))
             
             evidence_items = sorted(list(set(evidence_items)), reverse=True)
             logger.info(f"[Booster] 物理取证严格校验通过: SUM={total_sum:.2f}, COUNT={len(rows_data)}")

@@ -12,27 +12,21 @@ class AuditRuleEngine:
     #        dise_name, medfee_sumamt, fund_pay_sumamt, setl_id, setl_time
     TEMPLATES = {
         # [算子 1] 性别与诊断冲突 [ISS-008 Fix]
-        # 策略：使用双维度检测
-        # - 主检测：gend(性别编码) × dise_name(疾病名称，如存在)
-        # - 补充检测：当 dise_name 无法使用时，依赖 med_type 含妇科关键词
-        # - 年份过滤确保性能，避免全表扫描 18GB
         "GENDER_CONFLICT": """
             SELECT
-                psn_no,
-                fixmedins_name        AS hospital,
-                gend                  AS gender_code,
-                hilist_name           AS item_name,
-                med_type              AS service_type,
-                det_item_fee_sumamt   AS item_fee,
-                setl_time             AS settle_date
-            FROM fqz_fymx_test1
-            WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
-              AND gend = '1' -- 男性患者
-              AND (
-                  multiSearchAny(hilist_name, ['妇', '产', '阴道', '子宫', '乳腺', '卵巢', '宫颈', '避孕']) OR
-                  multiSearchAny(med_type, ['妇', '产', '妇幼'])
-              )
-            ORDER BY det_item_fee_sumamt DESC
+                A.psn_no,
+                A.fixmedins_name      AS hospital,
+                A.gend                AS gender_code,
+                A.hilist_name         AS hilist_name,
+                C.nat_hi_druglist_memo AS rule_limit,
+                A.det_item_fee_sumamt AS amount,
+                A.setl_time           AS setl_time
+            FROM fqz_fymx_test1 A
+            JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code
+            WHERE A.setl_time >= '2024-01-01 00:00:00' AND A.setl_time <= '2024-12-31 23:59:59'
+              AND A.gend = '1' -- 男性患者
+              AND C.nat_hi_druglist_memo LIKE '%限女性%' -- 核心：摒弃模糊匹配，基于三大目录备注精准拦截
+            ORDER BY A.det_item_fee_sumamt DESC
             LIMIT {limit}
         """,
 
@@ -74,8 +68,6 @@ class AuditRuleEngine:
             LIMIT {limit}
         """,
         
-        # [算子 4] 分解住院检测（当住院数据可用时）
-        # med_type 住院值需按实际数据口径替换
         "DECOMPOSITION_HOSPITALIZATION": """
             SELECT psn_no, fixmedins_name, 
                    prev_end_date as discharge_a, 
@@ -84,8 +76,8 @@ class AuditRuleEngine:
                    prev_fee as fee_a, medfee_sumamt as fee_b
             FROM (
                 SELECT psn_no, fixmedins_name, fixmedins_code, start_date, end_date, medfee_sumamt, med_type,
-                       lagInFrame(end_date) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY start_date) as prev_end_date,
-                       lagInFrame(medfee_sumamt) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY start_date) as prev_fee
+                       lag(end_date) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY start_date) as prev_end_date,
+                       lag(medfee_sumamt) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY start_date) as prev_fee
                 FROM {table}
                 WHERE toYear(toDateTime(start_date)) = 2024
             )
@@ -99,73 +91,61 @@ class AuditRuleEngine:
         # [算子 5] 跨机构同日结算（疑似挂名）
         # [算子 3] 跨机构重复住院（同一参保人在不同医院、时间重叠的住院记录）
         "CROSS_HOSPITAL_OVERLAP": """
-            SELECT psn_no, 
-                   prev_hosp as hospital_a, fixmedins_name as hospital_b,
-                   prev_start as start_a, prev_end as end_a,
-                   start_date as start_b, end_date as end_b,
-                   medfee_sumamt as fee_b
-            FROM (
-                SELECT psn_no, fixmedins_name, fixmedins_code, start_date, end_date, medfee_sumamt,
-                       lagInFrame(end_date) OVER w AS prev_end,
-                       lagInFrame(start_date) OVER w AS prev_start,
-                       lagInFrame(fixmedins_name) OVER w AS prev_hosp,
-                       lagInFrame(fixmedins_code) OVER w AS prev_hosp_code
-                FROM {table}
-                WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
-                  AND start_date IS NOT NULL AND end_date IS NOT NULL
-                WINDOW w AS (PARTITION BY psn_no ORDER BY start_date)
-            )
-            WHERE prev_end IS NOT NULL 
-              AND prev_hosp_code != fixmedins_code
-              AND start_date <= prev_end  -- 核心判定：当前入院在上次出院之前（时间重叠）
+            SELECT 
+                A.psn_no, 
+                A.fixmedins_name AS hospital_a, 
+                B.fixmedins_name AS hospital_b,
+                A.start_date AS start_a, 
+                A.end_date AS end_a,
+                B.start_date AS start_b, 
+                B.end_date AS end_b,
+                B.medfee_sumamt AS fee_b
+            FROM {table} A
+            JOIN {table} B ON A.psn_no = B.psn_no
+            WHERE A.fixmedins_code != B.fixmedins_code
+              AND A.med_type LIKE '%住院%' AND B.med_type LIKE '%住院%'
+              AND A.start_date IS NOT NULL AND A.end_date IS NOT NULL
+              AND B.start_date IS NOT NULL AND B.end_date IS NOT NULL
+              AND A.start_date <= B.end_date 
+              AND B.start_date <= A.end_date
+              AND A.setl_id < B.setl_id -- 去重对称结果
             ORDER BY fee_b DESC
             LIMIT {limit}
         """,
 
-        # [算子 6] 重复收费检测（同一天、同一患者、同一医院多次结算）
         "REPEAT_BILLING_DETECTOR": """
             SELECT
                 psn_no,
+                setl_id,
                 toDate(setl_time)       AS setl_date,
                 fixmedins_name          AS hospital,
-                count()                 AS bill_count,
-                sum(medfee_sumamt)      AS total_fee,
-                sum(fund_pay_sumamt)    AS total_fund_paid
-            FROM {table}
+                count()                 AS item_count,
+                sum(det_item_fee_sumamt) AS total_fee
+            FROM fqz_fymx_test1
             WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
-            GROUP BY psn_no, setl_date, fixmedins_code, fixmedins_name
-            HAVING bill_count > 1
-            ORDER BY bill_count DESC, total_fee DESC
+            GROUP BY psn_no, setl_id, setl_date, fixmedins_code, fixmedins_name
+            HAVING item_count > 50  -- 聚焦于单次就诊内的极端明细记录
+            ORDER BY item_count DESC, total_fee DESC
+            LIMIT {limit}
+        """,
+        
+        # [算子 6] 联系方式共用 (患者与职工)
+        "CONTACT_SHARING_DETECTOR": """
+            SELECT 
+                A.psn_no,
+                A.psn_name,
+                A.fixmedins_name,
+                A.tel,
+                count(DISTINCT A.setl_id) as visit_count,
+                sum(A.medfee_sumamt) as total_amt
+            FROM {table} A
+            WHERE A.tel IN (SELECT tel FROM {table} WHERE med_type LIKE '%职工%')
+              AND A.med_type NOT LIKE '%职工%'
+            GROUP BY A.psn_no, A.psn_name, A.fixmedins_name, A.tel
+            ORDER BY total_amt DESC
             LIMIT {limit}
         """,
 
-        # [算子 7] 共用联系方式欺诈网络检测
-        # 通过 tel (联系电话) 聚合，找出多个不同参保人共用同一手机号的异常情况
-        "CONTACT_SHARING_DETECTOR": """
-            SELECT
-                a.tel                  AS contact_phone,
-                count(DISTINCT a.psn_no) AS shared_patient_count,
-                groupArray(a.psn_name) AS shared_patients,
-                a.fixmedins_name       AS hospital,
-                count()                AS total_visits,
-                sum(a.medfee_sumamt)   AS total_fee,
-                sum(a.fund_pay_sumamt) AS total_fund_paid,
-                round(
-                    sum(a.fund_pay_sumamt) / nullIf(sum(a.medfee_sumamt), 0),
-                    4
-                ) AS reimb_ratio
-            FROM {table} AS a
-            WHERE toYear(toDateTime(a.setl_time)) = 2024
-              AND a.tel IS NOT NULL
-              AND a.tel != ''
-              AND length(a.tel) >= 7
-            GROUP BY a.tel, a.fixmedins_name
-            HAVING
-                shared_patient_count >= 2   -- 至少2个不同参保人共用
-                AND total_fund_paid > 5000  -- 报销金额偏高
-            ORDER BY shared_patient_count DESC, total_fund_paid DESC
-            LIMIT {limit}
-        """
     }
 
     @staticmethod
@@ -180,7 +160,8 @@ class AuditRuleEngine:
         """
         template = AuditRuleEngine.TEMPLATES.get(rule_id.upper())
         if not template:
-            logger.error(f">>> [RuleEngine] 未定义的规则算子: {rule_id}")
+            # [V66.2] 静默处理：由 Skill 层决定是否回退到算法库，不再强制报错
+            logger.debug(f">>> [RuleEngine] 算子 {rule_id} 不在规则库，尝试回退...")
             return ""
 
         # 1. 基础渲染（处理表名和限制）
@@ -220,12 +201,20 @@ class AuditRuleEngine:
                 # 检测是否已包含运算符
                 has_operator = any(cond_str.upper().startswith(op) for op in ['=', '>', '<', 'LIKE', 'IN', 'BETWEEN', '!='])
                 
+                # [V65.4] 智能日期/时间陷阱修复
+                date_fields = ['setl_time', 'start_date', 'end_date', 'fee_ocur_time', 'setl_date']
+                is_date_field = any(df in field.lower() for df in date_fields)
+                
                 if not has_operator:
                     # C. 算子与类型推断 (工业级)
                     numeric_fields = ['medfee_sumamt', 'fund_pay_sumamt', 'det_item_fee_sumamt', 'amount', 'fee']
                     is_numeric = any(nf in field.lower() for nf in numeric_fields) or field.lower().endswith('_amt') or 'count' in field.lower()
                     
-                    if is_numeric and re.match(r'^-?\d+(\.\d+)?$', cond_str):
+                    if is_date_field and re.match(r'^\d{4}$', cond_str):
+                        # 场景：字段是日期时间，但值只是 4 位年份（如 2024）
+                        # 自动转换为 toYear(toDateTime(field)) = 2024
+                        safe_predicate = f"toYear(toDateTime({field})) = {cond_str}"
+                    elif is_numeric and re.match(r'^-?\d+(\.\d+)?$', cond_str):
                         # 确实是数字字段且值合法
                         safe_predicate = f"{field} = {cond_str}"
                     else:

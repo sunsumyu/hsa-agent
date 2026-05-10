@@ -40,7 +40,7 @@
   },
   "deepseek-v3": {
     "provider": "dashscope",
-    "model_name": "deepseek-v3",
+    "model_name": "deepseek-v3.2",
     "priority": 0,
     "tools_support": true,
     "temperature": 0.3,

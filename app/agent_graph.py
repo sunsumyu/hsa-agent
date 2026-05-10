@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 import app.logging_config # [V41.6] 物理链路可跳转配置
 import asyncio
+import sys
 
 from app.usage_tracker import usage_tracker
 from app.model_manager import model_manager
@@ -100,6 +101,7 @@ class AuditState(TypedDict):
     schema_hint: Optional[str]   # NEED_SCHEMA 补充检索后的字段字典
     execution_trace: List[str]   # [V57.0] 审计执行轨迹：记录每步 SQL/工具 的物理行为日志
     methodology: str             # [V59.3] 审计口径/方法论说明，记录 SQL 背后的业务逻辑定义
+    temp_table: Optional[str]    # [V65.0] 联邦侧载产生的临时表名
 
 
 
@@ -135,6 +137,9 @@ def _append_trace(state: dict, entry: str) -> List[str]:
 
 
 async def planner_node(state: AuditState, config: RunnableConfig):
+    """
+    [V66.0] 规划节点：实现语义路由逻辑。
+    """
     # ── 安全提取用户输入 ─────────────────────────────────────────
     user_input = ""
     if state.get("messages") and len(state["messages"]) > 0:
@@ -183,8 +188,7 @@ async def planner_node(state: AuditState, config: RunnableConfig):
             },
             "retry_count": 0,
             "execution_trace": trace,
-            # [ISS-009 Fix] 保留原始 messages，不新增以避免 tuple/HumanMessage 混合
-            "messages": list(state.get("messages", []))
+            "messages": [] # [V65.7] 修复重复合并 Bug：不再返回旧消息，Reducer 会自动保留原状态
         }
 
     # ── [V47.3] LLM 推理路径（仅未知/复杂类任务）───────────────────
@@ -192,15 +196,23 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     logger.info(f"💡 [ROUTER] 本地语义路由决策结果: {complexity}")
 
     role = "planner_heavy" if complexity == "HIGH" else "planner_light"
-    llm, actual_model = model_manager.get_llm_by_role(role, retry_count=state.get("retry_count", 0), config=config)
+    llm, actual_model = await model_manager.get_llm_by_role(role, retry_count=state.get("retry_count", 0), config=config)
 
     mem_context = cognitive_memory_manager.recall_context(state.get("session_id", "default"), user_input)
     
     # 获取图谱本体
     ontology = neo4j_manager.get_ontology()
 
+    # ── [V67.5] 注入任务相关的精准 Schema 片段（M4 注入器）──────────
+    schema_hint = _schema_injector.inject(user_question=user_input, top_k=6)
+    
     prompt_template = get_langfuse_prompt("planner-audit-v1", fallback=PLANNER_PROMPT)
-    prompt = prompt_template.format_messages(messages=state["messages"], experiences=mem_context, schema_info=f"{ontology}\n\n请使用 lookup_medical_schema 技能查询字段")
+    prompt = prompt_template.format_messages(
+        messages=state["messages"], 
+        experiences=mem_context, 
+        ontology=ontology,
+        schema_info=schema_hint
+    )
     obs_config = build_obs_config(config, role, state)
     logger.debug(f">>> [执行期诊断] 节点角色: {role} | LLM对象: {llm} | 实际模型ID: {actual_model}")
     response = await llm.ainvoke(prompt, config=obs_config)
@@ -235,6 +247,7 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     """
     [工业级 Skills 节点] 完全基于 Tool Calling 调用独立封装的 Skills。
     """
+    from app.skills import MedicalSchemaSkill, RuleExecutionSkill, SQLSafeExecutionSkill, FederatedAuditSkill
     retry = state.get("retry_count", 0)
     if retry >= MAX_RETRIES:
         logger.error(f"🛑 [SQLEXEC] 达到重试上限，强制熔断并汇报失败。")
@@ -254,6 +267,8 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
             skill = RuleExecutionSkill()
             extra_filters = (state.get("metadata") or {}).get("extra_filters")
             res = await skill._arun(fast_route_id, extra_filters=extra_filters)
+            if "error" in res:
+                raise ValueError(f"FastRoute 算子内部执行失败: {res['error']}")
             trace = _append_trace(state, res.get("trace_hint", ""))
             
             import json as _j
@@ -267,7 +282,14 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                     return super().default(obj)
             
             raw_evidence = res.get("raw_evidence", [])
-            result_str = _j.dumps(raw_evidence, ensure_ascii=False, cls=_AuditEncoder) if isinstance(raw_evidence, list) else str(raw_evidence)
+            # [V65.0 POE] 自动采样降噪：防止海量数据撑爆上下文
+            if isinstance(raw_evidence, list) and len(raw_evidence) > 50:
+                logger.info(f"⚡ [PRUNING] 原始数据量过大 ({len(raw_evidence)}条)，执行物理采样备份，仅保留 50 条证据样本。")
+                sample_evidence = raw_evidence[:50]
+            else:
+                sample_evidence = raw_evidence
+
+            result_str = _j.dumps(sample_evidence, ensure_ascii=False, cls=_AuditEncoder) if isinstance(sample_evidence, list) else str(sample_evidence)
             
             return {
                 "raw_data": result_str,
@@ -282,9 +304,9 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
             state.get("metadata", {}).pop("fast_route_id", None)
 
     logger.info(f">>> [SKILLS] LLM 智能调度 Skills... (尝试 {retry + 1}/3)")
-    llm, actual_model = model_manager.get_llm_by_role("coder", retry_count=retry, config=config)
+    llm, actual_model = await model_manager.get_llm_by_role("coder", retry_count=retry, config=config)
     
-    tools = [MedicalSchemaSkill(), RuleExecutionSkill(), SQLSafeExecutionSkill(), query_fraud_ring]
+    tools = [MedicalSchemaSkill(), RuleExecutionSkill(), SQLSafeExecutionSkill(), FederatedAuditSkill(), query_fraud_ring]
     llm_with_tools = llm.bind_tools(tools)
     
     tasks_list = state.get("tasks", [])
@@ -293,10 +315,14 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     # 获取图谱本体
     ontology = neo4j_manager.get_ontology()
     
+    # ── [V67.5] 精准 Schema 注入：根据子任务召回物理字段 ─────────────
+    task_str = " ".join(tasks_list)
+    schema_hint = _schema_injector.inject(user_question=task_str, top_k=10)
+    
     prompt = CODER_PROMPT.format_messages(
         messages=state["messages"], 
         ontology=ontology,
-        schema_info=f"{ontology}\n\n请使用 lookup_medical_schema 技能按需查询字段",
+        schema_info=schema_hint,
         methodology=state.get("methodology", ""),
         tasks="\n".join(tasks_list), 
         experiences=mem_context
@@ -340,6 +366,9 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                         sql_logics.append(res["sql_logic"])
                     if "methodology" in res:
                         methodologies.append(res["methodology"])
+                    if "temp_table" in res:
+                        # [V65.0] 记录临时表名，供后续 Coder 引用
+                        state["temp_table"] = res["temp_table"]
                         
                     if res.get("status") == "ERROR" or "error" in res:
                         has_error = True
@@ -367,7 +396,8 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                 "methodology": combined_meth,
                 "messages": [response] + tool_msgs,
                 "retry_count": retry + 1,
-                "execution_trace": trace
+                "execution_trace": trace,
+                "temp_table": state.get("temp_table")
             }
 
         combined_raw = "\n---\n".join(raw_data_list)
@@ -380,7 +410,8 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
             "retry_count": retry + 1,
             "sql_validated": True,
             "error_log": None,
-            "execution_trace": trace
+            "execution_trace": trace,
+            "temp_table": state.get("temp_table")
         }
     
     # 无工具调用，尝试解析内容
@@ -390,9 +421,45 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
         "retry_count": retry + 1
     }
 
+async def critic_node(state: AuditState, config: RunnableConfig):
+    """[V65.0 POE] 自愈节点：分析取证失败原因并给出修复指令"""
+    retry = state.get("retry_count", 0)
+    logger.warning(f"🕵️ [CRITIC] 正在诊断执行偏差... (尝试 {retry}/3)")
+    
+    llm, _ = await model_manager.get_llm_by_role("reporter", config=config)
+    
+    from app.prompts import CRITIC_PROMPT
+    prompt = CRITIC_PROMPT.format_messages(
+        methodology=state.get("methodology", "未定义协议"),
+        raw_data=state.get("raw_data", "无数据"),
+        error_log=state.get("error_log", "无报错日志"),
+        messages=state["messages"]
+    )
+    
+    response = await llm.ainvoke(prompt)
+    feedback = str(response.content).strip()
+    
+    logger.info(f"💡 [CRITIC] 诊断建议: {feedback}")
+    
+    return {
+        "error_log": f"[CRITIC 反馈] {feedback}",
+        "messages": [response]
+    }
+
 async def reporter_node(state: AuditState, config: RunnableConfig):
-    """[V59.0] 确定性五章节报告渲染器：LLM 只写结论段，其余全部确定性生成。"""
-    logger.info(">>> [REPORTER] 正在渲染报告（确定性五章节模式）...")
+    """[V65.0 POE] 降噪版报告渲染器：执行状态修剪，防止上下文膨胀。"""
+    logger.info(">>> [REPORTER] 正在执行状态降噪并准备渲染报告...")
+    
+    # ── [V65.0 POE] 状态修剪 (State Pruning) ──────────────────────────
+    # 剔除所有的中间错误日志和非必要的中间尝试轨迹，只保留最终确定的审计信息
+    pruned_messages = []
+    for msg in state.get("messages", []):
+        # 仅保留用户输入、最终执行成功的工具调用、以及 Critic 的核心诊断建议
+        # 过滤掉过于冗长的错误堆栈消息
+        if "error" in str(msg).lower() and "fail" in str(msg).lower() and len(str(msg)) > 500:
+            continue
+        pruned_messages.append(msg)
+    
     from app.booster import booster
     import json as _json
 
@@ -485,7 +552,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     # ── Step 4: 调用 LLM 只生成第四章"核查结论"（约 150~300 字）───────
     llm_conclusion = ""
     try:
-        llm, _ = model_manager.get_llm_by_role("reporter", config=config)
+        llm, _ = await model_manager.get_llm_by_role("reporter", config=config)
 
         # [V59.1] 极简 Conclusion Prompt：强调核查广度与方法的透明度
         CONCLUSION_PROMPT = (
@@ -620,12 +687,13 @@ def route_post_audit(state: AuditState) -> str:
 
 def build_graph():
     """
-    [工业级 Skills 拓扑] 严格的线性工作流
-    PLANNER → SKILLS_EXEC(原SQLEXEC) ↺(限次重试) → CONSOLIDATOR → REPORTER → END
+    [V65.0 POE 拓扑] 增强型线性工作流 + 自愈环路
+    PLANNER → SQLEXEC → (Contract Check) → CRITIC ↺ → CONSOLIDATOR → REPORTER → END
     """
     workflow = StateGraph(AuditState)
     workflow.add_node("PLANNER", planner_node)
-    workflow.add_node("SQLEXEC", sqlexec_node)  # 我们保留了名字以兼容旧代码
+    workflow.add_node("SQLEXEC", sqlexec_node)
+    workflow.add_node("CRITIC", critic_node)
     workflow.add_node("REPORTER", reporter_node)
     workflow.add_node("CONSOLIDATOR", consolidator_node)
 
@@ -633,14 +701,46 @@ def build_graph():
     workflow.add_edge("PLANNER", "SQLEXEC")
     
     def route_post_exec(state: AuditState) -> str:
-        if state.get("error_log") and state.get("retry_count", 0) < MAX_RETRIES:
-            return "SQLEXEC"  # 发生错误则原节点重试
-        return "CONSOLIDATOR" # 成功直接进入整合
+        """
+        [V65.1 POE] 增强型智能路由：支持内部推理环路 + 外部自愈环路
+        """
+        messages = state.get("messages", [])
+        last_msg = messages[-1] if messages else None
+        
+        # 1. 内部推理环路：如果上一条消息是工具消息，说明 Coder 刚看完执行结果，需要回执进行下一步思考
+        if isinstance(last_msg, ToolMessage) or (not isinstance(last_msg, tuple) and getattr(last_msg, "tool_calls", None)):
+            # 只要还在调用工具，就继续让 SQLEXEC 运行（除非达到硬上限）
+            if state.get("retry_count", 0) < MAX_RETRIES:
+                return "SQLEXEC"
+
+        # 2. 外部自愈环路：Coder 已经给出了文字结论（无工具调用），此时检查数据契约
+        raw_data = state.get("raw_data", "")
+        has_error = bool(state.get("error_log"))
+        
+        # 契约检查：如果审计方法论涉及“金额/费用”，但结果中没数字，视为契约失效
+        contract_violation = False
+        methodology = str(state.get("methodology", ""))
+        if "### METHODOLOGY" in methodology and ("金额" in methodology or "费用" in methodology or "数值" in methodology):
+            # 检查原始数据中是否真的有金额列或数字证据（过滤掉简单的描述性数字）
+            numbers = re.findall(r'\d+\.\d+|\d{4,}', raw_data) # 寻找浮点数或 4 位以上整数（过滤掉 1, 2 等小编号）
+            if not numbers:
+                contract_violation = True
+                logger.warning("🚨 [CONTRACT] 检测到数据契约失效：审计口径要求数值，但取证载荷为空或无显著指标")
+
+        if (has_error or contract_violation) and state.get("retry_count", 0) < MAX_RETRIES:
+            return "CRITIC"  # 进入自愈节点，由审查官给出具体的 SQL 修正建议
+        
+        return "CONSOLIDATOR" # 成功通过或达到最大尝试次数
         
     workflow.add_conditional_edges(
         "SQLEXEC", route_post_exec,
-        {"SQLEXEC": "SQLEXEC", "CONSOLIDATOR": "CONSOLIDATOR"}
+        {
+            "SQLEXEC": "SQLEXEC", 
+            "CRITIC": "CRITIC", 
+            "CONSOLIDATOR": "CONSOLIDATOR"
+        }
     )
+    workflow.add_edge("CRITIC", "SQLEXEC") # 自愈后返回重试
     workflow.add_edge("CONSOLIDATOR", "REPORTER")
     workflow.add_edge("REPORTER", END)
     return workflow.compile()

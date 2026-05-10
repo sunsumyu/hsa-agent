@@ -84,11 +84,73 @@ class SQLGuardian:
                 logger.error(f"[SECURITY] 在 AST 深层探测到非法节点: {type(node)} - {node}")
                 raise SecurityViolationError(f"物理拦截：在 SQL 内部发现非法操作节点 {type(node).__name__}。")
 
-        # 4. 代价审计：通过 AST 树执行复杂性分析
+        # 4. 物理陷阱自动修复 (ClickHouse Anti-Trap)
+        expression = SQLGuardian._refine_sql_traps(expression)
+
+        # 5. [Phase 3-B] 严格字段白名单审计：防止臆造字段进入执行层
+        SQLGuardian._validate_column_existence(expression)
+
+        # 6. 代价审计：通过 AST 树执行复杂性分析
         SQLGuardian._audit_expression_complexity(expression)
         
-        # 5. 资源锁定：由驱动连接层负责，不再在 SQL 文本中注入
-        return clean_sql
+        # 7. 资源锁定：由驱动连接层负责，不再在 SQL 文本中注入
+        return expression.sql(dialect="clickhouse")
+
+    @staticmethod
+    def _validate_column_existence(expression):
+        """
+        遍历 AST，确保所有字段名在白名单或知识图谱中存在。
+        """
+        from app.neo4j_manager import field_kg
+        from app.schema_injector import BUILTIN_FIELD_SEEDS
+        
+        # 构建一个临时的全局字段白名单（后续可升级为从 ClickHouse 实时同步）
+        whitelist = {f["canonical"].lower() for f in field_kg.get_canonical_fields()}
+        whitelist.update({f["field"].lower() for f in BUILTIN_FIELD_SEEDS})
+        
+        # 常见聚合函数和关键字放行
+        common_ignore = {"count", "sum", "avg", "min", "max", "arraystringconcat", "groupuniqarray"}
+
+        for node in expression.walk():
+            if isinstance(node, exp.Column):
+                col_name = node.name.lower()
+                # 如果字段名不包含在白名单中，且不是聚合函数/虚拟列
+                if col_name not in whitelist and col_name not in common_ignore:
+                    # 尝试用 FieldKG 再次解析，看是否是漏网之鱼
+                    resolved = field_kg.resolve(col_name)
+                    if not resolved:
+                        logger.error(f"[SECURITY] 发现物理不存在的幻觉字段: {col_name}")
+                        raise SecurityViolationError(
+                            f"物理拦截：字段 `{col_name}` 不存在于生产数据库中。严禁猜测字段名，请调用 lookup_medical_schema 工具确认。"
+                        )
+
+    @staticmethod
+    def _refine_sql_traps(expression):
+        """
+        [V65.5] ClickHouse 语法陷阱自动修复器。
+        遍历 AST，修正 DateTime 与年份字符串对撞等高频错误。
+        """
+        # 定义日期时间敏感字段
+        date_fields = {'setl_time', 'start_date', 'end_date', 'fee_ocur_time', 'setl_date'}
+        
+        # 遍历所有等值判断节点
+        for eq in expression.find_all(exp.EQ):
+            # 获取左操作数和右操作数
+            left = eq.left
+            right = eq.right
+            
+            # 检测：左边是日期字段，右边是 4 位年份字符串
+            if isinstance(left, exp.Column) and left.name.lower() in date_fields:
+                if isinstance(right, exp.Literal) and right.is_string and re.match(r'^\d{4}$', right.this):
+                    logger.info(f"🛡️ [SQLGuardian] 自动纠正 ClickHouse 时间陷阱: {left.name} = '{right.this}'")
+                    # 重写节点：toYear(toDateTime(left)) = int(right.this)
+                    new_eq = sqlglot.parse_one(
+                        f"toYear(toDateTime({left.sql()})) = {right.this}", 
+                        read="clickhouse"
+                    )
+                    eq.replace(new_eq)
+                    
+        return expression
 
     @staticmethod
     def _audit_expression_complexity(expression):

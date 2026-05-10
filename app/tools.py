@@ -22,16 +22,29 @@ from app.security import SQLGuardian
 # 辅助函数
 # ──────────────────────────────────────────────────────────
 
-def _clean_encrypted_fields(records: List[Dict]) -> List[Dict]:
-    """清洗返回数据中的加密/脱敏字段，避免泄露"""
+def _sanitize_results(records: List[Dict]) -> List[Dict]:
+    """[V66.0] 企业级数据清洗中间件：脱敏、乱码清洗与极端离群值拦截"""
+    cleaned = []
     for row in records:
         for key, val in row.items():
+            # 1. 极端离群值拦截 (Cartesian Explosion Guard)
+            if 'count' in key.lower() and isinstance(val, (int, float)) and val > 1000:
+                logger.warning(f"🚨 [Sanitizer] 探测到异常聚合爆炸 ({key}={val})，触发降级熔断。")
+                raise ValueError(f"数据质量告警：检测到异常明细行数 ({val})，疑似发生笛卡尔积爆炸。请修改 SQL 逻辑，必须通过 setl_id (就诊流水号) 进行精确分组和排重！")
+            
             if not isinstance(val, str): continue
-            # 仅当包含非打印二进制字符时才置空（防止乱码泄露）
+            
+            # 2. 乱码清洗 (Garbled Text Filter)
+            if '\ufffd' in val or '' in val:
+                row[key] = "[数据源乱码/GBK编码冲突]"
+            
+            # 3. 基础脱敏
             has_binary = any(ord(c) < 32 and c not in '\n\r\t' for c in val)
             if has_binary:
                 row[key] = "[REDACTED/ENCRYPTED]"
-    return records
+                
+        cleaned.append(row)
+    return cleaned
 
 async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return_raw: bool = False) -> Any:
     """
@@ -51,7 +64,7 @@ async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return
             if return_raw:
                 cols = result.column_names
                 records = [{cols[j]: row[j] for j in range(len(cols))} for row in result.result_rows]
-                return _clean_encrypted_fields(records)
+                return _sanitize_results(records)
             return f"查询成功，返回 {len(result.result_rows)} 条记录。"
             
         return "MySQL 暂不支持在此路径执行。"

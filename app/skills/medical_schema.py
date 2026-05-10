@@ -19,7 +19,14 @@ class MedicalSchemaSkill(BaseTool):
         # 2. Augment with semantic search from SchemaInjector
         injector_hint = schema_injector.inject(user_question=keywords, top_k=5, include_warning=False)
         
-        combined_hint = f"{kg_hint}\n\n**[语义相关字段召回]**\n{injector_hint}"
+        correction_hint = (
+            "\n**[🚨 高频错误字段纠正]**\n"
+            "- 如果你想用 `det_item_name` 或 `item_name`，**必须**改用 `hilist_name`。\n"
+            "- 如果你想用 `medical_category` 或 `type_name`，**必须**改用 `med_type`。\n"
+            "- 如果你想用 `hosp_code`，**必须**改用 `fixmedins_code`。"
+        )
+        
+        combined_hint = f"{kg_hint}\n\n**[语义相关字段召回]**\n{injector_hint}\n{correction_hint}"
         
         if not injector_hint or "未检索到" in injector_hint:
             if kg_hint:

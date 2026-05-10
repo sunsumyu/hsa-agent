@@ -12,8 +12,13 @@ from app.endpoint_pool_manager import endpoint_pool_manager
 from app.schemas import ModelConfig, EndpointConfig, RoleConfigV2
 from app.observability import get_callbacks
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer, util
-import torch
+# load_dotenv() - Moved below
+import requests
+from app.usage_tracker import usage_tracker
+from app.endpoint_pool_manager import endpoint_pool_manager
+from app.schemas import ModelConfig, EndpointConfig, RoleConfigV2
+from app.observability import get_callbacks
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -27,7 +32,20 @@ class EnrichedChatOpenAI(ChatOpenAI):
             return result
         except Exception as e:
             m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
-            endpoint_pool_manager.record_failure(m_id, str(e))
+            err_msg = str(e)
+            
+            # [V66.1] 瞬时 429 物理自愈：原地退让并重试，最多 2 次
+            if "429" in err_msg or "limit" in err_msg.lower():
+                import asyncio
+                retry_count = getattr(self, '_rate_limit_retry', 0)
+                if retry_count < 2:
+                    self._rate_limit_retry = retry_count + 1
+                    wait_time = (retry_count + 1) * 2 # 2s, 4s
+                    logger.warning(f"⏳ [RateLimit-Retry] 节点 {m_id} 触发限速，等待 {wait_time}s 后进行第 {retry_count+1} 次重试...")
+                    await asyncio.sleep(wait_time)
+                    return await self._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+            
+            endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
@@ -37,7 +55,19 @@ class EnrichedChatOpenAI(ChatOpenAI):
             return result
         except Exception as e:
             m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
-            endpoint_pool_manager.record_failure(m_id, str(e))
+            err_msg = str(e)
+            
+            if "429" in err_msg or "limit" in err_msg.lower():
+                import time
+                retry_count = getattr(self, '_rate_limit_retry_sync', 0)
+                if retry_count < 2:
+                    self._rate_limit_retry_sync = retry_count + 1
+                    wait_time = (retry_count + 1) * 2
+                    logger.warning(f"⏳ [RateLimit-Retry-Sync] 节点 {m_id} 触发限速，等待 {wait_time}s 后重试...")
+                    time.sleep(wait_time)
+                    return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+            endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
     def _enrich_result(self, result, messages):
@@ -69,7 +99,19 @@ class EnrichedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             return result
         except Exception as e:
             m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
-            endpoint_pool_manager.record_failure(m_id, str(e))
+            err_msg = str(e)
+            
+            if "429" in err_msg or "limit" in err_msg.lower():
+                import asyncio
+                retry_count = getattr(self, '_rate_limit_retry', 0)
+                if retry_count < 2:
+                    self._rate_limit_retry = retry_count + 1
+                    wait_time = (retry_count + 1) * 2
+                    logger.warning(f"⏳ [RateLimit-Retry-Google] 节点 {m_id} 触发限速，等待 {wait_time}s 后重试...")
+                    await asyncio.sleep(wait_time)
+                    return await self._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+            endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
@@ -78,7 +120,19 @@ class EnrichedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             return result
         except Exception as e:
             m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
-            endpoint_pool_manager.record_failure(m_id, str(e))
+            err_msg = str(e)
+            
+            if "429" in err_msg or "limit" in err_msg.lower():
+                import time
+                retry_count = getattr(self, '_rate_limit_retry_sync', 0)
+                if retry_count < 2:
+                    self._rate_limit_retry_sync = retry_count + 1
+                    wait_time = (retry_count + 1) * 2
+                    logger.warning(f"⏳ [RateLimit-Retry-Sync-Google] 节点 {m_id} 触发限速，等待 {wait_time}s 后重试...")
+                    time.sleep(wait_time)
+                    return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+            endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
 class Reranker:
@@ -132,21 +186,27 @@ class ModelManager:
     def __init__(self, config_path="app/llm_providers.json"):
         self.config_path = config_path
         self.providers: Dict[str, ModelConfig] = self._load_config()
-        try:
-            # 优先加载本地多语言小模型，处理中文审计更精准
-            self.local_embedder = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-            logger.info("✅ [本地模型] 已加载嵌入式语义路由引擎 (MiniLM-L12)")
-        except Exception as e:
-            logger.warning(f"本地语义模型加载失败: {e}，将回退至通用模式")
-            self.local_embedder = None
+        self._local_embedder = None
         
+    @property
+    def local_embedder(self):
+        if self._local_embedder is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._local_embedder = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+                logger.info("✅ [本地模型] 已延迟加载嵌入式语义路由引擎 (MiniLM-L12)")
+            except Exception as e:
+                logger.warning(f"本地语义模型加载失败: {e}，将回退至通用模式")
+        return self._local_embedder
+
     def classify_complexity_locally(self, text: str) -> str:
+        # 暂时保持简单逻辑，如需扩展则调用 self.local_embedder
         return "MEDIUM"
         
     def _load_config(self) -> Dict[str, ModelConfig]:
         try:
             if not os.path.exists(self.config_path): return {}
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, 'r', encoding='utf-8-sig') as f:
                 raw_data = json.load(f)
                 return {k: ModelConfig(**v) for k, v in raw_data.items()}
         except Exception as e:
@@ -241,16 +301,44 @@ class ModelManager:
             return main_llm.with_fallbacks(fallback_objects), selected_ep.id
         return main_llm, selected_ep.id
 
-    def get_llm_by_role(self, role: str, retry_count: int = 0, config: Optional[Dict] = None):
+    async def get_llm_by_role(self, role: str, retry_count: int = 0, config: Optional[Dict] = None):
+        """[V66.0 Final] 异步高可用角色路由：集成自动探测与长效自愈"""
         model_override = None
         if config and isinstance(config, dict):
             model_override = config.get("configurable", {}).get("model_override")
+        
+        # 1. 初始寻址
         if model_override:
-            return self.get_adaptive_llm(model_id=model_override)
+            llm, m_id = self.get_adaptive_llm(model_id=model_override)
+        else:
+            role_cfg = endpoint_pool_manager.roles.get(role)
+            pool_id = role_cfg.pool if role_cfg else "tier-1-chat"
+            llm, m_id = self._get_llm_from_pool(pool_id)
 
-        role_cfg = endpoint_pool_manager.roles.get(role)
-        if not role_cfg: return self.get_adaptive_llm()
-        return self._get_llm_from_pool(role_cfg.pool)
+        # 2. 物理嗅探 (Pre-flight Probing)
+        if retry_count > 5:
+            raise ValueError(f"🚨 [算力绝望] 角色 {role} 对应的所有备选节点均已进入封禁期。")
+
+        from langchain_core.messages import HumanMessage
+        try:
+            pool = endpoint_pool_manager.pools.get(endpoint_pool_manager.roles[role].pool if role in endpoint_pool_manager.roles else "tier-1-chat")
+            ep = next((e for e in pool.endpoints if e.id == m_id), None)
+            
+            if ep:
+                logger.info(f"🔍 [Proactive-Probe] 正在验证角色 {role} 的首选节点: {m_id}...")
+                probe_llm = self._create_llm(m_id, ep)
+                await probe_llm.ainvoke([HumanMessage(content="1")], config={"timeout": 3.0})
+                logger.info(f"✨ [Proactive-Probe] 节点 {m_id} 存活确认")
+        except Exception as e:
+            err_msg = str(e)
+            if any(sig in err_msg.lower() for sig in ["429", "quota", "limit", "rate", "体验模式"]):
+                logger.warning(f"⛔ [Proactive-Probe] 检测到节点 {m_id} 配额枯竭，立即执行 2 小时长效熔断。")
+                endpoint_pool_manager.record_failure(m_id, err_msg)
+                return await self.get_llm_by_role(role, retry_count + 1, config)
+            else:
+                logger.debug(f"ℹ️ [Proactive-Probe] 节点 {m_id} 探测异常 (非配额问题，暂不熔断): {err_msg}")
+        
+        return llm, m_id
 
     def get_reranker(self, reranker_id: str = "gte-rerank"):
         cfg = self.providers.get(reranker_id)
@@ -263,20 +351,7 @@ class ModelManager:
         return Reranker(reranker_id, cfg) if cfg else None
 
     async def run_health_check(self):
-        import asyncio
-        from langchain_core.messages import HumanMessage
-        model_ids = list(self.providers.keys())
-        async def probe_single(m_id):
-            cfg = self.providers[m_id]
-            try:
-                llm = self._create_llm(m_id, cfg, bypass_limit=True)
-                if not llm: return m_id, False
-                await llm.ainvoke([HumanMessage(content="1")])
-                usage_tracker.record_success(m_id)
-                return m_id, True
-            except:
-                return m_id, False
-        results = await asyncio.gather(*[probe_single(m) for m in model_ids])
-        return {"healthy_count": len([r for r in results if r[1]]), "total": len(model_ids)}
+        """[V44.0] 基础健康检查占位"""
+        pass
 
 model_manager = ModelManager()

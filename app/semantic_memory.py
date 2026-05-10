@@ -1,7 +1,6 @@
 import os
 import uuid
 import json
-import torch
 import numpy as np
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Sequence, Union
@@ -11,7 +10,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from loguru import logger
-from sentence_transformers import SentenceTransformer, util
+# from sentence_transformers import SentenceTransformer, util - Lazy loaded below
 
 # ============================================================
 # 1. 核心架构：本地小模型嵌入引擎 (参考 hello-agents)
@@ -27,8 +26,9 @@ class LocalEmbeddingEngine(Embeddings):
     def _load_model(self):
         try:
             # 优先加载多语言小模型，处理中文医保政策更精准
+            from sentence_transformers import SentenceTransformer
             self.model = SentenceTransformer(self.model_name)
-            logger.info(f"✅ 本地记忆引擎加载成功: {self.model_name}")
+            logger.info(f"✅ [延迟加载] 本地记忆引擎加载成功: {self.model_name}")
         except Exception as e:
             logger.warning(f"⚠️ 本地模型加载失败，将使用 Mock 模式或云端备份: {e}")
             self.model = None
@@ -170,11 +170,16 @@ class SQLCacheManager:
         self.cache = self._load()
         # [V48.5] 物理优化：构建精确匹配索引 (O(1))
         self.lookup = {item["question"].strip(): item["sql"] for item in self.cache}
-        # 复用认知记忆中心的引擎，节省内存
-        self.engine = cognitive_memory_manager._local_engine
-        if not self.engine:
-            cognitive_memory_manager._init_components()
-            self.engine = cognitive_memory_manager._local_engine
+        # [V48.5] 引擎延迟加载：不在初始化时启动物理引擎，仅在 search/save 时按需激活
+        self._engine = None
+
+    @property
+    def engine(self):
+        if self._engine is None:
+            if not cognitive_memory_manager._local_engine:
+                cognitive_memory_manager._init_components()
+            self._engine = cognitive_memory_manager._local_engine
+        return self._engine
 
     def _load(self):
         if os.path.exists(self.cache_file):
@@ -206,6 +211,8 @@ class SQLCacheManager:
                 
         # 2. 语义相似度匹配 (针对相似表达进行模糊拦截)
         if not self.engine: return None
+        import torch
+        from sentence_transformers import util
         emb1 = self.engine.embed_query(question)
         emb1_tensor = torch.tensor(emb1)
         

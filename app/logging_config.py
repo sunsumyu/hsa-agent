@@ -10,7 +10,7 @@ def init_logging():
     logger.add(
         sys.stderr, 
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{file}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        enqueue=True
+        enqueue=False
     )
 
 # 默认在模块加载时初始化一次

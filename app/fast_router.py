@@ -126,18 +126,6 @@ DEFAULT_RULE_CONFIG: List[Dict] = [
         "description": "同日同迺同容重复收费检测",
     },
     {
-        "target_id": "CONTACT_SHARING_DETECTOR",
-        "route_type": RouteType.KNOWN_RULE,
-        "exact_keywords": ["共用联系方式", "联系方式共用", "共用手机号", "尾号异常"],
-        "fuzzy_groups": [
-            ["联系方式", "异常", "报销"],
-            ["手机号", "共用", "患者"],
-            ["联系方式", "负责人", "报销"],
-            ["联系", "尾号", "异常偏高"],
-        ],
-        "description": "共用联系方式 + 报销金额异常偏高欺诈检测",
-    },
-    {
         "target_id": "VIX_ANOMALY_SCAN",
         "route_type": RouteType.KNOWN_ALGO,
         "exact_keywords": ["变异指数", "VIX", "机构变异"],
@@ -159,14 +147,15 @@ DEFAULT_RULE_CONFIG: List[Dict] = [
         "description": "统计学离群点检测",
     },
     {
-        "target_id": "CLUSTER_ENCOUNTER_DETECTOR",
-        "route_type": RouteType.KNOWN_ALGO,
-        "exact_keywords": ["聚集就医", "欺诈网络"],
+        "target_id": "CONTACT_SHARING",
+        "route_type": RouteType.KNOWN_RULE,
+        "exact_keywords": ["联系方式共用", "共用电话", "电话相同", "共用手机号"],
         "fuzzy_groups": [
-            ["聚集", "患者"],
-            ["成群", "就医"],
+            ["患者", "职工", "共用"],
+            ["手机号", "相同"],
+            ["联系电话", "共用"],
         ],
-        "description": "聚集性就医欺诈网络检测",
+        "description": "患者与职工共用联系方式检测",
     },
 ]
 

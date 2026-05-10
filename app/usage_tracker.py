@@ -42,7 +42,7 @@ class UsageTracker:
         """[V50.0] 从算力池配置中提取所有 Endpoint 的模型定义"""
         try:
             if os.path.exists(self.config_path):
-                with open(self.config_path, 'r', encoding='utf-8') as f:
+                with open(self.config_path, 'r', encoding='utf-8-sig') as f:
                     data = json.load(f)
                     all_endpoints = {}
                     for p_id, p_cfg in data.get("pools", {}).items():
@@ -58,7 +58,7 @@ class UsageTracker:
         """[V35.0] 加载角色模型映射与预算配置"""
         try:
             if os.path.exists(self.role_path):
-                with open(self.role_path, 'r', encoding='utf-8') as f:
+                with open(self.role_path, 'r', encoding='utf-8-sig') as f:
                     raw_data = json.load(f)
                     return {k: RoleConfigV2(**v) for k, v in raw_data.items()}
         except Exception as e:
@@ -70,7 +70,7 @@ class UsageTracker:
         today_str = datetime.now().strftime("%Y-%m-%d")
         if os.path.exists(self.stats_path):
             try:
-                with open(self.stats_path, 'r', encoding='utf-8') as f:
+                with open(self.stats_path, 'r', encoding='utf-8-sig') as f:
                     data = json.load(f)
                     stats = UsageStats(**data)
                     

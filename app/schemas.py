@@ -20,6 +20,8 @@ class RoleConfig(BaseModel):
 class ModelConfig(BaseModel):
     provider: str
     model_name: str
+    family: Optional[str] = None
+    platform: Optional[str] = None
     priority: int = 0
     tools_support: bool = True
     temperature: float = 0.3
@@ -41,6 +43,8 @@ class EndpointConfig(BaseModel):
     id: str
     provider: str
     model_name: str
+    family: Optional[str] = None
+    platform: Optional[str] = None
     api_key_env: str
     base_url_env: Optional[str] = None
     weight: int = 50

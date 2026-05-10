@@ -20,14 +20,14 @@ from typing import List, Dict, Any, Optional
 FIELD_ALIAS_REGISTRY: List[Dict] = [
     {
         "canonical": "fixmedins_code",
-        "aliases": ["hosp_code", "hospital_code", "med_ins_code", "org_code", "fixmedins_code"],
+        "aliases": ["医疗机构编码", "机构代码"],
         "table": "fqz_fymx_test1",
-        "desc": "医疗机构唯一编码（物理字段名，hosp_code 不存在）",
+        "desc": "医疗机构唯一编码（必须使用此字段，严禁使用 hosp_code）",
         "forbidden_aliases": ["hosp_code"]
     },
     {
         "canonical": "fixmedins_name",
-        "aliases": ["hosp_name", "hospital_name", "med_ins_name", "fixmedins_name"],
+        "aliases": ["医疗机构名称"],
         "table": "fqz_fymx_test1",
         "desc": "医疗机构名称",
         "forbidden_aliases": ["hosp_name"]
@@ -41,7 +41,7 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     },
     {
         "canonical": "gend",
-        "aliases": ["gender", "sex", "gend"],
+        "aliases": ["性别代码"],
         "table": "fqz_fymx_test1",
         "desc": "性别代码：1=男，2=女",
         "forbidden_aliases": ["gender", "sex"]
@@ -69,10 +69,10 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     },
     {
         "canonical": "medfee_sumamt",
-        "aliases": ["total_fee", "total_amount", "fee_sum"],
+        "aliases": ["医疗总费用", "结算金额"],
         "table": "fqz_gz_jzsj_all_ql",
-        "desc": "医疗总费用",
-        "forbidden_aliases": ["total_fee", "total_amount"]
+        "desc": "医疗总费用（必须使用此字段，严禁使用 total_fee 或 amount）",
+        "forbidden_aliases": ["total_fee", "total_amount", "amount"]
     },
     {
         "canonical": "fund_pay_sumamt",
@@ -97,17 +97,17 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     },
     {
         "canonical": "med_type",
-        "aliases": ["medical_type", "visit_type", "med_type"],
+        "aliases": ["medical_type", "visit_type", "med_type", "medical_category"],
         "table": "fqz_fymx_test1",
         "desc": "就医类型（门诊/住院/药店）",
-        "forbidden_aliases": ["medical_type"]
+        "forbidden_aliases": ["medical_type", "medical_category"]
     },
     {
         "canonical": "hilist_name",
-        "aliases": ["item_name", "drug_name", "treat_name", "project_name", "fee_name", "hilist_name"],
+        "aliases": ["item_name", "drug_name", "treat_name", "project_name", "fee_name", "hilist_name", "det_item_name"],
         "table": "fqz_fymx_test1",
         "desc": "费用明细项目名称（药品/诊疗/耗材）",
-        "forbidden_aliases": ["drug_name", "treat_name", "item_name"]
+        "forbidden_aliases": ["drug_name", "treat_name", "item_name", "det_item_name"]
     },
     {
         "canonical": "hilist_code",
@@ -239,7 +239,8 @@ class Neo4jManager:
         self.password = os.getenv("NEO4J_PASSWORD", "password")
         self.driver = None
         self.is_connected = False
-        self._init_connection()
+        # [V59.3] 延迟加载：不在初始化时物理阻塞，仅在首次使用时建立连接
+        # self._init_connection() 
 
     def _init_connection(self):
         try:
@@ -247,7 +248,7 @@ class Neo4jManager:
             self.driver = GraphDatabase.driver(
                 self.uri, 
                 auth=(self.user, self.password),
-                connection_timeout=3.0
+                connection_timeout=30.0  # [V65.1] 针对 Aura 云端实例唤醒耗时较长，增加超时容忍度
             )
             self.driver.verify_connectivity()
             self.is_connected = True
@@ -258,12 +259,16 @@ class Neo4jManager:
             self.is_connected = False
 
     def get_driver(self):
+        if not self.driver:
+            self._init_connection()
         if not self.is_connected:
             raise RuntimeError("Neo4j 服务未连接，无法执行图查询。")
         return self.driver
 
     def get_ontology(self) -> str:
         """获取图数据库的本体结构（标签和关系类型）"""
+        if not self.driver:
+            self._init_connection()
         if not self.is_connected:
             return "Neo4j 未连接，无法获取本体结构。"
         
