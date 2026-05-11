@@ -55,8 +55,13 @@ class RuleExecutionSkill(BaseTool):
             return {"error": f"Rule or algorithm not found: {rule_id}", "evidence_count": 0}
             
         try:
-            from app.tools import _execute_audit_sql_logic
-            raw_data = await _execute_audit_sql_logic(sql, return_raw=True)
+            # [V72.0 企业级修复] 注入业务容差：针对明细扫描（重复收费等）放宽阈值至 50,000
+            tolerance = 50000 if "REPEAT_BILLING" in target_id or "GENDER" in target_id else 1000
+            
+            raw_data = await _execute_audit_sql_logic(sql, return_raw=True, tolerance=tolerance)
+            if isinstance(raw_data, dict) and raw_data.get("status") == "ERROR":
+                return {"error": f"SQL Execution Failed: {raw_data.get('error_message')}", "evidence_count": 0}
+            
             if isinstance(raw_data, str) and "失败" in raw_data:
                 return {"error": f"Execution blocked: {raw_data}", "evidence_count": 0}
                 

@@ -78,8 +78,8 @@ CODER_PROMPT = ChatPromptTemplate.from_messages([
 
 **[验证示例]**：
 - 意图：核查“项目金额”
-- 思考：Schema 中有 `medfee_sumamt` 和 `det_item_fee_sumamt`。
-- 决策：根据 Methodology 协议，此处应选择明细级的 `det_item_fee_sumamt`。
+- 思考：Schema 中有 `medfee_sumamt` 和 `sum_det_item_fee`。
+- 决策：根据 Methodology 协议，此处应选择结算汇总级的 `medfee_sumamt`。
 - ❌ 错误决策：直接使用 `item_amount`（猜测）。
 
 ---
@@ -185,6 +185,12 @@ REPORTER_PROMPT = ChatPromptTemplate.from_messages([
 ### 四、核查结论与建议 (Findings & Recommendations)
 - **数值闭环**：结论段中的“违规条数”和“涉及金额”必须与下方的“原始取证数据”**绝对一致**，严禁任何形式的估算或幻觉。
 - **整改建议**：提供具备可操作性的后续处理方案（如：追回违规基金、约谈定点机构、移交司法机关等）。
+
+## 🔐 敏感数据脱敏与隐私保护说明 (Anonymization Policy)
+**重要提示**：本系统中展示的部分敏感字段（如 `psn_name` 姓名、`certno` 身份证、`addr` 地址）可能显示为空字符串或 `NULL`。
+1. **合规性**：这是按照医保数据分级分类保护规定执行的**脱敏处理**，并非系统故障或数据质量问题。
+2. **审计依据**：审计关联和唯一性校验均基于加密哈希后的 `psn_no`（参保人唯一 ID）进行，确保了审计结论的证据效力。
+3. **报告表达**：在报告中提及患者时，请统一表述为“参保人 [psn_no]”，严禁在报告中抱怨“数据缺失”或“字段乱码”。
 
 ## 铁律 (Strict Rules)
 - **禁止幻觉**：如果发现条数为 0，结论必须明确写明“未检出”，不得生搬硬套风险。

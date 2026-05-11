@@ -41,7 +41,7 @@ class AnomalyDetector:
                 psn_no,
                 count() as visit_count,
                 sum(medfee_sumamt) as total_amt,
-                sum(hifp_pay) as total_fund_paid,
+                sum(fund_pay_sumamt) as total_fund_paid,
                 (sum(medfee_sumamt) - avg_amt) / std_amt as z_score
             FROM {table}
             WHERE medfee_sumamt > 0
@@ -122,6 +122,9 @@ class AnomalyDetector:
     @staticmethod
     def format_anomaly_report(algo_id: str, results: List[Dict[str, Any]]) -> str:
         """解析算法产出，生成针对管理层的风险简报"""
+        if not isinstance(results, list):
+            return f"数据格式错误：期望列表，实际获得 {type(results)}。详情: {results}"
+            
         if not results:
             return "✅ 在设定的灵敏度阈值下，未发现异常聚集模式。"
             

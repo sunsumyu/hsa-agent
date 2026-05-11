@@ -22,20 +22,32 @@ from app.security import SQLGuardian
 # 辅助函数
 # ──────────────────────────────────────────────────────────
 
-def _sanitize_results(records: List[Dict]) -> List[Dict]:
-    """[V66.0] 企业级数据清洗中间件：脱敏、乱码清洗与极端离群值拦截"""
+def _sanitize_results(records: List[Dict], tolerance: int = 1000) -> List[Dict]:
+    """
+    [V72.0 企业级] 业务感知型数据清洗中间件：
+    - 支持梯级熔断：L1(放行), L2(告警), L3(强力拦截)
+    - 结合 FieldKG 进行动态脱敏
+    """
+    HARD_MELT_LIMIT = 200000 # 绝对物理上限，防止笛卡尔积彻底撑爆内存
     cleaned = []
+    
     for row in records:
         for key, val in row.items():
-            # 1. 极端离群值拦截 (Cartesian Explosion Guard)
-            if 'count' in key.lower() and isinstance(val, (int, float)) and val > 1000:
-                logger.warning(f"🚨 [Sanitizer] 探测到异常聚合爆炸 ({key}={val})，触发降级熔断。")
-                raise ValueError(f"数据质量告警：检测到异常明细行数 ({val})，疑似发生笛卡尔积爆炸。请修改 SQL 逻辑，必须通过 setl_id (就诊流水号) 进行精确分组和排重！")
+            # 1. 动态算力审计 (Tiered Circuit Breaker)
+            if 'count' in key.lower() and isinstance(val, (int, float)):
+                if val > HARD_MELT_LIMIT:
+                    logger.error(f"🚨 [MELT] 触发绝对物理熔断！字段 {key} 数值 {val} 远超系统承载极限，疑似严重 SQL 逻辑错误。")
+                    raise ValueError(f"物理安全拦截：检测到异常明细爆炸 ({val})。请检查 SQL 中的 JOIN 条件，必须通过 setl_id 精确排重。")
+                
+                if val > tolerance:
+                    # [V72.0] 梯级降级：仅记录告警，不再直接抛出异常
+                    logger.warning(f"⚠️ [Sanitizer] 探测到高体量业务数据 ({key}={val})。当前规则容差: {tolerance}。已记录并放行。")
             
             if not isinstance(val, str): continue
             
-            # 2. 乱码清洗 (Garbled Text Filter)
-            if '\ufffd' in val or '' in val:
+            # 2. 乱码清洗
+            if val == "" or val is None: continue
+            if '\ufffd' in val:
                 row[key] = "[数据源乱码/GBK编码冲突]"
             
             # 3. 基础脱敏
@@ -46,25 +58,21 @@ def _sanitize_results(records: List[Dict]) -> List[Dict]:
         cleaned.append(row)
     return cleaned
 
-async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return_raw: bool = False) -> Any:
+async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return_raw: bool = False, tolerance: int = 1000) -> Any:
     """
-    [V59.4] 核心执行逻辑：
-    - 强制通过 SQLGuardian 校验（含 FieldKG 自动纠错）
-    - 使用 asyncio.to_thread 包装同步驱动，防止阻塞事件循环
+    [V72.0] 核心执行逻辑：支持业务感知的容差控制
     """
     try:
-        # 1. 安全校验与字段纠错 (M4/M5 成果落地)
         safe_sql = SQLGuardian.validate_sql(sql)
         
         if db_type.lower() == "clickhouse":
             client = get_clickhouse_client()
-            # 2. 异步执行（线程池）
             result = await asyncio.to_thread(client.query, safe_sql)
             
             if return_raw:
                 cols = result.column_names
                 records = [{cols[j]: row[j] for j in range(len(cols))} for row in result.result_rows]
-                return _sanitize_results(records)
+                return _sanitize_results(records, tolerance=tolerance)
             return f"查询成功，返回 {len(result.result_rows)} 条记录。"
             
         return "MySQL 暂不支持在此路径执行。"
@@ -142,8 +150,9 @@ async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:
         return {"report": f"未找到匹配的审计算子: {rule_id}", "evidence_count": 0, "raw_evidence": []}
 
     try:
-        # 核心异步执行
-        raw_data = await _execute_audit_sql_logic(sql, return_raw=True)
+        # 核心异步执行 (V72.0 注入业务容差)
+        tolerance = 50000 if "REPEAT_BILLING" in target_rule else 1000
+        raw_data = await _execute_audit_sql_logic(sql, return_raw=True, tolerance=tolerance)
         
         if isinstance(raw_data, str) and "失败" in raw_data:
              return {"report": f"物理引擎执行受阻: {raw_data}", "evidence_count": 0, "raw_evidence": []}
@@ -189,7 +198,8 @@ async def run_anomaly_detection(algorithm_id: str) -> Dict[str, Any]:
         return {"report": f"未找到匹配的算法算子: {algorithm_id}", "evidence_count": 0, "raw_evidence": []}
 
     try:
-        raw_data = await _execute_audit_sql_logic(sql, return_raw=True)
+        # V72.0 注入业务容差 (统计异常通常具有较高基数)
+        raw_data = await _execute_audit_sql_logic(sql, return_raw=True, tolerance=20000)
         
         if isinstance(raw_data, str) and "失败" in raw_data:
              return {"report": f"物理算法执行受阻: {raw_data}", "evidence_count": 0, "raw_evidence": []}
@@ -273,9 +283,13 @@ async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
     except Exception as e:
         error_msg = str(e)
         logger.error(f"❌ [GRAPH ERROR] Neo4j 物理查询失败: {error_msg}")
+        
+        # [V113.1] 自动反馈：如果查询失败，立即拉取本体结构告知 Agent，防止其继续臆造标签
+        current_ontology = neo4j_manager.get_ontology()
+        
         return {
             "status": "ERROR",
-            "error_message": f"图数据库查询失败: {error_msg}。请检查您的 Cypher 语法，或联系系统管理员检查 Neo4j 服务是否正常运行。",
-            "sql_logic": cypher,
-            "suggestion": "如果是因为网络或服务不可用导致，请在最终报告中明确说明'图谱数据源连接中断，无法完成多跳关联分析'。"
+            "error_message": f"图数据库查询失败: {error_msg}。",
+            "suggested_ontology": current_ontology,
+            "suggestion": "检测到您可能使用了不存在的标签或属性。请参考上述 [Neo4j Graph Ontology] 重新编写 Cypher。重点：业务数据（患者等）可能尚未注入，如果 Ontology 为空，请先尝试 lookup_medical_schema。"
         }

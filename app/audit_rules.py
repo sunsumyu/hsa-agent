@@ -19,7 +19,7 @@ class AuditRuleEngine:
                 A.gend                AS gender_code,
                 A.hilist_name         AS hilist_name,
                 C.nat_hi_druglist_memo AS rule_limit,
-                A.det_item_fee_sumamt AS amount,
+                A.medfee_sumamt AS amount,
                 A.setl_time           AS setl_time
             FROM fqz_gz_jzsj_all_ql A
             LEFT JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code
@@ -33,7 +33,7 @@ class AuditRuleEngine:
                   OR A.hilist_name LIKE '%子宫%'
                   OR A.hilist_name LIKE '%阴道%'
               )
-            ORDER BY A.det_item_fee_sumamt DESC
+            ORDER BY A.medfee_sumamt DESC
             LIMIT {limit}
         """,
 
@@ -111,8 +111,7 @@ class AuditRuleEngine:
             JOIN {table} B ON A.psn_no = B.psn_no
             WHERE A.fixmedins_code != B.fixmedins_code
               AND A.med_type LIKE '%住院%' AND B.med_type LIKE '%住院%'
-              AND A.start_date IS NOT NULL AND A.end_date IS NOT NULL
-              AND B.start_date IS NOT NULL AND B.end_date IS NOT NULL
+              AND A.start_date >= '2024-01-01' AND B.start_date >= '2024-01-01'
               AND A.start_date <= B.end_date 
               AND B.start_date <= A.end_date
               AND A.setl_id < B.setl_id -- 去重对称结果
@@ -127,7 +126,7 @@ class AuditRuleEngine:
                 toDate(setl_time)       AS setl_time_date,
                 fixmedins_name          AS fixmedins_name,
                 count()                 AS item_count,
-                sum(det_item_fee_sumamt) AS sum_det_item_fee
+                sum(medfee_sumamt)      AS sum_det_item_fee
             FROM fqz_gz_jzsj_all_ql
             WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
             GROUP BY psn_no, setl_id, setl_time_date, fixmedins_code, fixmedins_name
@@ -146,7 +145,8 @@ class AuditRuleEngine:
                 count(DISTINCT A.setl_id) as visit_count,
                 sum(A.medfee_sumamt) as total_amt
             FROM {table} A
-            WHERE A.tel IN (SELECT tel FROM {table} WHERE med_type LIKE '%职工%')
+            WHERE A.setl_time >= '2024-01-01 00:00:00'
+              AND A.tel IN (SELECT tel FROM {table} WHERE med_type LIKE '%职工%' AND setl_time >= '2024-01-01 00:00:00')
               AND A.med_type NOT LIKE '%职工%'
             GROUP BY A.psn_no, A.psn_name, A.fixmedins_name, A.tel
             ORDER BY total_amt DESC
@@ -214,7 +214,7 @@ class AuditRuleEngine:
                 
                 if not has_operator:
                     # C. 算子与类型推断 (工业级)
-                    numeric_fields = ['medfee_sumamt', 'fund_pay_sumamt', 'det_item_fee_sumamt', 'amount', 'fee']
+                    numeric_fields = ['medfee_sumamt', 'fund_pay_sumamt', 'amount', 'fee']
                     is_numeric = any(nf in field.lower() for nf in numeric_fields) or field.lower().endswith('_amt') or 'count' in field.lower()
                     
                     if is_date_field and re.match(r'^\d{4}$', cond_str):
@@ -271,6 +271,9 @@ class AuditRuleEngine:
     @staticmethod
     def format_violation_report(rule_id: str, results: List[Dict[str, Any]]) -> str:
         """将物理取证结果转化为业务反馈"""
+        if not isinstance(results, list):
+            return f"数据格式错误：期望列表，实际获得 {type(results)}。详情: {results}"
+            
         if not results:
             return "经过规则对撞，未发现该项违规行为。"
         
