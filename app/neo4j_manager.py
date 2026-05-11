@@ -20,63 +20,63 @@ from typing import List, Dict, Any, Optional
 FIELD_ALIAS_REGISTRY: List[Dict] = [
     {
         "canonical": "fixmedins_code",
-        "aliases": ["医疗机构编码", "机构代码"],
-        "table": "fqz_fymx_test1",
+        "aliases": ["医疗机构编码", "机构代码", "hospital_id", "hosp_id", "inst_code"],
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "医疗机构唯一编码（必须使用此字段，严禁使用 hosp_code）",
         "forbidden_aliases": ["hosp_code"]
     },
     {
         "canonical": "fixmedins_name",
-        "aliases": ["医疗机构名称"],
-        "table": "fqz_fymx_test1",
+        "aliases": ["医院名称", "机构名称", "hosp_name", "hospital_name", "provider_name", "med_inst_name"],
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "医疗机构名称",
         "forbidden_aliases": ["hosp_name"]
     },
     {
         "canonical": "psn_no",
-        "aliases": ["patient_id", "person_id", "psn_id", "insured_no", "psn_no"],
-        "table": "fqz_fymx_test1",
+        "aliases": ["patient_id", "person_id", "psn_id", "insured_no", "psn_no", "patient_no"],
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "参保人唯一标识",
         "forbidden_aliases": []
     },
     {
         "canonical": "gend",
         "aliases": ["性别代码"],
-        "table": "fqz_fymx_test1",
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "性别代码：1=男，2=女",
         "forbidden_aliases": ["gender", "sex"]
     },
     {
         "canonical": "dise_name",
-        "aliases": ["diagnosis", "disease_name", "diag_name"],
+        "aliases": ["diagnosis", "disease_name", "diag_name", "diagnosis_code", "diag_code", "dise_code"],
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "主要诊断名称",
         "forbidden_aliases": ["diagnosis", "disease_name"]
     },
     {
         "canonical": "start_date",
-        "aliases": ["adm_date", "admit_date", "in_date"],
+        "aliases": ["adm_date", "admit_date", "in_date", "admission_date", "start_time"],
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "住院开始日期",
         "forbidden_aliases": ["adm_date", "admit_date"]
     },
     {
         "canonical": "end_date",
-        "aliases": ["dis_date", "discharge_date", "out_date"],
+        "aliases": ["dis_date", "discharge_date", "out_date", "finish_date"],
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "住院结束日期",
         "forbidden_aliases": ["dis_date", "discharge_date"]
     },
     {
         "canonical": "medfee_sumamt",
-        "aliases": ["医疗总费用", "结算金额"],
+        "aliases": ["医疗总费用", "结算金额", "total_fee", "total_amount", "medfee", "total_expense", "total_bill", "gross_amount", "medical_cost"],
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "医疗总费用（必须使用此字段，严禁使用 total_fee 或 amount）",
         "forbidden_aliases": ["total_fee", "total_amount", "amount"]
     },
     {
         "canonical": "fund_pay_sumamt",
-        "aliases": ["insurance_pay", "medical_pay", "fund_pay"],
+        "aliases": ["insurance_pay", "medical_pay", "fund_pay", "reimbursement_amount", "fund_amt", "reimbursement", "benefit_amount", "covered_amount"],
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "医保基金实际支付金额",
         "forbidden_aliases": ["insurance_pay", "medical_pay"]
@@ -84,44 +84,51 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     {
         "canonical": "setl_time",
         "aliases": ["settle_time", "settlement_date", "setl_time"],
-        "table": "fqz_fymx_test1",
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "医疗费用结算时间",
         "forbidden_aliases": ["settle_time"]
     },
     {
         "canonical": "setl_id",
-        "aliases": ["settlement_id", "settle_id"],
+        "aliases": ["settlement_id", "settle_id", "bill_id", "record_id", "admission_id"],
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "结算流水唯一标识",
         "forbidden_aliases": ["settlement_id"]
     },
     {
         "canonical": "med_type",
-        "aliases": ["medical_type", "visit_type", "med_type", "medical_category"],
-        "table": "fqz_fymx_test1",
+        "aliases": ["medical_type", "visit_type", "med_type", "medical_category", "treatment_type", "admission_type", "visit_category", "treat_type"],
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "就医类型（门诊/住院/药店）",
         "forbidden_aliases": ["medical_type", "medical_category"]
     },
     {
         "canonical": "hilist_name",
         "aliases": ["item_name", "drug_name", "treat_name", "project_name", "fee_name", "hilist_name", "det_item_name"],
-        "table": "fqz_fymx_test1",
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "费用明细项目名称（药品/诊疗/耗材）",
         "forbidden_aliases": ["drug_name", "treat_name", "item_name", "det_item_name"]
     },
     {
         "canonical": "hilist_code",
-        "aliases": ["item_code", "drug_code", "treat_code", "list_code", "hilist_code"],
-        "table": "fqz_fymx_test1",
+        "aliases": ["item_code", "drug_code", "treat_code", "list_code", "hilist_code", "service_code", "project_code", "fee_code", "item_id"],
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "医保标准项目编码",
         "forbidden_aliases": ["drug_code", "item_code"]
     },
     {
         "canonical": "det_item_fee_sumamt",
         "aliases": ["item_fee", "detail_amount", "item_amount", "det_item_fee_sumamt"],
-        "table": "fqz_fymx_test1",
+        "table": "fqz_gz_jzsj_all_ql",
         "desc": "明细项目总金额",
         "forbidden_aliases": ["item_fee", "item_amount"]
+    },
+    {
+        "canonical": "tel",
+        "aliases": ["手机号", "电话", "联系方式", "mobile", "phone", "tel"],
+        "table": "fqz_gz_jzsj_all_ql",
+        "desc": "参保人联系电话（提示：结算明细表中该字段可能为空，建议优先调用 query_fraud_ring 查图）",
+        "forbidden_aliases": []
     },
 ]
 
@@ -217,7 +224,7 @@ class FieldKnowledgeGraph:
         格式与 schema_injector.inject() 兼容，优先级更高。
         """
         entries = self.get_canonical_fields(table)[:max_fields]
-        lines = ["**[字段知识图谱] 以下为物理确认存在的字段，严禁使用其他名称：**\n"]
+        lines = ["**[字段知识图谱] 以下为推荐的物理映射参考。若任务涉及手机号、亲属关系、聚集性分析，请务必优先尝试调用 query_fraud_ring (图查询)：**\n"]
         for e in entries:
             forbidden_hint = ""
             if e.get("forbidden_aliases"):

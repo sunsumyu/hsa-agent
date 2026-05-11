@@ -30,8 +30,10 @@ class LocalEmbeddingEngine(Embeddings):
             self.model = SentenceTransformer(self.model_name)
             logger.info(f"✅ [延迟加载] 本地记忆引擎加载成功: {self.model_name}")
         except Exception as e:
-            logger.warning(f"⚠️ 本地模型加载失败，将使用 Mock 模式或云端备份: {e}")
+            logger.warning(f"⚠️ 本地模型加载失败（网络或路径问题），进入 Mock 模式: {e}")
             self.model = None
+            # [V81.0] 强制不报错，防止阻塞主流程
+            return
 
     def embed_query(self, text: str) -> List[float]:
         if not self.model: return [0.0] * 384

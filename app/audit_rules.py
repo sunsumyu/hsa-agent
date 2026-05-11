@@ -21,7 +21,7 @@ class AuditRuleEngine:
                 C.nat_hi_druglist_memo AS rule_limit,
                 A.det_item_fee_sumamt AS amount,
                 A.setl_time           AS setl_time
-            FROM fqz_fymx_test1 A
+            FROM fqz_gz_jzsj_all_ql A
             LEFT JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code
             WHERE A.setl_time >= '2024-01-01 00:00:00' AND A.setl_time <= '2024-12-31 23:59:59'
               AND A.gend = '1' -- 男性患者
@@ -128,7 +128,7 @@ class AuditRuleEngine:
                 fixmedins_name          AS fixmedins_name,
                 count()                 AS item_count,
                 sum(det_item_fee_sumamt) AS sum_det_item_fee
-            FROM fqz_fymx_test1
+            FROM fqz_gz_jzsj_all_ql
             WHERE setl_time >= '2024-01-01 00:00:00' AND setl_time <= '2024-12-31 23:59:59'
             GROUP BY psn_no, setl_id, setl_time_date, fixmedins_code, fixmedins_name
             HAVING item_count > 50  -- 聚焦于单次就诊内的极端明细记录

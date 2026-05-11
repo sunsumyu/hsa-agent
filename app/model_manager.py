@@ -281,9 +281,10 @@ class ModelManager:
                     temperature=temperature,
                     timeout=60.0,
                     streaming=True,
-                    default_headers=default_headers,
-                    endpoint_id=name # [V77.0] 在初始化时传入，符合 Pydantic 规范
+                    default_headers=default_headers
                 )
+                # [V81.0] 物理绕过：使用 object.__setattr__ 绕过 Pydantic 的初始化校验，确保 ID 强绑定
+                object.__setattr__(llm, 'endpoint_id', name)
                 return llm
         except Exception as e:
             logger.error(f"LLM 实例化失败: {name} | {e}")

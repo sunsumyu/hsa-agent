@@ -58,11 +58,11 @@
                 <div class="kpi-row">
                     <div class="kpi-card">
                         <span class="lbl">涉案金额</span>
-                        <span class="val" style="color: var(--danger);">¥2.00</span>
+                        <span class="val" style="color: var(--danger);">¥0.00</span>
                     </div>
                     <div class="kpi-card">
                         <span class="lbl">违规线索条数</span>
-                        <span class="val">1</span>
+                        <span class="val">0</span>
                     </div>
                     <div class="kpi-card">
                         <span class="lbl">审计置信度</span>
@@ -88,8 +88,8 @@
                 <div class="glass-card">
                     <div class="section-title" style="margin-bottom: 15px; font-weight: 700;">📅 审计时间轴</div>
                     <p style="font-size: 14px; color: #64748b;">
-                        数据拉取: 2026-05-02 22:17:38<br>
-                        AI 推演完成: 2026-05-02 22:17:38<br>
+                        数据拉取: 2026-05-11 03:11:44<br>
+                        AI 推演完成: 2026-05-11 03:11:44<br>
                         人工校验状态: <span style="color: var(--warning);">待审核</span>
                     </p>
                 </div>
@@ -120,7 +120,7 @@
 
             // 风险雷达图 - 动态维度加载
             var radarChart = echarts.init(document.getElementById('radar-container'));
-            var radarScores = {};
+            var radarScores = {"\u518d\u72af\u98ce\u9669": 30, "\u53d1\u73b0\u9690\u853d\u6027": 60, "\u53d6\u8bc1\u6e05\u6670\u5ea6": 80, "\u653f\u7b56\u590d\u6742\u6027": 40, "\u7ecf\u6d4e\u5f71\u54cd": 50};
             var indicators = Object.keys(radarScores).map(k => ({ name: k, max: 100 }));
             var values = Object.values(radarScores);
 

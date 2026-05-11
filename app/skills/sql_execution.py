@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, Dict, Any, Union
+from typing import Type, Dict, Any, Union, List
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from loguru import logger
@@ -15,8 +15,20 @@ class SQLSafeExecutionSkill(BaseTool):
     async def _arun(self, sql: str) -> Union[str, Dict[str, Any]]:
         from app.security import SQLGuardian
         from app.db_conn import get_clickhouse_client
-        from app.tools import _clean_encrypted_fields
+        from app.security import SQLGuardian
+        from app.db_conn import get_clickhouse_client
         
+        def _mask_sensitive_data(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            """[V82.0] 就地实现脱敏逻辑，确保数据安全并修复导入错误"""
+            sensitive_fields = {"tel", "phone", "mobile", "certno", "addr", "psn_name"}
+            for row in records:
+                for field in sensitive_fields:
+                    if field in row and row[field]:
+                        val = str(row[field])
+                        if len(val) > 4:
+                            row[field] = f"{val[:3]}****{val[-4:]}"
+            return records
+
         logger.info(f"🛡️ [Skill] Validating and Executing SQL...")
         
         try:
@@ -27,7 +39,17 @@ class SQLSafeExecutionSkill(BaseTool):
             
             cols = result.column_names
             records = [{cols[j]: row[j] for j in range(len(cols))} for row in result.result_rows]
-            clean_records = _clean_encrypted_fields(records)
+            clean_records = _mask_sensitive_data(records)
+            
+            # [V92.0] 强制 JSON 化处理：解决 Decimal 和 datetime 无法被 ast.literal_eval/json.loads 解析的问题
+            import datetime
+            from decimal import Decimal
+            for row in clean_records:
+                for k, v in row.items():
+                    if isinstance(v, (datetime.datetime, datetime.date)):
+                        row[k] = v.isoformat()
+                    elif isinstance(v, Decimal):
+                        row[k] = float(v)
             
             count = len(clean_records)
             logger.success(f"✅ [Skill] SQL execution succeeded, {count} records returned.")

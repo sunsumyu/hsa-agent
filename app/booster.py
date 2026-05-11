@@ -31,31 +31,34 @@ class PrecisionBooster:
             amount_keys = ["medfee", "fee", "amt", "amount", "sum", "cost", "total", "money", "金额", "费用", "总计"]
             count_keys = ["count", "times", "num", "cnt", "次数", "数量"]
             
-            lines = [l.strip() for l in raw_data_str.split("\n") if "|" in l and "---" not in l]
+            # ── Step 1: 多级结构化解析 [V89.0] ──────────────────────────────────
             rows_data = []
+            import json as _json
+            import ast as _ast
+            import datetime as _dt
+            from decimal import Decimal as _Decimal
 
-            # 1. 尝试 Markdown 表格解析
-            if len(lines) >= 2 and ("查询结果" in lines[0] or any(ak in lines[0].lower() for ak in amount_keys + ["psn_no", "id"])):
-                header_line = lines[0].replace("查询结果:", "").strip()
-                headers = [h.strip().lower() for h in header_line.split("|")]
-                
-                for line in lines[1:]:
-                    if "系统提示" in line or not line.strip(): continue
-                    cols = [c.strip() for c in line.split("|")]
-                    if len(cols) != len(headers): continue
-                    
-                    row_dict = {}
-                    for i, h in enumerate(headers):
-                        try:
-                            val_str = cols[i].replace(",", "")
-                            val_str = "".join(c for c in val_str if c.isdigit() or c == ".")
-                            if val_str: row_dict[h] = float(val_str)
-                        except: continue
-                    if row_dict: rows_data.append(row_dict)
-            
-            # 2. 尝试 JSON 解析
+            # 1.1 尝试 JSON 直接解析
+            try:
+                # 清洗字符串中的非法控制字符
+                clean_str = re.sub(r'[\x00-\x1f\x7f]', '', raw_data_str).strip()
+                if clean_str.startswith("[") or clean_str.startswith("{"):
+                    parsed = _json.loads(clean_str)
+                    rows_data = parsed if isinstance(parsed, list) else [parsed]
+            except:
+                pass
+
+            # 1.2 尝试 ast.literal_eval 解析 (处理 Python 特有类型)
             if not rows_data:
-                # [V65.6] 升级正则：支持字符串、数字、以及 Decimal 包装器
+                try:
+                    eval_context = {"datetime": _dt, "date": _dt.date, "Decimal": _Decimal}
+                    parsed = _ast.literal_eval(raw_data_str.strip())
+                    rows_data = parsed if isinstance(parsed, list) else [parsed]
+                except:
+                    pass
+
+            # 1.3 正则兜底 (处理 LLM 混入的杂质)
+            if not rows_data:
                 kv_pattern = re.compile(r"['\"](?P<key>[^'\"]+)['\"]\s*:\s*(?:Decimal\(')?(?P<val>[^'\"},]+)(?:\')?")
                 for item_match in re.finditer(r"\{([^{}]+)\}", raw_data_str):
                     row_str = item_match.group(1)
@@ -63,18 +66,12 @@ class PrecisionBooster:
                     for kv_match in kv_pattern.finditer(row_str):
                         key = kv_match.group('key').lower()
                         val = kv_match.group('val').strip().strip("'").strip('"')
-                        try:
-                            # 尝试转数字，转不了则保留原样字符串
-                            if re.match(r"^-?\d+(\.\d+)?$", val):
-                                row_dict[key] = float(val)
-                            else:
-                                row_dict[key] = val
-                        except: 
-                            row_dict[key] = val
+                        row_dict[key] = val
                     if row_dict: rows_data.append(row_dict)
 
-            # [V65.6 强校验门禁：只要有行记录，就不触发熔断]
+            # [V89.0] 强校验门禁：如果数据流不为空但解析不到任何记录，触发熔断
             if not rows_data and raw_data_str.strip() not in ["[]", ""]:
+                logger.error(f"[Booster] 解析失败。原始数据片段: {raw_data_str[:200]}...")
                 raise DataExtractionError("无法从输入流中提取出结构化的记录载荷。")
 
             evidence_items = []
@@ -82,21 +79,27 @@ class PrecisionBooster:
             
             for row in rows_data:
                 best_val = 0.0
-                best_score = -1
+                best_score = 0  # [V97.0] 默认分为 0，只有命中关键词才提取
                 for k, v in row.items():
-                    # 仅针对数字类型进行评分和金额提取
-                    if isinstance(v, (int, float)):
+                    k_lower = k.lower()
+                    # 排除掉明显的标识符字段
+                    if any(id_k in k_lower for id_k in ["no", "id", "code", "certno", "tel", "phone"]):
+                        continue
+                        
+                    try:
+                        curr_val = float(str(v).replace(",", ""))
                         score = 0
-                        if any(ak in k for ak in amount_keys): score = 30
-                        elif any(ck in k for ck in count_keys): score = 15
+                        if any(ak in k_lower for ak in amount_keys): score = 30
+                        elif any(ck in k_lower for ck in count_keys): score = 15
+                        
                         if score > best_score:
-                            best_score, best_val = score, float(v)
+                            best_score, best_val = score, curr_val
+                    except:
+                        continue
                 
                 total_sum += best_val
-                evidence_items.append(best_val)
-                for k, v in row.items():
-                    if isinstance(v, (int, float)):
-                        if v != best_val and v > 0: evidence_items.append(float(v))
+                if best_val > 0:
+                    evidence_items.append(best_val)
             
             evidence_items = sorted(list(set(evidence_items)), reverse=True)
             logger.info(f"[Booster] 物理取证严格校验通过: SUM={total_sum:.2f}, COUNT={len(rows_data)}")

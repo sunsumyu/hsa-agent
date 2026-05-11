@@ -131,19 +131,20 @@ class AuditReportRenderer:
         raw_data = raw_data or []
         execution_trace = execution_trace or []
 
-        # [V61.0 Consistency Guard] 强制以物理数据为准
+        # [V88.0] 逻辑修正：即便 raw_data 为空（可能是解析失败），也要优先保留调用方传入的硬性统计值
         if not raw_data:
-            total_amount = 0.0
-            finding_count = 0
-            llm_conclusion = "经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
+            total_amount = total_amount if total_amount > 0 else 0.0
+            finding_count = finding_count if finding_count > 0 else 0
+            if total_amount == 0:
+                llm_conclusion = "经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
         else:
-            # 自动从数据中计算金额（如果调用方传入的与实际不符，以实际为准）
+            # 自动从数据中计算金额
             actual_total = self._calc_total_amount(raw_data)
             actual_count = len(raw_data)
             
-            # 如果传入的数值与实际数值偏差过大，强制修正（防止 LLM 幻觉干扰报告）
-            total_amount = actual_total if total_amount == 0 else total_amount
-            finding_count = actual_count if finding_count == 0 else finding_count
+            # 优先保留调用方传入的硬性统计值 (Hard Metrics)
+            total_amount = total_amount if total_amount > 0 else actual_total
+            finding_count = finding_count if finding_count > 0 else actual_count
 
         risk_level = self._calc_risk_level(total_amount, finding_count)
 

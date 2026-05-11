@@ -368,19 +368,23 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                     if "methodology" in res:
                         methodologies.append(res["methodology"])
                     if "temp_table" in res:
-                        # [V65.0] 记录临时表名，供后续 Coder 引用
                         state["temp_table"] = res["temp_table"]
                         
                     if res.get("status") == "ERROR" or "error_message" in res:
                         has_error = True
                         error_msg = res.get("error_message") or res.get("error")
                     else:
+                        # [V95.0] 只有真正的业务数据才进入证据链
                         if "records_sample" in res:
                             raw_data_list.append(str(res["records_sample"]))
                         if "raw_evidence" in res:
                             raw_data_list.append(str(res["raw_evidence"]))
                 else:
-                    raw_data_list.append(str(res))
+                    # [V95.0] 拦截非字典类型的工具返回（如 schema 描述），防止污染证据链
+                    # 仅当工具名包含执行意图时才作为潜在数据加入
+                    tool_name = t_call.get("name", "").lower()
+                    if "sql" in tool_name or "query" in tool_name:
+                        raw_data_list.append(str(res))
 
         trace = list(state.get("execution_trace") or [])
         for hint in tool_traces:
@@ -601,7 +605,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     # ── Step 6: 构建结构化 AuditReport 对象（供下游节点使用） ──────────
     report = AuditReport(
         summary=rendered.summary,
-        findings=[],
+        findings=raw_data_list,
         total_amount=rendered.total_amount,
         finding_count=rendered.finding_count,
         risk_level=rendered.risk_level,
@@ -617,7 +621,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
             "total_amount": report.total_amount,
             "finding_count": report.finding_count,
             "risk_level": report.risk_level,
-            "findings": [],
+            "findings": raw_data_list[:20], # 仪表盘仅展示前20条
             "risk_scores": report.risk_scores
         }
         html_path = f"data/reports/dashboard_{state.get('session_id', 'latest')}.html"

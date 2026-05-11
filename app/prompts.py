@@ -58,12 +58,23 @@ CODER_PROMPT = ChatPromptTemplate.from_messages([
 - **常规加氢**：如果图查询结果较小（< 50条），请利用返回的 ID 直接在 SQL 的 `IN (...)` 子句中提取明细。
 - 严禁只给出名单而忽略金额。
 
-## 4. 零幻觉取证协议 (Zero-Knowledge Protocol)
+## 4. ⚡️ 物理禁令 (CRITICAL PHYSICAL BAN) - 严禁触碰
+你必须像遵守物理定律一样遵守以下禁令，否则你的代码将被 SQLGuardian 物理拦截：
+1. **禁止一切通用命名**：严禁在 SQL 中使用 `patient_info`, `medical_fees`, `users`, `orders`, `settlements`, `disease_policy`, `patient_records` 等任何通用、猜测性的表名。
+2. **强制 `fqz_` 前缀**：当前数据库中所有的真实表名**必须**以 `fqz_` 开头。
+3. **主表绝对指定**：
+   - 全量结算明细/患者记录：**必须且仅能使用** `fqz_gz_jzsj_all_ql`。
+   - 机构指标表：**必须且仅能使用** `fqz_all_yy_yd_1`。
+   - 医保限制目录：**必须且仅能使用** `fqz_drug_mcs_info_list`。
+4. **违反后果**：任何包含非 `fqz_` 表名（且非内部 CTE）的 SQL 都会被系统直接拦截并记录为“严重审计事故”。
+
+## 5. 零幻觉取证协议 (Zero-Knowledge Protocol)
 你必须遵循“先查后写”的原则，严禁基于语义常识猜测字段名：
-1. **业务意图识别**：明确任务中涉及的业务概念（如：项目名称、就医类型）。
+1. **禁猜令 (Hallucination Prohibition)**: 
+   - **严禁臆造表名**：所有表名均以 `fqz_` 开头。
+   - **严禁臆造字段**：任何未在 `schema_info` 中出现的字段名均视为幻觉。
 2. **物理快照对齐**：在 `schema_info` 中检索该概念对应的物理字段。
 3. **强制查证逻辑**：如果在 `schema_info` 中未发现 **100% 精确匹配** 的字段，你**必须**先调用 `lookup_medical_schema` 工具。
-4. **禁猜令**：任何未在 `schema_info` 或工具返回结果中出现的字符串，均视为非法标识符。使用非法标识符会导致审计系统熔断。
 
 **[验证示例]**：
 - 意图：核查“项目金额”
@@ -73,7 +84,12 @@ CODER_PROMPT = ChatPromptTemplate.from_messages([
 
 ---
 
-## 5. SQL 性能与语法 (ClickHouse 专用)
+6. ⚡️ 占位符禁令 (NO PLACEHOLDERS)
+- **严禁臆造**: 严禁在 SQL 中使用 `'患者编号'`, `'嫌疑人ID'`, `'某医院'`, `'XXX'` 等任何占位符字符串。
+- **真实取证**: 如果前序工具（如 `query_fraud_ring`）返回了真实数据，你**必须**提取其中的真实物理 ID（如 `3100000000000000001`）并填入 `IN (...)` 子句中。
+- **格式要求**: 必须确保 ID 被单引号包裹，如 `WHERE psn_no IN ('ID1', 'ID2')`。
+
+## 7. SQL 性能与语法 (ClickHouse 专用)
 - **分区过滤**：必须带上 `setl_time` 区间过滤（推荐 `setl_time >= '2024-01-01'`）。
 - **避坑准则**：
     1. **禁止别名阴影**：严禁将表达式结果的别名设为与原始列名相同（例如：禁止 `SELECT toDate(setl_time) AS setl_time`，应改为 `AS setl_date`）。
@@ -200,9 +216,15 @@ CRITIC_PROMPT = ChatPromptTemplate.from_messages([
     1. **NOT_AN_AGGREGATE**: 检查是否出现了“别名阴影”？
     2. **MySQL 污染**: 是否使用了 `GROUP_CONCAT` 或 `DATEDIFF`？
 
-## 3. 修复指令要求
+## 3. ⚡️ 物理纠偏 (PHYSICAL ALIGNMENT)
+凡是报错信息中提到“物理拦截”或“幻觉表”：
+- **铁律**：严禁使用 `patient_info`, `medical_fees`, `disease_policy`, `patient_records` 等通用名。
+- **物理真相**：所有结算明细和患者数据**必须**从 `fqz_gz_jzsj_all_ql` 表中获取。
+- **修复逻辑**：立即修正 SQL 表名，确保以 `fqz_` 开头。
+
+## 4. 修复指令要求
 你必须输出一段“修正指令”，告诉 Coder 下一步该如何调整。
-- **重点提示**: 如果是因为字段臆造导致的失败，请强制 Coder 先运行 `lookup_medical_schema` 工具重新同步物理蓝图。
+- **重点提示**: 如果是因为字段/表名臆造导致的失败，请强制 Coder 先运行 `lookup_medical_schema` 工具重新同步物理蓝图。
 
 ## 执行上下文：
 审计方法论：{methodology}
@@ -231,6 +253,9 @@ AUDITOR_PROMPT = ChatPromptTemplate.from_messages([
 - **严禁**: `DATE_FORMAT`, `DATEDIFF`, `CURDATE`, `YEAR()` (这些是 MySQL 函数)。
 - **必须**: `formatDateTime`, `dateDiff`, `now()`, `toYear()`。
 - **类型校验**: 检查 `ipt_days` 是否执行了 `toUInt32OrZero` 转换。
+- **物理存在审计 (Table Name Check)**: 
+  - **凡是** SQL 中出现了非 `fqz_` 开头的表名（如 `patient_info`, `medical_fees`, `disease_policy`, `patient_records`），**必须判定为 REJECT**。
+  - **纠偏建议**：命令其使用正确的物理表名（主表必须为 `fqz_gz_jzsj_all_ql`）。
 
 ## 输出协议 (STRICT JSON)
 你必须直接输出一个 JSON 对象，严禁包含任何说明性文字。

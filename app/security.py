@@ -35,9 +35,10 @@ class SQLGuardian:
             raise SecurityViolationError("SQL 内容不能为空")
 
         clean_sql = sql.strip()
+        logger.info(f"🕵️ [SQLGuardian] 正在校验原始 SQL: {clean_sql[:300]}...")
         clean_sql = sql.replace('\\n', '\n').strip().rstrip(';； \n\r\t')
 
-        # ── Step 0: [Phase 3-B] 字段知识图谱纠错（在 AST 解析前先修正禁用字段）────
+        # ── Step 0: [Phase 3-B] 字段知识图谱纠错（优先修正字段别名）────
         try:
             from app.neo4j_manager import field_kg
             clean_sql, kg_warnings = field_kg.sanitize_sql(clean_sql)
@@ -52,23 +53,58 @@ class SQLGuardian:
             logger.error(f"[SECURITY] 检测到非法堆叠查询攻击! [Raw]: {repr(sql)} | [Cleaned]: {repr(clean_sql)}")
             raise SecurityViolationError("物理拦截：检测到堆叠查询意图，系统已拒绝执行。")
 
-        # 2. 框架级语法审计 (The Gatekeeper)
+        # 2. 框架级语法解析与 AST 生成 (The Gatekeeper)
+        import sqlglot
+        import sqlglot.expressions as exp
         try:
             # 强制分发给 ClickHouse 方言处理器
             expression = sqlglot.parse_one(clean_sql, read="clickhouse")
-        except sqlglot.errors.ParseError as pe:
+        except Exception as pe:
             logger.error(f"[SECURITY] SQL 框架解析失败: {pe}")
             # 提取详细报错信息供 Agent 自愈
             raise SecurityViolationError(f"物理语法解析失败：{str(pe)}。请检查 SQL 结构是否完整。")
 
+        # ── Step 1: [Phase 3-B] 表名白名单校验 ────
+        for table in expression.find_all(exp.Table):
+            table_name = table.name.lower()
+            # 允许 CTE (Common Table Expressions) 和 临时表名
+            forbidden_tables = {"patient_info", "medical_fees", "users", "orders", "settlements"}
+            if table_name in forbidden_tables or (not table_name.startswith("fqz_") and table_name not in {"dual"}):
+                # 检查是否是 CTE
+                is_cte = False
+                parent = table.parent
+                while parent:
+                    if isinstance(parent, exp.CTE) and parent.alias == table.name:
+                        is_cte = True
+                        break
+                    parent = parent.parent
+                
+                if not is_cte:
+                    logger.error(f"[SECURITY] 发现物理不存在的幻觉表: {table_name}")
+                    
+                    # [V107.0] 逻辑纠偏：多维幻觉识别
+                    rule_hint = ""
+                    if any(dk in table_name.lower() for dk in ["dept", "department"]):
+                        rule_hint = "当前物理 Schema 不包含科室（Department）级别的数据！请仅使用医疗机构级别字段（如 `fixmedins_code`）。"
+                    else:
+                        from app.audit_rules import AuditRuleEngine
+                        if table_name.upper() in AuditRuleEngine.TEMPLATES:
+                            rule_hint = f"检测到您误将审计规则 ID `{table_name}` 当作了物理表名！\n请修正 SQL 直接查询 `fqz_gz_jzsj_all_ql` 表，或直接调用 `audit_medical_rule` 技能并传入 rule_id='{table_name.upper()}'。"
+                    
+                    raise SecurityViolationError(
+                        f"物理拦截：表 `{table_name}` 是虚假幻觉表！\n"
+                        f"{rule_hint if rule_hint else '请务必使用物理主表。'}\n"
+                        f"【物理真相】当前数据库中仅允许访问以下主表：\n"
+                        f"- `fqz_gz_jzsj_all_ql` (全量结算明细/患者记录)\n"
+                        f"- `fqz_all_yy_yd_1` (机构评估指标)\n"
+                        f"- `fqz_drug_mcs_info_list` (医保限制支付目录)\n"
+                    )
+
         # 3. 结构化指令审计 (取代正则扫描)
-        # 遍历 AST 寻找非查询类节点
-        # 注意：Truncate, Grant, Revoke 等在 sqlglot 中通常表现为 Command 节点
         forbidden_nodes = (exp.Drop, exp.Update, exp.Delete, exp.Alter, exp.Create, 
                           exp.Insert, exp.Command)
         
         # 特殊处理：使用 .key 指纹强制放行合法查询根节点
-        # 包含：SELECT, WITH, SHOW, DESCRIBE, EXPLAIN
         allowed_keys = ("select", "with", "show", "describe", "explain")
         if expression.key not in allowed_keys:
             logger.warning(f"[SECURITY] 拦截到非查询意图节点 key: {expression.key}")
