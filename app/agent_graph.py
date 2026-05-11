@@ -13,6 +13,14 @@ from app.compressor import trace_compressor
 from app.model_manager import model_manager
 from app.neo4j_manager import field_kg, neo4j_manager
 from app.prompts import PLANNER_PROMPT, CODER_PROMPT, ANALYST_PROMPT, REPORTER_PROMPT, AUDITOR_PROMPT
+# [重构 V90.0] 分层 State + 领域 Schema 单一事实源
+from app.core.state import (
+    AuditState as _LayeredAuditState,
+    AuditFinding as _LayeredAuditFinding,
+    AuditReport as _LayeredAuditReport,
+    AuditFeedback as _LayeredAuditFeedback,
+)
+from app.core.schema_registry import schema_registry
 from app.tools import execute_audit_sql, get_table_schema, list_tables, search_expert_knowledge, query_fraud_ring
 from app.skills import MedicalSchemaSkill, RuleExecutionSkill, SQLSafeExecutionSkill
 from app.experience import experience_manager
@@ -41,26 +49,10 @@ semantic_retriever = SemanticRetriever()
 # ============================================================
 # 1. Structured Output Schemas
 # ============================================================
-
-class AuditFinding(BaseModel):
-    violation_type: str = Field(description="认定的违规类型")
-    evidence: str = Field(description="证据描述，必须包含核心数值")
-    amount: float = Field(description="涉及金额")
-    count: int = Field(description="涉及违规次数")
-    policy_basis: str = Field(description="政策依据")
-
-class AuditReport(BaseModel):
-    summary: str = Field(description="任务总结")
-    findings: List[AuditFinding] = Field(description="发现列表")
-    total_amount: float = Field(description="总计金额")
-    finding_count: int = Field(default=0, description="发现的记录总数")
-    risk_level: str = Field(description="高/中/低")
-    risk_scores: Dict[str, int] = Field(default_factory=lambda: {"取证清晰度": 80, "经济影响": 50, "再犯风险": 30, "政策复杂性": 40, "发现隐蔽性": 60})
-
-class AuditFeedback(BaseModel):
-    decision: str = Field(description="判定结果: PASS 或 REJECT")
-    reason: str = Field(description="拒绝或通过的详细理由")
-    corrective_action: Optional[str] = Field(default=None, description="如果拒绝，给出的具体修正指令")
+# [重构 V90.0] 已迁移到 app.core.state — 此处仅做别名导出保持向后兼容
+AuditFinding = _LayeredAuditFinding
+AuditReport = _LayeredAuditReport
+AuditFeedback = _LayeredAuditFeedback
 
 # --- 常量配置 ---
 MAX_RETRIES = 3
@@ -592,7 +584,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         raw_data=raw_data_list,
         sql_query=sql_query,
         methodology=methodology,
-        table_info="fqz_gz_jzsj_all_ql（全量结算明细）",
+        table_info=f"{schema_registry.get_main_table()}（{schema_registry.get_table(schema_registry.get_main_table()).alias if schema_registry.get_table(schema_registry.get_main_table()) else '全量结算明细'}）",
         total_amount=hard_sum,
         finding_count=hard_count,
         policy_basis="《医保基金监管条例》",
@@ -676,15 +668,82 @@ async def consolidator_node(state: AuditState, config: RunnableConfig):
 # 4. 路由逻辑（V59.3 架构降维）
 # ============================================================
 
-def route_post_exec(state: AuditState) -> str:
-    """SQLEXEC 后的路由：出错则重试，成功则进入 AUDITOR"""
-    if state.get("error_log") and state.get("retry_count", 0) < MAX_RETRIES:
-        return "SQLEXEC"  # 重试
-    return "AUDITOR"  # 正常路径（包括达到重试上限后强制进入）
+# [重构 V90.0] 删除旧的简陋 route_post_exec / route_post_audit
+# 原因: build_graph() 内定义了嵌套的同名高级版本 (含契约检查), 会遮蔽模块级版本;
+# 但 get_graph_executor() 却引用模块级旧版, 导致两条编译路径行为不一致 (Bug)。
+# 新版: 将高级路由提升为模块级 _route_sqlexec_post, 单一实现, 两个工厂共用。
 
-def route_post_audit(state: AuditState) -> str:
-    """AUDITOR 后的路由：一律进入 CONSOLIDATOR（不再循环回 SQLEXEC）"""
+
+def _route_sqlexec_post(state: AuditState) -> str:
+    """
+    SQLEXEC 后的增强型路由:
+    
+      - 内部推理环路: 如果 Coder 刚调了工具 (last_msg 是 ToolMessage 或带 tool_calls),
+        继续留在 SQLEXEC 做下一步思考 (未达 MAX_RETRIES)。
+      - 契约检查: methodology 要求数值但 raw_data 里没数字 -> 判定契约失效。
+      - 出错 / 契约失效 且未达上限 -> 进 CRITIC 自愈。
+      - 其他 -> 进 CONSOLIDATOR。
+    """
+    messages = state.get("messages", [])
+    last_msg = messages[-1] if messages else None
+
+    # 1. 内部推理环路
+    if isinstance(last_msg, ToolMessage) or (
+        not isinstance(last_msg, tuple) and getattr(last_msg, "tool_calls", None)
+    ):
+        if state.get("retry_count", 0) < MAX_RETRIES:
+            return "SQLEXEC"
+
+    # 2. 契约检查
+    raw_data = state.get("raw_data", "")
+    has_error = bool(state.get("error_log"))
+    contract_violation = False
+    methodology = str(state.get("methodology", ""))
+    if "### METHODOLOGY" in methodology and (
+        "金额" in methodology or "费用" in methodology or "数值" in methodology
+    ):
+        numbers = re.findall(r"\d+\.\d+|\d{4,}", raw_data)
+        if not numbers:
+            contract_violation = True
+            logger.warning(
+                "🚨 [CONTRACT] 检测到数据契约失效：审计口径要求数值，但取证载荷为空或无显著指标"
+            )
+
+    if (has_error or contract_violation) and state.get("retry_count", 0) < MAX_RETRIES:
+        return "CRITIC"
     return "CONSOLIDATOR"
+
+
+def _build_workflow_skeleton() -> StateGraph:
+    """
+    构建工作流拓扑 (不含 compile)。build_graph 和 get_graph_executor 共用。
+    
+    拓扑: PLANNER -> SQLEXEC -> (route) -> {SQLEXEC | CRITIC | CONSOLIDATOR}
+          CRITIC  -> SQLEXEC
+          CONSOLIDATOR -> REPORTER -> END
+    """
+    wf = StateGraph(AuditState)
+    wf.add_node("PLANNER", planner_node)
+    wf.add_node("SQLEXEC", sqlexec_node)
+    wf.add_node("CRITIC", critic_node)
+    wf.add_node("REPORTER", reporter_node)
+    wf.add_node("CONSOLIDATOR", consolidator_node)
+
+    wf.set_entry_point("PLANNER")
+    wf.add_edge("PLANNER", "SQLEXEC")
+    wf.add_conditional_edges(
+        "SQLEXEC",
+        _route_sqlexec_post,
+        {
+            "SQLEXEC": "SQLEXEC",
+            "CRITIC": "CRITIC",
+            "CONSOLIDATOR": "CONSOLIDATOR",
+        },
+    )
+    wf.add_edge("CRITIC", "SQLEXEC")
+    wf.add_edge("CONSOLIDATOR", "REPORTER")
+    wf.add_edge("REPORTER", END)
+    return wf
 
 # ============================================================
 # 5. 图编译（V59.3 线性托扑）
@@ -694,64 +753,52 @@ def build_graph():
     """
     [V65.0 POE 拓扑] 增强型线性工作流 + 自愈环路
     PLANNER → SQLEXEC → (Contract Check) → CRITIC ↺ → CONSOLIDATOR → REPORTER → END
-    """
-    workflow = StateGraph(AuditState)
-    workflow.add_node("PLANNER", planner_node)
-    workflow.add_node("SQLEXEC", sqlexec_node)
-    workflow.add_node("CRITIC", critic_node)
-    workflow.add_node("REPORTER", reporter_node)
-    workflow.add_node("CONSOLIDATOR", consolidator_node)
-
-    workflow.set_entry_point("PLANNER")
-    workflow.add_edge("PLANNER", "SQLEXEC")
     
-    def route_post_exec(state: AuditState) -> str:
-        """
-        [V65.1 POE] 增强型智能路由：支持内部推理环路 + 外部自愈环路
-        """
-        messages = state.get("messages", [])
-        last_msg = messages[-1] if messages else None
-        
-        # 1. 内部推理环路：如果上一条消息是工具消息，说明 Coder 刚看完执行结果，需要回执进行下一步思考
-        if isinstance(last_msg, ToolMessage) or (not isinstance(last_msg, tuple) and getattr(last_msg, "tool_calls", None)):
-            # 只要还在调用工具，就继续让 SQLEXEC 运行（除非达到硬上限）
-            if state.get("retry_count", 0) < MAX_RETRIES:
-                return "SQLEXEC"
-
-        # 2. 外部自愈环路：Coder 已经给出了文字结论（无工具调用），此时检查数据契约
-        raw_data = state.get("raw_data", "")
-        has_error = bool(state.get("error_log"))
-        
-        # 契约检查：如果审计方法论涉及“金额/费用”，但结果中没数字，视为契约失效
-        contract_violation = False
-        methodology = str(state.get("methodology", ""))
-        if "### METHODOLOGY" in methodology and ("金额" in methodology or "费用" in methodology or "数值" in methodology):
-            # 检查原始数据中是否真的有金额列或数字证据（过滤掉简单的描述性数字）
-            numbers = re.findall(r'\d+\.\d+|\d{4,}', raw_data) # 寻找浮点数或 4 位以上整数（过滤掉 1, 2 等小编号）
-            if not numbers:
-                contract_violation = True
-                logger.warning("🚨 [CONTRACT] 检测到数据契约失效：审计口径要求数值，但取证载荷为空或无显著指标")
-
-        if (has_error or contract_violation) and state.get("retry_count", 0) < MAX_RETRIES:
-            return "CRITIC"  # 进入自愈节点，由审查官给出具体的 SQL 修正建议
-        
-        return "CONSOLIDATOR" # 成功通过或达到最大尝试次数
-        
-    workflow.add_conditional_edges(
-        "SQLEXEC", route_post_exec,
-        {
-            "SQLEXEC": "SQLEXEC", 
-            "CRITIC": "CRITIC", 
-            "CONSOLIDATOR": "CONSOLIDATOR"
-        }
-    )
-    workflow.add_edge("CRITIC", "SQLEXEC") # 自愈后返回重试
-    workflow.add_edge("CONSOLIDATOR", "REPORTER")
-    workflow.add_edge("REPORTER", END)
-    return workflow.compile()
+    [重构 V90.0] 拓扑委托给 _build_workflow_skeleton, 保证和 get_graph_executor 行为一致。
+    """
+    return _build_workflow_skeleton().compile()
 
 # 全局编译好的工作流
 workflow = build_graph()
+
+# ────────────────────────────────────────────────────────────────
+# [重构 V90.0] get_graph_executor — main.py 期望存在的导出
+# ────────────────────────────────────────────────────────────────
+# 历史包袱: main.py 多处调用 get_graph_executor(checkpointer=, model_id=)
+# 期望返回 (executor, resolved_model_id) 元组。
+# 之前此函数从未导出过, 导致 main.py import 时 ImportError。
+# ────────────────────────────────────────────────────────────────
+
+_EXECUTOR_CACHE: Dict[str, Any] = {}
+
+
+def get_graph_executor(checkpointer=None, model_id: Optional[str] = None):
+    """
+    获取 LangGraph 执行器单例。
+    
+    Args:
+        checkpointer: AsyncSqliteSaver 实例 (用于状态持久化)
+        model_id: 客户端指定的模型 ID (用于动态路由)
+    
+    Returns:
+        Tuple[CompiledGraph, str]: (执行器, 实际使用的模型 ID)
+    """
+    cache_key = f"{id(checkpointer)}_{model_id or 'default'}"
+
+    if cache_key in _EXECUTOR_CACHE:
+        return _EXECUTOR_CACHE[cache_key], (model_id or "default")
+
+    # [重构 V90.0] 拓扑由 _build_workflow_skeleton 统一定义, 保证行为一致
+    if checkpointer is not None:
+        executor = _build_workflow_skeleton().compile(checkpointer=checkpointer)
+    else:
+        executor = workflow
+
+    _EXECUTOR_CACHE[cache_key] = executor
+    resolved_id = model_id or "default"
+    logger.info(f"[GraphExecutor] cache_key={cache_key} resolved_model_id={resolved_id}")
+    return executor, resolved_id
+
 
 class AgentGraph:
     def __init__(self, model_id: str = None): self.model_id = model_id

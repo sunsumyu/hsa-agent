@@ -1,0 +1,46 @@
+# ============================================================
+# Expert Knowledge Base — 医保审计专家知识库
+# ============================================================
+# 从主题索引返回针对性提示, 替代原硬编码字符串。
+# 新增主题只需添加 topic 条目, 无需修改 Python 代码。
+# ============================================================
+
+topics:
+  - title: 跨机构重复住院
+    keywords: ["重复住院", "跨院", "同时住院", "重叠住院", "cross_hospital"]
+    hint: >
+      同一患者同一天在不同医疗机构存在重叠住院时间，通常涉及违规套取基金。
+      建议核查 start_date 和 end_date 的交集 (A.start <= B.end AND B.start <= A.end)，
+      并关联 medfee_sumamt 计算违规金额。
+
+  - title: 分解住院
+    keywords: ["分解住院", "短期再入院", "再入院", "decomposition"]
+    hint: >
+      "分解住院"指医疗机构将一次完整住院拆分为多次结算的违规行为。
+      判定要点：同一患者出院后 15 天内在同一机构再次入院，
+      且诊断关联度高 (dise_name 相似或 ICD 编码相同)。
+
+  - title: 高频购药
+    keywords: ["高频购药", "频繁购药", "药店", "high_freq_drug"]
+    hint: >
+      参保人在药店异常高频购药 (月度 >10 次 或 跨多家药店)，
+      可能涉及套现倒卖。建议按 psn_no 聚合 fixmedins_code，
+      并对比 nat_hi_druglist_memo 中的剂量限制。
+
+  - title: 性别诊断冲突
+    keywords: ["性别冲突", "性别不符", "男性妇科", "女性男科", "gender_conflict"]
+    hint: >
+      利用国家医保目录的 nat_hi_druglist_memo 字段进行性别限制对撞。
+      例：gend='1' (男性) 不应出现 nat_hi_druglist_memo LIKE '%限女性%' 的诊疗项目。
+
+  - title: 重复收费
+    keywords: ["重复收费", "重复结算", "重复计费", "repeat_billing"]
+    hint: >
+      同一就诊 (psn_no + setl_id) 下相同诊疗项目的实收数量超过单日临床合理限额。
+      建议按 (psn_no, setl_id, hilist_code) 分组计数，HAVING count() > 阈值。
+
+  - title: 团伙骗保
+    keywords: ["团伙", "欺诈环", "共用手机", "共用联系方式", "fraud_ring"]
+    hint: >
+      团伙特征：多个看似无关的参保人共享联系方式或地址。
+      建议联邦查询：图谱 (Neo4j) 发现共用关系 → sideload IDs → 在 ClickHouse 汇总报销金额。

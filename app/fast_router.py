@@ -171,10 +171,35 @@ class FastAuditRouter:
     def __init__(self, rule_config: Optional[List[Dict]] = None):
         """
         Args:
-            rule_config: 自定义规则配置列表。不传则使用默认配置。
-                         可传入空列表禁用所有快速路由（纯 LLM 模式）。
+            rule_config: 自定义规则配置列表。不传则按以下优先级加载:
+                1. configs/routing_rules.yaml (推荐, 可热更新)
+                2. DEFAULT_RULE_CONFIG (fallback 硬编码)
+                可传入空列表禁用所有快速路由（纯 LLM 模式）。
         """
-        self._config = rule_config if rule_config is not None else DEFAULT_RULE_CONFIG
+        if rule_config is not None:
+            self._config = rule_config
+            return
+
+        # 优先从 YAML 注册表加载
+        try:
+            from app.core.rule_registry import rule_registry
+            yaml_rules = rule_registry.routing_rules.get_rules_as_dicts()
+            if yaml_rules:
+                # 归一化 route_type 为枚举值 (YAML 存字符串)
+                for r in yaml_rules:
+                    rt = r.get("route_type", "KNOWN_RULE")
+                    if isinstance(rt, str):
+                        try:
+                            r["route_type"] = RouteType(rt)
+                        except ValueError:
+                            r["route_type"] = RouteType.UNKNOWN
+                self._config = yaml_rules
+                return
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"[FastRouter] YAML rules load failed, fallback to hardcoded: {e}")
+
+        self._config = DEFAULT_RULE_CONFIG
 
     def classify(self, user_question: str) -> RouteResult:
         """

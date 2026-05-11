@@ -57,14 +57,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="HSA AI Agent (Python Edition)", lifespan=lifespan)
 
-# 允许跨域请求
+# 跨域配置: 从环境变量读取允许的来源, 默认仅本地开发
+# 生产环境必须设置 CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
+# allow_origins=["*"] + allow_credentials=True 是严重安全漏洞 (允许任意域携带 Cookie)
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000")
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+
+# 安全护栏: 若同时允许 credentials 和通配符, 强制降级为不带 credentials
+if _allow_credentials and "*" in _cors_origins:
+    logger.warning("[SECURITY] CORS 配置不安全: allow_origins=['*'] 与 allow_credentials=True 冲突, 已强制禁用 credentials")
+    _allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-Id"],
 )
+logger.info(f"[CORS] allowed_origins={_cors_origins} allow_credentials={_allow_credentials}")
 
 # [V4.6.0] 协议拦截器：流式状态机体系，彻底解决标签泄露与 OOM 风险
 class ProtocolInterceptor:
@@ -215,18 +227,14 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
     2. 对物理表名进行脱敏。
     3. 支持会话自动寻回。
     """
-    body = await request.body()
-    try:
-        # 尝试解析为 JSON 并提取 input 字段，兼容 Java 侧的 Payload
-        data = json.loads(body.decode("utf-8"))
-        message = data.get("input", str(data))
-        model_id = data.get("modelId") # 获取前端指定的模型 ID
-    except Exception:
-        # 回退到原始文本模式
-        message = body.decode("utf-8")
-        model_id = None
-        
-    session_id = request.headers.get("X-Session-Id", "default-python-session")
+    # [重构 V90.0] HTTP 解析逻辑已提取到 app.chat_stream.parse_chat_request
+    from app.chat_stream import (
+        parse_chat_request,
+        emit_node_status,
+        emit_tool_start_events,
+        classify_and_render_error,
+    )
+    message, model_id, session_id = await parse_chat_request(request)
     
     logger.info(f"收到请求 [Session: {session_id}][Model: {model_id}]: {message}")
 
@@ -358,74 +366,19 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
                 elif kind == "on_chain_start":
                     # [V15.3 强固检测] 优先使用 metadata 中的节点名称，其次使用 chain name
                     check_name = (lg_node or name).upper()
-                    
-                    # 监听专家节点切换，发送 3D 状态包 (不再重复读取 DB 以防死锁)
-                    if check_name in ["DATA_EXPERT", "AUDITOR", "FINANCIAL_EXPERT", "REPORTER", "SOLO_EXPERT"]:
-                        # [V15.9.2] 统一归一化标识，确保交付拦截器大小写匹配
+                    # [重构 V90.0] 节点切换的协议包生成委托给 emit_node_status
+                    if check_name in ("DATA_EXPERT", "AUDITOR", "FINANCIAL_EXPERT", "REPORTER", "SOLO_EXPERT"):
                         active_node = "REPORTER" if check_name == "REPORTER" else "EXPERT"
-                        
-                        display_name = {
-                            "DATA_EXPERT": "数据外联专家",
-                            "AUDITOR": "政策合规专家",
-                            "FINANCIAL_EXPERT": "精算核算专家",
-                            "REPORTER": "稽核报告终审",
-                            "SOLO_EXPERT": "全能审计专家"
-                        }.get(check_name, check_name)
-                        
-                        # 只有正式节点切换才下发状态
-                        if name != "solo_expert_node":
-                            yield f"[[[STATUS:正在激活 [{display_name}] 进行推演...]]]"
-                        # 触发初始空间移动 — 键名与前端 ARCHIVE_WORLD 严格一致
-                        if name == "data_expert": 
-                            yield "[[[MOVE:default.fqz_all_yy_yd_1]]]"
-                            yield "[[[SCHEMA:default.fqz_all_yy_yd_1:fixmedins_code,medfee_sumamt,setl_time,psn_no]]]"
-                        elif name == "auditor": 
-                            yield "[[[MOVE:hsa_policy_kb]]]"
-                            yield "[[[SCHEMA:hsa_policy_kb:rule_id,rule_name,legal_basis,risk_weight]]]"
-                        elif name == "financial_expert": 
-                            yield "[[[MOVE:t_audit_task]]]"
-                            yield "[[[SCHEMA:t_audit_task:task_id,status,target_hosp_id,audit_amount]]]"
+                        for packet in emit_node_status(check_name, name):
+                            yield packet
 
                 elif kind == "on_tool_start":
                     name = event['name']
                     inputs = event['data']['input'] or {}
                     logger.info(f"审计工具执行: {name} -> {inputs}")
-                    
-                    # 联动 3D：精确空间指令
-                    if name in ["execute_audit_sql", "get_table_schema"]:
-                        db = inputs.get("db_type", "clickhouse")
-                        table = inputs.get("table_name", "archives")
-                        if table == "archives": table = "fqz_all_yy_yd_1"
-                        
-                        # 统一为前端 ARCHIVE_WORLD 键名
-                        world_key = f"default.{table}" if db == "clickhouse" else table
-                        yield f"[[[MOVE:{world_key}]]]"
-                        yield f"[[[LOGIC:正在执行交叉核验 -> 检索键: {inputs.get('sql', 'Metadata Fetch')[:50]}...]]]"
-                        if "sql" in inputs:
-                            sql_val = inputs['sql']
-                            yield f"[[[SQL:{sql_val}]]]"
-                            # 新增: 精确书架命中协议 — 从 SQL 中提取 SELECT 字段
-                            try:
-                                col_match = re.search(r'SELECT\s+(.+?)\s+FROM', sql_val, re.IGNORECASE)
-                                if col_match:
-                                    raw_cols = col_match.group(1).strip()
-                                    if raw_cols != '*':
-                                        cols = [c.strip().split('.')[-1].split(' ')[0] for c in raw_cols.split(',')]
-                                        yield f"[[[BOOKSHELF:{world_key}:{','.join(cols)}]]]"
-                                    else:
-                                        yield f"[[[BOOKSHELF:{world_key}:*]]]"
-                            except Exception:
-                                pass
-                    elif name == "search_expert_knowledge":
-                        yield "[[[MOVE:hsa_policy_kb]]]"
-                        yield "[[[THOUGHT:正在检索核心政策库以比对违规特征...]]]"
-                        yield "[[[LOGIC:输入诊断特征 -> 搜索高风险规则集...]]]"
-                        query_text = inputs.get('query', '')[:40]
-                        yield f"[[[BOOKSHELF:hsa_policy_kb:rule_name,legal_basis]]]"
-                    elif name == "calculator":
-                        yield "[[[MOVE:logic_core]]]"
-                        yield "[[[THOUGHT:正在启动确证计算引擎，进行高精度金额核算...]]]"
-                        yield "[[[LOGIC:输入数值对 -> 精算确认违规金额总计...]]]"
+                    # [重构 V90.0] 工具启动协议包委托给 emit_tool_start_events
+                    for packet in emit_tool_start_events(name, inputs):
+                        yield packet
 
                 elif kind == "on_tool_end":
                     name = event['name']
@@ -539,38 +492,26 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
             logger.error(f"Agent Engine Error: {err_msg}")
             
             # [V4.9.15] 架构级容灾：将异常反馈给稳定性注册表
-            if 'resolved_id' in locals():
-                usage_tracker.record_failure(resolved_id, err_msg)
+            _rid = resolved_id if 'resolved_id' in locals() else None
+            if _rid:
+                usage_tracker.record_failure(_rid, err_msg)
             
-            # 1. 协议透传：如果是 Token 耗尽导致的结构化建议，必须原样透传
-            if "[[[OUT_OF_TOKEN" in err_msg:
-                yield f"\n{err_msg}"
-            elif "403" in err_msg or "Forbidden" in err_msg or "exhausted" in err_msg.lower():
-                if 'resolved_id' in locals():
-                    # 抓取当前该节点已消耗的总 Token 数，供用户透明查看
-                    consumed_tokens = usage_tracker.stats.daily_usage.get(resolved_id, 0)
-                    
-                    is_free_tier_limited = "FreeTierOnly" in err_msg or "free tier" in err_msg.lower()
-                    if is_free_tier_limited:
-                        platform_name = "阿里云百炼 (Bailian)" if "qwen" in resolved_id or "deepseek" in resolved_id or "llama" in resolved_id else "火山引擎 (Volcengine)"
-                        usage_tracker.blacklist_model(resolved_id, reason=f"FreeTier Limit (Switch Required)", permanent=True)
-                        # [V5.3.1] 联动自愈：单点报错，后台静默全网体检
-                        background_tasks.add_task(model_manager.run_health_check)
-                        yield f"\n\n> [!CAUTION]\n> **检测到算力配额冲突 (403)**\n> \n> **平台来源**: {platform_name}\n> **架构自愈中**: 您的账号目前开启了“仅限免费额度”保护。系统已封禁该节点，并同步启动后台探测全场可用性。\n> \n> **📊 资源消耗公开**: 节点 `{resolved_id}` 今日消耗 `{consumed_tokens:,}` Tokens。"
-                    else:
-                        usage_tracker.blacklist_model(resolved_id, reason=f"Provider Quota Exhausted (403)", permanent=True)
-                        # [V5.3.1] 联动自愈：全自动踢人排查，锁定健康备份
-                        background_tasks.add_task(model_manager.run_health_check)
-                        yield f"\n\n> [!WARNING]\n> **算力配额熔断 (403)**\n> 当前模型 `{resolved_id}` 已耗尽。系统已启动后台自检排查，自动锁定健康的存活模型。"
-            elif "Model not found" in err_msg:
-                err_str = f"\n[算力链路异常]: 找不到模型标识符。请检查 llm_providers.json 配置。"
-                yield err_str
-                ai_response_content += err_str
-            else:
-                err_str = f"\n[核心审计异常]: 处理中断。详细信息: {err_msg[:50]}..."
-                yield err_str
-                ai_response_content += err_str
-                
+            # [重构 V90.0] 错误分类 + 自愈文案已提取到 classify_and_render_error
+            # 该函数处理: Token 耗尽透传 / 403 配额熔断 / Model not found / 兜底
+            # 以及黑名单和后台健康检查的副作用
+            err_packets = classify_and_render_error(
+                err_msg=err_msg,
+                resolved_id=_rid,
+                usage_tracker=usage_tracker,
+                model_manager=model_manager,
+                background_tasks=background_tasks,
+            )
+            for pkt in err_packets:
+                yield pkt
+                # Model not found / 兜底错误需要计入 ai_response_content
+                if pkt.startswith("\n[算力链路异常]") or pkt.startswith("\n[核心审计异常]"):
+                    ai_response_content += pkt
+
             # 异常时也要保存历史，否则会导致对话树不对齐
             history_manager.save_turn(session_id, message, ai_response_content)
 
@@ -700,7 +641,8 @@ async def get_palace_timeline(session_id: str = "default_session"):
     """[V4.9.6] MemPalace 记忆时间轴：获取 Agent 推演时的离散记忆切片"""
     try:
         async with AsyncSqliteSaver.from_conn_string("audit_checkpoints.db") as saver:
-            agent = get_graph_executor(saver)
+            # [Bug fix V90.0] get_graph_executor 返回 (executor, model_id) 元组, 必须解包
+            agent, _ = get_graph_executor(checkpointer=saver)
             state_snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
             if state_snapshot and getattr(state_snapshot, "values", None):
                 events = state_snapshot.values.get("timeline_events", [])

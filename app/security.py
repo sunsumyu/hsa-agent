@@ -4,6 +4,8 @@ import sqlglot
 from sqlglot import exp
 from loguru import logger
 
+from app.core.schema_registry import schema_registry
+
 class SecurityViolationError(Exception):
     """物理安全或算力限制违规异常"""
     pass
@@ -56,11 +58,15 @@ class SQLGuardian:
             logger.error(f"[SECURITY] SQL 框架解析失败: {pe}")
             raise SecurityViolationError(f"物理语法解析失败：{str(pe)}。请检查 SQL 结构是否完整。")
 
-        # ── Step 1: 表名白名单校验 ────
+        # ── Step 1: 表名白名单校验 (从 SchemaRegistry 读取) ────
+        forbidden_tables = {t.lower() for t in schema_registry.get_forbidden_table_names()}
+        valid_prefixes = tuple(p.lower() for p in schema_registry.get_valid_prefixes())
         for table in expression.find_all(exp.Table):
             table_name = table.name.lower()
-            forbidden_tables = {"patient_info", "medical_fees", "users", "orders", "settlements"}
-            if table_name in forbidden_tables or (not table_name.startswith("fqz_") and table_name not in {"dual"}):
+            if table_name in forbidden_tables or (
+                not any(table_name.startswith(p) for p in valid_prefixes)
+                and table_name not in {"dual"}
+            ):
                 is_cte = False
                 parent = table.parent
                 while parent:
@@ -146,7 +152,9 @@ class SQLGuardian:
         """
         joins = list(expression.find_all(exp.Join))
         table_names = [t.name.upper() for t in expression.find_all(exp.Table)]
-        large_tables = ["FQZ_GZ_JZSJ_ALL_QL", "FQZ_GZ_JZSJ_ALL_QL_FIXED"]
+        # 大表列表从 SchemaRegistry 读取
+        main_table = schema_registry.get_main_table().upper()
+        large_tables = [main_table, f"{main_table}_FIXED"]
         
         involves_large_table = any(t in large_tables for t in table_names)
         
@@ -184,9 +192,14 @@ class SQLGuardian:
     @staticmethod
     def inject_settings(sql: str) -> str:
         sql = sql.strip().rstrip(";")
-        QUOTA_SETTINGS = "SETTINGS max_execution_time=30, max_memory_usage=2000000000, readonly=1"
+        max_time = schema_registry.get_max_execution_time()
+        max_mem = schema_registry.get_max_memory_usage()
+        quota_settings = (
+            f"SETTINGS max_execution_time={max_time}, "
+            f"max_memory_usage={max_mem}, readonly=1"
+        )
         if "SETTINGS" not in sql.upper():
-            return f"{sql}\n{QUOTA_SETTINGS}"
+            return f"{sql}\n{quota_settings}"
         return sql
 
     @staticmethod

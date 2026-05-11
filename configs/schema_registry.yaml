@@ -1,0 +1,89 @@
+# ============================================================
+# Schema Registry — 数据库结构单一事实源
+# ============================================================
+# 所有模块 (security, prompts, audit_rules, tools, agent_graph)
+# 都必须从此处读取表名/字段信息, 严禁硬编码。
+# ============================================================
+
+db_engine: clickhouse
+main_table: fqz_gz_jzsj_all_ql
+drug_catalog_table: fqz_drug_mcs_info_list
+hospital_stats_table: fqz_all_yy_yd_1
+
+# SQLGuardian 白名单
+valid_table_prefixes:
+  - "fqz_"
+
+# 幻觉表拦截列表
+forbidden_table_names:
+  - patient_info
+  - medical_fees
+  - users
+  - orders
+  - settlements
+  - disease_policy
+  - patient_records
+
+# 脱敏字段
+sensitive_fields:
+  - tel
+  - phone
+  - mobile
+  - certno
+  - addr
+  - psn_name
+
+# SQL 执行安全限制
+max_execution_time: 30
+max_memory_usage: "2000000000"
+default_limit: 100
+default_time_filter: "setl_time >= '2024-01-01'"
+
+# ── 表定义 ──────────────────────────────────────────────────
+
+tables:
+  - name: fqz_gz_jzsj_all_ql
+    alias: 全量结算明细表
+    description: 全量就诊结算明细, 包含参保人基本信息、诊断、费用、结算等全量字段
+    partition_field: setl_time
+    default_time_filter: "setl_time >= '2024-01-01 00:00:00'"
+    fields:
+      - { name: psn_no,           type: String,   desc: "参保人唯一ID" }
+      - { name: psn_name,         type: String,   desc: "参保人姓名 (敏感)" }
+      - { name: gend,             type: String,   desc: "性别编码 (1=男, 2=女)" }
+      - { name: certno,           type: String,   desc: "身份证号 (敏感)" }
+      - { name: tel,              type: String,   desc: "联系电话 (敏感)" }
+      - { name: fixmedins_code,   type: String,   desc: "医疗机构编码" }
+      - { name: fixmedins_name,   type: String,   desc: "医疗机构名称" }
+      - { name: med_type,         type: String,   desc: "医疗类型 (住院/门诊/药店)" }
+      - { name: setl_id,          type: String,   desc: "结算ID" }
+      - { name: setl_time,        type: DateTime, desc: "结算时间" }
+      - { name: start_date,       type: String,   desc: "入院/开始日期" }
+      - { name: end_date,         type: String,   desc: "出院/结束日期" }
+      - { name: ipt_days,         type: String,   desc: "住院天数 (String, 需 toUInt32OrZero)" }
+      - { name: dise_name,        type: String,   desc: "诊断名称" }
+      - { name: medfee_sumamt,    type: Float64,  desc: "医疗总费用" }
+      - { name: fund_pay_sumamt,  type: Float64,  desc: "基金支付总额" }
+      - { name: hilist_code,      type: String,   desc: "医保目录编码" }
+      - { name: hilist_name,      type: String,   desc: "医保目录名称" }
+
+  - name: fqz_drug_mcs_info_list
+    alias: 医保限制目录
+    description: 国家医保药品/诊疗目录限制信息
+    fields:
+      - { name: med_list_code,          type: String, desc: "目录编码" }
+      - { name: nat_hi_druglist_memo,   type: String, desc: "国家目录限制备注 (含性别限制等)" }
+
+  - name: fqz_all_yy_yd_1
+    alias: 机构月度指标表
+    description: 定点医疗机构月度统计指标
+    partition_field: setl_time
+    fields:
+      - { name: fixmedins_code,   type: String,   desc: "医疗机构编码" }
+      - { name: fixmedins_name,   type: String,   desc: "医疗机构名称" }
+      - { name: medfee_sumamt,    type: Float64,  desc: "医疗总费用" }
+      - { name: fund_pay_sumamt,  type: Float64,  desc: "基金支付总额" }
+      - { name: vix,              type: Float64,  desc: "变异指数" }
+      - { name: psn_no,           type: String,   desc: "参保人ID" }
+      - { name: ipt_days,         type: String,   desc: "住院天数" }
+      - { name: setl_time,        type: DateTime, desc: "结算时间" }

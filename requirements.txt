@@ -1,16 +1,59 @@
-fastapi==0.111.0
-uvicorn==0.30.1
-langchain==0.1.20
-langchain-openai==0.1.7
-clickhouse-connect==0.7.16
-python-dotenv==1.0.1
-pydantic==2.7.1
-httpx==0.27.0
-loguru==0.7.2
-faiss-cpu==1.8.0
-sentence-transformers==2.7.0
-deepeval==0.21.42
-langchain-google-genai==1.0.3
-google-generativeai==0.5.2
-markitdown==0.0.1a2
-langgraph==0.0.39
+# =============================================================================
+# HSA Agent - Python dependencies
+# =============================================================================
+# [Phase 7 V90.0] Synced with actually-installed versions (2026-05-11).
+# Previous pins were 1-2 years stale - new clones would install incompatible
+# versions (e.g. langgraph==0.0.39 lacks AsyncSqliteSaver, deepeval==0.21.42
+# lacks GEval). Loose pinning (>=) preferred where API is stable, exact pin
+# (==) where there is high churn (langgraph, langchain*).
+# =============================================================================
+
+# --- Web framework ---
+fastapi>=0.115,<0.140
+uvicorn>=0.30,<0.50
+
+# --- LangChain stack (high churn - pin major.minor) ---
+langchain==0.3.*
+langchain-core==0.3.*
+langchain-community==0.3.*
+langchain-openai==0.2.*
+langchain-google-genai==2.0.*
+langchain-text-splitters==0.3.*
+langgraph==0.2.*
+langfuse>=4.0,<5.0
+
+# --- LLM SDKs ---
+google-generativeai>=0.8,<0.9
+
+# --- Data stores / connectors ---
+clickhouse-connect>=0.7,<0.9
+clickhouse-driver>=0.2,<0.3
+neo4j>=6.0,<7.0
+aiosqlite>=0.20,<1.0
+
+# --- SQL / AST ---
+sqlglot>=25.0
+
+# --- ML / embeddings ---
+faiss-cpu>=1.8,<2.0
+sentence-transformers>=2.7,<3.0
+spacy>=3.8,<4.0
+
+# --- Evaluation harness ---
+deepeval>=3.0,<4.0
+pytest>=8.0
+pytest-asyncio>=0.23
+
+# --- Observability ---
+arize-phoenix>=14.0,<15.0
+openinference-instrumentation>=0.1,<1.0
+
+# --- Utilities ---
+pydantic>=2.7,<3.0
+python-dotenv>=1.0,<2.0
+loguru>=0.7,<1.0
+requests>=2.30
+jinja2>=3.1
+httpx>=0.27,<1.0
+markitdown>=0.1,<1.0
+pyyaml>=6.0

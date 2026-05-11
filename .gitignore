@@ -19,10 +19,34 @@ agent_start_log.txt
 .DS_Store
 Thumbs.db
 
-# Data/Temporary
+# ── JSON 规则: 默认忽略, 白名单显式追踪 ───────────────────
 *.json
 !llm_registry.json
 !llm_providers.json
+!app/role_configs.json
+!app/endpoint_pools.json
+!app/semantic_config.json
+!tests/eval/golden_dataset.json
+!tests/eval/golden_dataset_*.json
 !requirements.txt
+
+# ── 配置文件目录 (必须追踪) ───────────────────────────────
+# configs/ prompts/ rules/ 目录下所有 yaml/yml/json 都应追踪
+
+# ── 数据库和运行时产物 ────────────────────────────────────
 *.db
+*.db-shm
+*.db-wal
 data/reports/
+data/phoenix/
+data/semantic_index/
+data/usage_stats.json
+
+# ── 备份和临时文件 ────────────────────────────────────────
+*.bak
+*.tmp
+*.swp
+
+# ── 大仓库内脏文件 ────────────────────────────────────────
+scratch/
+docs-log/

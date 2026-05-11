@@ -95,35 +95,107 @@ async def execute_audit_sql(sql: str, db_type: str = "clickhouse") -> Any:
 
 @tool
 def list_tables() -> str:
-    """列出可用审计数据表。"""
-    return "fqz_gz_jzsj_all_ql (就诊结算全量表)"
+    """列出当前医保审计数据库中所有可用的物理表及其业务说明。从 SchemaRegistry 读取，不再写死。"""
+    from app.core.schema_registry import schema_registry
+    return schema_registry.get_tables_summary() or "⚠️ 未加载到表定义"
+
+# 表名校验正则: 仅允许字母/数字/下划线, 防止 SQL 注入
+import re as _re_tools
+_TABLE_NAME_RE = _re_tools.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 @tool
 def get_table_schema(table_name: str) -> str:
-    """获取 ClickHouse 物理表的真实字段结构，返回字段名和类型列表。"""
+    """获取 ClickHouse 物理表的真实字段结构。优先从 SchemaRegistry 读取，未注册时才走 DESCRIBE。"""
+    # 安全校验: 防止 SQL 注入。原代码直接拼接 {table_name} 到 SQL。
+    if not table_name or not _TABLE_NAME_RE.match(table_name):
+        return f"非法表名: {table_name!r} (仅允许 a-zA-Z0-9_)"
+
+    from app.core.schema_registry import schema_registry
+    # 1. 优先走注册表 (零 DB 费用)
+    entry = schema_registry.get_table(table_name)
+    if entry:
+        return "\n".join(
+            f"{f['name']} ({f.get('type', 'String')}) - {f.get('desc', '')}"
+            for f in entry.fields
+        )
+    # 2. 未注册才查数据库 (此时已经通过名称正则校验, 安全)
     try:
         client = get_clickhouse_client()
         result = client.query(f"DESCRIBE TABLE {table_name}")
         fields = [f"{row[0]} ({row[1]})" for row in result.result_rows]
-        return "\n".join(fields)
+        return "\n".join(fields) if fields else f"表 {table_name} 不存在"
     except Exception as e:
         return f"获取表结构失败: {e}"
 
+# 安全计算器: 只允许数字+运算符。路由物理拦截子类逃逸攻击。
+_SAFE_EXPR_RE = _re_tools.compile(r"^[\d\s\.\+\-\*\/\(\)\%]+$")
+
 @tool
 def calculator(expr: str) -> str:
-    """高精度数学计算器。"""
-    try: return str(eval(expr, {"__builtins__": None}, {}))
-    except: return "计算失败"
+    """高精度数学计算器。仅支持数字和算术运算符，拒绝名称、属性访问、函数调用等。防止 eval() 的子类逃逸攻击。"""
+    if not expr or not _SAFE_EXPR_RE.match(expr):
+        return f"非法表达式: {expr!r} (仅允许数字和 + - * / ( ) % )"
+    try:
+        # compile 为 expression mode + 源码白名单双重防护
+        code = compile(expr, "<calc>", "eval")
+        for name in code.co_names:
+            return f"非法名称引用: {name}"
+        return str(eval(code, {"__builtins__": {}}, {}))
+    except Exception as e:
+        return f"计算失败: {e}"
+
 
 # ──────────────────────────────────────────────────────────
 # 规则引擎与专家知识 (M3 成果落地)
 # ──────────────────────────────────────────────────────────
 
+# [重构 V90.0] 专家知识库: 从 SemanticRetriever 识别任务型别返回针对性提示
+import os as _os_tools
+_EXPERT_KB_PATH = _os_tools.path.join(
+    _os_tools.path.dirname(__file__), "..", "configs", "expert_knowledge.yaml"
+)
+_EXPERT_KB_CACHE = None
+
+def _load_expert_kb():
+    global _EXPERT_KB_CACHE
+    if _EXPERT_KB_CACHE is not None:
+        return _EXPERT_KB_CACHE
+    try:
+        import yaml
+        with open(_EXPERT_KB_PATH, "r", encoding="utf-8") as f:
+            _EXPERT_KB_CACHE = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        _EXPERT_KB_CACHE = {}
+    except Exception as e:
+        logger.warning(f"[ExpertKB] load failed: {e}")
+        _EXPERT_KB_CACHE = {}
+    return _EXPERT_KB_CACHE
+
 @tool
 def search_expert_knowledge(query: str) -> str:
-    """检索医保审计专家知识库。"""
-    # 模拟专家经验：对于重复住院，需要关注同一天不同机构的结算重叠
-    return "专家提示：同一患者同一天在不同医疗机构存在重叠住院时间，通常涉及违规套取基金。建议核查 start_date 和 end_date 的交集。"
+    """检索医保审计专家知识库。从 configs/expert_knowledge.yaml 加载由主题索引的专家提示。"""
+    if not query:
+        return "⚠️ 查询为空"
+
+    kb = _load_expert_kb()
+    topics = kb.get("topics", [])
+    if not topics:
+        return "⚠️ 专家知识库未配置 (configs/expert_knowledge.yaml)"
+
+    q_lower = query.lower()
+    matched = []
+    for topic in topics:
+        keywords = topic.get("keywords", [])
+        if any(kw.lower() in q_lower for kw in keywords):
+            matched.append(
+                f"【{topic.get('title', '')}】{topic.get('hint', '')}"
+            )
+
+    if not matched:
+        return f"未检索到与 '{query}' 匹配的专家知识。已收录主题: " + ", ".join(
+            t.get("title", "") for t in topics
+        )
+    return "\n\n".join(matched)
 
 @tool
 async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:

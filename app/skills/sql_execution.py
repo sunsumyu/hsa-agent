@@ -15,12 +15,11 @@ class SQLSafeExecutionSkill(BaseTool):
     async def _arun(self, sql: str) -> Union[str, Dict[str, Any]]:
         from app.security import SQLGuardian
         from app.db_conn import get_clickhouse_client
-        from app.security import SQLGuardian
-        from app.db_conn import get_clickhouse_client
+        from app.core.schema_registry import schema_registry
         
         def _mask_sensitive_data(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-            """[V82.0] 就地实现脱敏逻辑，确保数据安全并修复导入错误"""
-            sensitive_fields = {"tel", "phone", "mobile", "certno", "addr", "psn_name"}
+            """脱敏字段列表从 SchemaRegistry 读取, 消灭硬编码"""
+            sensitive_fields = schema_registry.get_sensitive_fields()
             for row in records:
                 for field in sensitive_fields:
                     if field in row and row[field]:

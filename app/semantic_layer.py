@@ -3,14 +3,16 @@ import re
 import faiss
 from loguru import logger
 
-class SemanticRetriever:
+# [重构 V90.0] 原文件存在两个重复的 SemanticRetriever 类定义, 第二个会覆盖第一个
+# 导致 extract_metadata 方法丢失。现在合并: _MetadataExtractor 作为辅助基类,
+# SemanticRetriever 为唯一对外入口。
+
+class _MetadataExtractor:
+    """从百科文档中提取字段语义元数据的辅助类。"""
+
     def __init__(self, schema_file="e:/chain/hsa-agent-python/docs/medical_audit_encyclopedia.md"):
         self.schema_file = schema_file
-        # [V66.2] 生产级 BGE 语义模型切换：全面提升中文审计意图识别精度
         self.model_name = "BAAI/bge-small-zh-v1.5"
-        self._model = None
-        self.data_dir = "data/semantic_index"
-        os.makedirs(self.data_dir, exist_ok=True)
 
     def extract_metadata(self):
         """解析 v3.0 百科文档，提取全域 32 表分区业务含义"""
@@ -124,8 +126,10 @@ def get_embedding_model():
         _GLOBAL_EMBEDDING_MODEL = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
     return _GLOBAL_EMBEDDING_MODEL
 
-class SemanticRetriever:
-    def __init__(self, data_dir="data/semantic_index"):
+class SemanticRetriever(_MetadataExtractor):
+    def __init__(self, data_dir="data/semantic_index",
+                 schema_file="e:/chain/hsa-agent-python/docs/medical_audit_encyclopedia.md"):
+        super().__init__(schema_file=schema_file)
         self.data_dir = data_dir
         self.index = None
         self.column_metadata = []

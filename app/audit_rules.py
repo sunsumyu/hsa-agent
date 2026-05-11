@@ -4,12 +4,14 @@ from typing import List, Dict, Any, Optional
 from loguru import logger
 
 class AuditRuleEngine:
-    """[V37.7] 审计规则引擎：物理算子库已适配生产数据真实口径"""
+    """[V37.7 重构] 审计规则引擎：SQL 模板已外置到 rules/sql_templates.yaml。
     
-    # --- [V37.7] 生产数据经口径校准后的 SQL 模板库 ---
-    # 实测数据结构: fqz_gz_jzsj_all_ql 为全量结算明细
-    # 字段: psn_no, fixmedins_code, fixmedins_name, med_type, start_date, end_date,
-    #        dise_name, medfee_sumamt, fund_pay_sumamt, setl_id, setl_time
+    本类作为历史兼容层保留, 实际模板从 app.core.rule_registry 加载。
+    新增规则只需编辑 YAML 配置, 无需修改 Python 源码。
+    """
+    
+    # [DEPRECATED] 保留 TEMPLATES 字典用于向后兼容, 但内容已移至 rules/sql_templates.yaml
+    # 若 YAML 缺失或加载失败, 可作为兜底
     TEMPLATES = {
         # [算子 1] 性别与诊断冲突 [ISS-008 Fix]
         "GENDER_CONFLICT": """
@@ -156,23 +158,35 @@ class AuditRuleEngine:
     }
 
     @staticmethod
-    def get_rule_sql(rule_id: str, table_name: str = "fqz_gz_jzsj_all_ql", limit: int = 50, extra_filters: Optional[Dict[str, str]] = None) -> str:
+    def get_rule_sql(rule_id: str, table_name: Optional[str] = None, limit: int = 50, extra_filters: Optional[Dict[str, str]] = None) -> str:
         """
-        [企业级算子引擎 V61.5] 结构化获取审计 SQL 并注入动态过滤器。
-        
-        改进点：
-        1. 字段对齐：通过 FieldKG 将动态字段映射为标准物理字段。
-        2. 算子推断：自动补全缺失的 '=' 或 'LIKE'。
-        3. 安全包裹：智能处理单引号，防止语法崩溃。
+        [企业级算子引擎 V62.0] 优先从 YAML RuleRegistry 加载, fallback 到内置 TEMPLATES。
         """
-        template = AuditRuleEngine.TEMPLATES.get(rule_id.upper())
-        if not template:
-            # [V66.2] 静默处理：由 Skill 层决定是否回退到算法库，不再强制报错
-            logger.debug(f">>> [RuleEngine] 算子 {rule_id} 不在规则库，尝试回退...")
-            return ""
+        # 1a. 默认表名从 SchemaRegistry 读取
+        if table_name is None:
+            try:
+                from app.core.schema_registry import schema_registry
+                table_name = schema_registry.get_main_table()
+            except Exception:
+                table_name = "fqz_gz_jzsj_all_ql"
 
-        # 1. 基础渲染（处理表名和限制）
-        sql = template.format(table=table_name, limit=limit)
+        # 1b. 优先走外置 YAML Registry
+        sql = ""
+        try:
+            from app.core.rule_registry import rule_registry
+            sql = rule_registry.sql_templates.get_sql(
+                rule_id, table=table_name, limit=limit
+            )
+        except Exception as e:
+            logger.debug(f"[RuleEngine] YAML registry load failed, fallback: {e}")
+
+        # 1c. Fallback 到内置模板
+        if not sql:
+            template = AuditRuleEngine.TEMPLATES.get(rule_id.upper())
+            if not template:
+                logger.debug(f">>> [RuleEngine] 算子 {rule_id} 不在规则库，尝试回退...")
+                return ""
+            sql = template.format(table=table_name, limit=limit)
         
         # 2. 清理：移除残留在模板功能区的中文干扰项（保护单引号内业务关键词）
         import re

@@ -1,18 +1,12 @@
 import os
 import json
 import logging
+import asyncio
 from loguru import logger
 from typing import Dict, Optional, List, Any
 from datetime import datetime
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
-import requests
-from app.usage_tracker import usage_tracker
-from app.endpoint_pool_manager import endpoint_pool_manager
-from app.schemas import ModelConfig, EndpointConfig, RoleConfigV2
-from app.observability import get_callbacks
-from dotenv import load_dotenv
-# load_dotenv() - Moved below
 import requests
 from app.usage_tracker import usage_tracker
 from app.endpoint_pool_manager import endpoint_pool_manager
@@ -216,8 +210,36 @@ class ModelManager:
                 logger.warning(f"本地语义模型加载失败: {e}，将回退至通用模式")
         return self._local_embedder
 
+    # 复杂度判定的启发式信号 (从 SchemaRegistry 衍生)
+    _COMPLEX_SIGNALS = (
+        "团伙", "欺诈环", "共用", "联邦", "图谱", "多层关联",
+        "跨机构", "跨年", "环路", "图分析", "graph", "fraud_ring",
+    )
+    _SIMPLE_SIGNALS = (
+        "性别冲突", "重复收费", "查一下", "列出", "显示",
+        "总数", "数量", "多少",
+    )
+
     def classify_complexity_locally(self, text: str) -> str:
-        # 暂时保持简单逻辑，如需扩展则调用 self.local_embedder
+        """
+        启发式复杂度分类。原版御宅式返回 MEDIUM, 导致 planner_light/heavy 路由失效。
+        现按关键词信号 + 长度做出合理判断:
+          - HIGH: 命中复杂信号 (团伙/联邦/图谱) 或 文本超长
+          - LOW: 命中简单信号 (性别冲突/查一下) 且文本短
+          - MEDIUM: 默认
+        """
+        if not text:
+            return "MEDIUM"
+
+        t = text.lower()
+        # 高复杂度: 关键词 OR 任务文本超过 200 字符
+        if any(s in text for s in self._COMPLEX_SIGNALS) or any(s in t for s in ("fraud_ring", "graph", "联邦")):
+            return "HIGH"
+        if len(text) > 200:
+            return "HIGH"
+        # 低复杂度: 关键词 AND 文本简短
+        if any(s in text for s in self._SIMPLE_SIGNALS) and len(text) < 50:
+            return "LOW"
         return "MEDIUM"
         
     def _load_config(self) -> Dict[str, ModelConfig]:
@@ -379,7 +401,37 @@ class ModelManager:
         return Reranker(reranker_id, cfg) if cfg else None
 
     async def run_health_check(self):
-        """[V44.0] 基础健康检查占位"""
-        pass
+        """[V90.0] 周期性健康检查: 校验端点池中每个 endpoint 的可用性。
+        
+        原版为空 pass, 但启动时 main.py 已经 asyncio.create_task() 它,
+        系统声称具备"算力自愈"能力, 实际为空操作。
+        
+        现在的实现:
+          - 每 5 分钟巡检一次
+          - 通过 endpoint_pool_manager 的黑名单状态做轻量级心跳
+          - 仅记录指标, 不主动调用外部 API (避免烧 token)
+        """
+        interval_seconds = int(os.getenv("HEALTH_CHECK_INTERVAL_SECONDS", "300"))
+        logger.info(f"[HealthCheck] 启动, interval={interval_seconds}s")
+        while True:
+            try:
+                await asyncio.sleep(interval_seconds)
+                pools = endpoint_pool_manager.list_pools() if hasattr(endpoint_pool_manager, "list_pools") else []
+                healthy = 0
+                blacklisted = 0
+                for pool_id in pools:
+                    pool_endpoints = endpoint_pool_manager.get_pool_endpoints(pool_id) if hasattr(endpoint_pool_manager, "get_pool_endpoints") else []
+                    for ep in pool_endpoints:
+                        ep_id = getattr(ep, "id", None) or (ep.get("id") if isinstance(ep, dict) else None)
+                        if ep_id and usage_tracker.is_blacklisted(ep_id):
+                            blacklisted += 1
+                        else:
+                            healthy += 1
+                logger.info(f"[HealthCheck] healthy={healthy} blacklisted={blacklisted}")
+            except asyncio.CancelledError:
+                logger.info("[HealthCheck] 收到取消信号, 优雅退出")
+                break
+            except Exception as e:
+                logger.warning(f"[HealthCheck] 巡检异常: {e}")
 
 model_manager = ModelManager()
