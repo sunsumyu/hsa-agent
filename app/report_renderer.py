@@ -59,7 +59,7 @@ DEFAULT_RISK_THRESHOLDS = {
 DEFAULT_MAX_EVIDENCE_ROWS = 10
 
 # 证据表格中不展示的敏感字段（脱敏处理）
-SENSITIVE_FIELDS = {"psn_name", "certno", "phone", "addr"}
+SENSITIVE_FIELDS = {"psn_name", "certno", "phone", "addr", "org_name", "fixmedins_name", "id_card", "tel"}
 
 
 @dataclass

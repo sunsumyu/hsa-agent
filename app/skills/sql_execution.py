@@ -31,14 +31,14 @@ class SQLSafeExecutionSkill(BaseTool):
         logger.info(f"🛡️ [Skill] Validating and Executing SQL...")
         
         try:
+            # [V121.1] 物理验证与执行
             safe_sql = SQLGuardian.validate_sql(sql)
-            
             client = get_clickhouse_client()
             result = await asyncio.to_thread(client.query, safe_sql)
             
-            cols = result.column_names
-            records = [{cols[j]: row[j] for j in range(len(cols))} for row in result.result_rows]
-            clean_records = _mask_sensitive_data(records)
+            # [V121.1] 已经是 List[Dict]，直接取样并脱敏
+            sample = result[:100]
+            clean_records = _mask_sensitive_data(sample)
             
             # [V92.0] 强制 JSON 化处理：解决 Decimal 和 datetime 无法被 ast.literal_eval/json.loads 解析的问题
             import datetime

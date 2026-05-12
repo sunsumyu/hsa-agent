@@ -162,18 +162,11 @@ class AuditRuleEngine:
         """
         [企业级算子引擎 V62.0] 优先从 YAML RuleRegistry 加载, fallback 到内置 TEMPLATES。
         """
-        # 1a. 默认表名从 SchemaRegistry 读取
-        if table_name is None:
-            try:
-                from app.core.schema_registry import schema_registry
-                table_name = schema_registry.get_main_table()
-            except Exception:
-                table_name = "fqz_gz_jzsj_all_ql"
-
         # 1b. 优先走外置 YAML Registry
         sql = ""
         try:
             from app.core.rule_registry import rule_registry
+            # 如果 caller 没传 table_name，这里传 None 让 rule_registry 使用模板自带的 default_table
             sql = rule_registry.sql_templates.get_sql(
                 rule_id, table=table_name, limit=limit
             )
@@ -186,6 +179,15 @@ class AuditRuleEngine:
             if not template:
                 logger.debug(f">>> [RuleEngine] 算子 {rule_id} 不在规则库，尝试回退...")
                 return ""
+            
+            # Legacy fallback: if table_name still None, use main table
+            if table_name is None:
+                try:
+                    from app.core.schema_registry import schema_registry
+                    table_name = schema_registry.get_main_table()
+                except Exception:
+                    table_name = "fqz_gz_jzsj_all_ql"
+            
             sql = template.format(table=table_name, limit=limit)
         
         # 2. 清理：移除残留在模板功能区的中文干扰项（保护单引号内业务关键词）
@@ -213,9 +215,22 @@ class AuditRuleEngine:
             from app.neo4j_manager import field_kg
             filter_clauses = []
             
+            from app.core.schema_registry import schema_registry
+            # 获取主表物理字段，用于熔断校验
+            main_table = schema_registry.get_main_table()
+            physical_cols = schema_registry.get_column_names(main_table)
+
             for raw_field, cond in extra_filters.items():
                 # A. 字段名对齐
-                field = field_kg.resolve(raw_field) or raw_field
+                field = field_kg.resolve(raw_field)
+                
+                # [V118.2] 物理真理熔断：如果 KG 无法对齐，必须通过 SchemaRegistry 校验物理存在
+                if not field:
+                    if raw_field.lower() in [c.lower() for c in physical_cols]:
+                        field = raw_field
+                    else:
+                        logger.warning(f"⚠️ [RuleEngine] 拦截到幻觉字段注入意图: {raw_field}。物理表 {main_table} 中不存在此列，已跳过。")
+                        continue
                 
                 # B. 算子与值智能补全
                 cond_str = str(cond).strip()

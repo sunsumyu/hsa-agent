@@ -91,6 +91,13 @@ class SchemaRegistry:
         entry = self.get_table(table_name)
         return entry.fields if entry else []
 
+    def get_column_names(self, table_name: str) -> List[str]:
+        """[V115.0] 物理兼容层：获取表的物理列名集合"""
+        entry = self.get_table(table_name)
+        if entry:
+            return list(entry.field_names)
+        return []
+
     def get_all_table_names(self) -> List[str]:
         """获取所有已注册的表名。"""
         self._ensure_loaded()

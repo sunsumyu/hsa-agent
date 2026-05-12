@@ -116,38 +116,64 @@ class SQLGuardian:
     @staticmethod
     def _validate_column_existence(expression):
         """
-        [V80.0] 遍历 AST，确保所有字段名在物理真相中心（SchemaManager）中存在。
+        [V113.0] 物理真理对撞：基于 AST 执行严格的表级字段与函数校验。
+        不再使用模糊的全局白名单，而是精准对撞 SchemaRegistry 中的物理表列。
         """
-        from app.schema_manager import schema_manager
+        from app.core.schema_registry import schema_registry
         from app.neo4j_manager import field_kg
         
-        # 1. 获取动态物理白名单
-        whitelist = schema_manager.get_all_columns()
+        # 1. 提取当前 SQL 涉及的所有物理表
+        tables = [t.name.lower() for t in expression.find_all(exp.Table)]
         
+        # 2. 构建针对当前表的“物理真理库”
+        physical_columns = set()
+        for t_name in tables:
+            entry = schema_registry.get_table(t_name)
+            if entry:
+                physical_columns.update([c.lower() for c in entry.field_names])
+        
+        # 3. 常见聚合函数与本地别名
         local_aliases = {alias.alias.lower() for alias in expression.find_all(exp.Alias)}
-        common_ignore = {"count", "sum", "avg", "min", "max", "arraystringconcat", "groupuniqarray", "any"}
+        # ClickHouse 常用内置函数白名单 (部分)
+        allowed_functions = {
+            "count", "sum", "avg", "min", "max", "toyear", "tomonth", "todatetime", "todate", 
+            "datediff", "ifnull", "arraystringconcat", "groupuniqarray", "multisearchany",
+            "substring", "countdistinct", "grouparray", "tostring", "toint64", "coalesce",
+            "any", "uniq", "round", "length", "format", "if", "multiif", "greatest", "least",
+            "and", "or", "not", "anonymous", "anonymousaggfunc"
+        }
 
         for node in expression.walk():
+            # 校验字段 (exp.Column)
             if isinstance(node, exp.Column):
-                raw_name = node.name
-                if not isinstance(raw_name, str) or not raw_name.strip():
-                    continue
-                col_name = raw_name.lower()
-                
-                if col_name in whitelist or col_name in local_aliases or col_name in common_ignore:
+                col_name = node.name.lower()
+                # 排除别名和标准计算列
+                if col_name in local_aliases or col_name in {"*", "1"}:
                     continue
                 
-                # 尝试用 FieldKG 再次解析（处理物理别名映射）
-                resolved = field_kg.resolve(col_name)
-                if not resolved:
-                    # [V90.2] 自愈建议：尝试模糊匹配给出最可能的正确字段
-                    suggestion = SQLGuardian._suggest_field(col_name)
-                    logger.error(f"[SECURITY] 发现物理不存在的幻觉字段: {col_name} | 建议: {suggestion}")
-                    raise SecurityViolationError(
-                        f"物理拦截：字段 `{col_name}` 既不是物理列也不是合法别名。"
-                        f"{suggestion} "
-                        f"请调用 `lookup_medical_schema` 工具查询正确字段名后重写 SQL。"
-                    )
+                # 核心拦截：如果不在当前表的物理列中，且 FieldKG 无法映射
+                if col_name not in physical_columns:
+                    resolved = field_kg.resolve(col_name)
+                    if not resolved:
+                        suggestion = SQLGuardian._suggest_field(col_name)
+                        logger.error(f"🚨 [SECURITY] 物理字段幻觉拦截: 表 {tables} 中不存在字段 `{col_name}`")
+                        raise SecurityViolationError(
+                            f"【物理拦截】字段 `{col_name}` 在当前表 {tables} 中不存在！"
+                            f"{suggestion} "
+                            f"严禁通过 Prompt 瞎猜字段。请立即调用 `lookup_medical_schema` 工具获取物理表 `{tables[0]}` 的正确字段名。"
+                        )
+            
+            # 校验函数 (exp.Func) [V113.0 新增]
+            elif isinstance(node, exp.Func):
+                func_name = node.key.lower()
+                if func_name not in allowed_functions:
+                    # 针对 year/month 这种典型幻觉做专门引导
+                    if func_name in {"year", "month", "day"}:
+                        raise SecurityViolationError(
+                            f"【物理拦截】检测到非法函数 `{func_name}()`。ClickHouse 不支持此语法。"
+                            f"请改用 `toYear()`, `toMonth()` 或直接使用日期字段范围过滤。"
+                        )
+                    logger.warning(f"⚠️ [SECURITY] 使用了非标准函数: {func_name}")
 
     @staticmethod
     def _suggest_field(hallucinated: str) -> str:

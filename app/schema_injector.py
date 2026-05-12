@@ -183,14 +183,26 @@ class SchemaInjector:
         if total_injected == 0:
             return self._format_warning() if include_warning else ""
 
+        # ── [V116.0] 审计治理与安全禁区 (Audit Governance) ──────────────────
+        from app.core.schema_registry import schema_registry
+        forbidden_tables = schema_registry.get_forbidden_table_names()
+        valid_prefixes = schema_registry.get_valid_prefixes()
+        sensitive_fields = schema_registry.get_sensitive_fields()
+
+        lines.append("\n## 🚨 [审计治理与安全禁区 - 强制合规提示]")
+        lines.append(f"- **禁止访问的幻觉表**: {', '.join([f'`{t}`' for t in forbidden_tables])} (严禁猜测，这些表物理不存在或被禁止直接访问)")
+        lines.append(f"- **合法表前缀**: 物理表名必须以 {', '.join([f'`{p}`' for p in valid_prefixes])} 开头")
+        lines.append(f"- **敏感字段约束**: 涉及 {', '.join([f'`{f}`' for f in sensitive_fields])} 字段时，严禁输出明文，必须用于过滤或由系统自动脱敏")
+        lines.append("- **性能强制分区**: 涉及明细表查询时，**必须** 显式包含 `setl_time` 时间范围过滤条件（推荐 2024 年内）")
+
         # 追加约束提示
         lines.append(
-            f"\n**[约束]** 以上共 {total_injected} 个物理字段。"
-            f"SELECT 中的别名（AS xxx）不受此限制，但 WHERE/JOIN 条件中引用的字段必须在上述列表内。"
+            f"\n**[物理约束总结]** 以上共 {total_injected} 个物理字段。你只能使用上述物理列。 "
+            f"严禁在 WHERE/JOIN 中臆造任何字段名，否则将触发布控拦截。"
         )
 
         result = "\n".join(lines)
-        logger.info(f"[SchemaInjector] 分区注入: 域={domain_desc} 表={target_tables} 字段数={total_injected}")
+        logger.info(f"[SchemaInjector] 分区注入: 域={domain_desc} 表={target_tables} 字段数={total_injected} (已注入治理元数据)")
         return result[:max_chars] if len(result) > max_chars else result
 
     # ── 兼容旧接口 ──────────────────────────────────────────────

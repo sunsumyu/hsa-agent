@@ -3,6 +3,9 @@ import uuid
 import json
 import numpy as np
 from datetime import datetime
+
+# [V112.0] 物理稳定性加固：防止 Windows 下多重 OpenMP 运行时冲突导致的 forrtl 错误
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 from typing import List, Dict, Any, Optional, Sequence, Union
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage
@@ -203,6 +206,7 @@ class SQLCacheManager:
         logger.success(f"💾 [SQL Cache] 已固化审计策略至语义缓存: {question[:15]}...")
 
     def search(self, question: str, threshold: float = 0.80):
+        """[V112.0] 高性能语义搜索：使用 NumPy 替代 Torch 以降低延迟并解决环境冲突"""
         if not self.cache: return None
         
         # 1. 精确匹配优先（O(1) 物理拦截，极其飞快）
@@ -213,17 +217,24 @@ class SQLCacheManager:
                 
         # 2. 语义相似度匹配 (针对相似表达进行模糊拦截)
         if not self.engine: return None
-        import torch
-        from sentence_transformers import util
-        emb1 = self.engine.embed_query(question)
-        emb1_tensor = torch.tensor(emb1)
+        
+        # [V112.1] 物理优化：使用 NumPy 替代 Torch，避免 Windows 环境下的 OpenMP (forrtl) 冲突
+        query_emb = np.array(self.engine.embed_query(question))
+        query_norm = np.linalg.norm(query_emb)
         
         best_score = 0
         best_sql = None
+        
         for item in self.cache:
-            if "embedding" in item and len(item["embedding"]) == len(emb1):
-                emb2_tensor = torch.tensor(item["embedding"])
-                score = util.cos_sim(emb1_tensor, emb2_tensor).item()
+            if "embedding" in item:
+                target_emb = np.array(item["embedding"])
+                if len(target_emb) != len(query_emb): continue
+                
+                # 手动计算 Cosine Similarity
+                dot_product = np.dot(query_emb, target_emb)
+                target_norm = np.linalg.norm(target_emb)
+                score = dot_product / (query_norm * target_norm) if (query_norm * target_norm) != 0 else 0
+                
                 if score > best_score:
                     best_score = score
                     best_sql = item["sql"]

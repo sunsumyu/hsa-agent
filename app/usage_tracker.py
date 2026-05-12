@@ -155,7 +155,7 @@ class UsageTracker:
             total_cost = i_cost + o_cost
             rpd = self.stats.daily_requests[model_id]
             rpm = self.rpm_window[model_id][current_min]
-            logger.info(f"用量流水: {model_id} | +{total} tokens (含估算) | RPD:{rpd} | RPM:{rpm} | 计费: ${total_cost:.4f}")
+            logger.info(f"用量流水: {model_id} | Input:{input_tokens} | Prediction(Output):{output_tokens} | Total:{total} (含估算) | RPD:{rpd} | RPM:{rpm} | 计费: ${total_cost:.4f}")
 
     def check_limit(self, model_id: str):
         """

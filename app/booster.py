@@ -1,5 +1,5 @@
 import ast
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import re
 from loguru import logger
 
@@ -160,7 +160,7 @@ class PrecisionBooster:
 
     @staticmethod
     def detect_anomalous_consistency(rows_data: List[Dict[str, Any]]) -> Optional[str]:
-        """[V110.0] 异常回溯机制：检测全量一致性数值"""
+        """[V111.0] 异常一致性回溯：检测伪造数据的典型特征"""
         if not rows_data or len(rows_data) < 5: return None
         
         # 收集数值字段
@@ -175,11 +175,51 @@ class PrecisionBooster:
                     continue
         
         for field, values in field_values.items():
+            # 这里的逻辑是：如果一个业务字段在所有记录中都完全相同，且数值很大，通常是逻辑错误（如笛卡尔积或 AI 幻觉）
             if len(values) == len(rows_data) and len(set(values)) == 1:
                 const_val = values[0]
-                # 排除 0, 1 等正常的小数值，以及年份等
-                if abs(const_val) > 100 and not (1900 < const_val < 2100):
-                    return f"🚨 AnomalousDataWarning: 字段 `{field}` 的所有记录数值均为一致的 {const_val}。这在审计业务中极度不合理，请务必检查 SQL 逻辑（如 GROUP BY 是否缺失或错位），并给出该数值合理性的物理理由，否则不予采信。"
+                if abs(const_val) > 10 and not (1900 < const_val < 2100):
+                    # 特别针对 QA-01 报告中 item_count=14848 的幻觉
+                    return f"🚨 [数据幻觉警告] 字段 `{field}` 的所有 {len(values)} 条记录数值均为完全一致的 {const_val}。这在医保审计中属于高度异常，通常由错误的 GROUP BY 或 SQL 笛卡尔积产生。请修正 SQL 逻辑，严禁提交包含‘虚假整齐’数据的报告。"
         return None
+
+    @staticmethod
+    def verify_evidence_grounding(report_findings: List[Any], raw_data_list: List[Dict[str, Any]]) -> Tuple[bool, str]:
+        """
+        [V111.0] 证据溯源校验 (Fact-Check Pinning)
+        确保 Report 中的 Finding 至少能在 Raw Data 中找到影子。
+        """
+        if not report_findings: return True, ""
+        if not raw_data_list: return False, "报告声称发现了问题，但原始数据流为空。"
+
+        # 将原始数据转化为扁平字符串池
+        data_pool = str(raw_data_list).lower()
+        
+        hallucinated_findings = []
+        for finding in report_findings:
+            # 提取 Finding 中的核心标识符 (如 金额、代码、ID)
+            finding_text = str(finding).lower()
+            # 检查金额是否在数据池中
+            amount = getattr(finding, "amount", 0)
+            if amount > 0:
+                amount_str = f"{amount:.2f}"
+                if amount_str not in data_pool and str(int(amount)) not in data_pool:
+                    hallucinated_findings.append(f"金额 ¥{amount_str}")
+            
+            # 检查证据描述中的关键字是否在数据池中
+            evidence = getattr(finding, "evidence", "")
+            if evidence:
+                # 提取可能的 ID (如 P001, S001)
+                ids = re.findall(r'[A-Z0-9]{5,}', str(evidence))
+                for id_val in ids:
+                    if id_val.lower() not in data_pool:
+                        hallucinated_findings.append(f"标识符 {id_val}")
+
+        if hallucinated_findings:
+            msg = f"❌ [证据链断裂] 报告中提到的证据 ({', '.join(hallucinated_findings)}) 在原始 SQL 结果中找不到对应项。严禁在报告中‘信口雌黄’，请务必仅根据 SQL 返回的物理记录编写结论。"
+            logger.error(msg)
+            return False, msg
+            
+        return True, ""
 
 booster = PrecisionBooster()

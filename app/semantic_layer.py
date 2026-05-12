@@ -108,10 +108,6 @@ class _MetadataExtractor:
             "desc": f"{desc} {meaning}",
             "full_text": full_text
         }
-        
-        self.column_metadata = extracted_data
-        logger.info(f"✔ 语义元数据提取完成: 共捕获 {len(extracted_data)} 个字段语义单元。")
-        return extracted_data
 
 class MetadataMappingLayer:
     """[V110.0] 企业级“语义-物理”映射层：解决业务术语混淆及字段幻觉"""

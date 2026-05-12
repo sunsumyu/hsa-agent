@@ -64,8 +64,6 @@ tables:
       - { name: dise_name,        type: String,   desc: "诊断名称" }
       - { name: medfee_sumamt,    type: Float64,  desc: "医疗总费用" }
       - { name: fund_pay_sumamt,  type: Float64,  desc: "基金支付总额" }
-      - { name: hilist_code,      type: String,   desc: "医保目录编码" }
-      - { name: hilist_name,      type: String,   desc: "医保目录名称" }
 
   - name: fqz_drug_mcs_info_list
     alias: 医保限制目录
@@ -87,3 +85,16 @@ tables:
       - { name: psn_no,           type: String,   desc: "参保人ID" }
       - { name: ipt_days,         type: String,   desc: "住院天数" }
       - { name: setl_time,        type: DateTime, desc: "结算时间" }
+
+  - name: fqz_fymx_test
+    alias: 费用明细表
+    description: 就诊费用明细，包含具体的药品、耗材、诊疗项目编码及名称
+    fields:
+      - { name: setl_id,          type: String,   desc: "结算ID (与主表关联)" }
+      - { name: hilist_code,      type: String,   desc: "医保目录编码" }
+      - { name: hilist_name,      type: String,   desc: "医保目录名称" }
+      - { name: cnt,              type: Float64,  desc: "数量" }
+      - { name: pric,             type: Float64,  desc: "单价" }
+      - { name: det_item_fee_sumamt, type: Float64, desc: "明细费用总额" }
+      - { name: psn_no,           type: String,   desc: "参保人唯一ID" }
+      - { name: fixmedins_name,   type: String,   desc: "医疗机构名称" }

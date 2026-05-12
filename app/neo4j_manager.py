@@ -203,28 +203,40 @@ class FieldKnowledgeGraph:
 
     def sanitize_sql(self, sql: str):
         """
-        扫描 SQL 中的禁用字段名，自动替换为正规字段名。
-
-        Returns:
-            (fixed_sql, warnings): 修正后的 SQL 和警告列表
+        [V119.1] 工业级纠错：扫描 SQL 中的禁用字段名并替换，但【严格保护别名】。
         """
         warnings = []
         fixed = sql
+
+        def _safe_replace(target_sql, forbidden_word, canonical_word):
+            # 使用正则捕获组：(AS 关键字)? + (目标词)
+            # 我们通过 lambda 逻辑，如果前面是 AS，则原样返回，不替换
+            pattern = r'(\bAS\s+)?\b' + re.escape(forbidden_word) + r'\b'
+            
+            def _sub_func(match):
+                if match.group(1): # 命中了 AS 别名定义
+                    return match.group(0) # 原样返回，不纠错
+                return canonical_word
+            
+            new_sql = re.sub(pattern, _sub_func, target_sql, flags=re.IGNORECASE)
+            return new_sql
+
         # 第一阶段：纠错禁用别名
         for forbidden in self._forbidden:
             if re.search(r'\b' + re.escape(forbidden) + r'\b', fixed, re.IGNORECASE):
                 canonical = self._alias_map.get(forbidden)
                 if canonical:
-                    fixed = re.sub(r'\b' + re.escape(forbidden) + r'\b', canonical, fixed, flags=re.IGNORECASE)
-                    msg = f"[FieldKG] 自动纠错: {forbidden} -> {canonical}"
-                    warnings.append(msg)
-                    logger.warning(msg)
+                    new_fixed = _safe_replace(fixed, forbidden, canonical)
+                    if new_fixed != fixed:
+                        fixed = new_fixed
+                        msg = f"[FieldKG] 自动纠错: {forbidden} -> {canonical}"
+                        warnings.append(msg)
+                        logger.warning(msg)
 
-        # 第二阶段：对齐普通别名
+        # 第二阶段：对齐普通别名 (同样保护 AS)
         for alias, canonical in self._alias_map.items():
             if alias in self._forbidden: continue
-            if re.search(r'\b' + re.escape(alias) + r'\b', fixed, re.IGNORECASE):
-                fixed = re.sub(r'\b' + re.escape(alias) + r'\b', canonical, fixed, flags=re.IGNORECASE)
+            fixed = _safe_replace(fixed, alias, canonical)
                     
         return fixed, warnings
 
@@ -270,16 +282,27 @@ class Neo4jManager:
     def _init_connection(self):
         try:
             from neo4j import GraphDatabase
+            # [V117.0] 物理协议自愈：针对本地/WSL 环境，bolt:// 比 neo4j:// 更具鲁棒性
+            connection_uri = self.uri
+            if "localhost" in connection_uri or "127.0.0.1" in connection_uri:
+                if connection_uri.startswith("neo4j://"):
+                    logger.warning("[NEO4J] 检测到本地环境使用 neo4j:// 协议，可能导致路由失败。正在尝试降级为 bolt://...")
+                    connection_uri = connection_uri.replace("neo4j://", "bolt://")
+
             self.driver = GraphDatabase.driver(
-                self.uri, 
+                connection_uri, 
                 auth=(self.user, self.password),
-                connection_timeout=30.0  # [V65.1] 针对 Aura 云端实例唤醒耗时较长，增加超时容忍度
+                connection_timeout=60.0  # [V117.0] 增加超时容忍度
             )
             self.driver.verify_connectivity()
             self.is_connected = True
-            logger.info(">>> 成功直连至企业级 Neo4j 图数据库。")
+            logger.info(f">>> 成功直连至 Neo4j 图数据库 ({connection_uri.split('://')[0]} 模式)。")
         except Exception as e:
-            logger.error(f"❌ [NEO4J ERROR] 真实图数据库连接失败: {e}。图谱关联分析功能将受限。")
+            err_msg = str(e)
+            if "routing information" in err_msg.lower() and "bolt://" not in self.uri:
+                logger.error(f"❌ [NEO4J ROUTING ERROR] 路由发现失败。请检查 .env，建议将 NEO4J_URI 的协议头改为 bolt://")
+            else:
+                logger.error(f"❌ [NEO4J ERROR] 真实图数据库连接失败: {e}。")
             self.driver = None
             self.is_connected = False
 

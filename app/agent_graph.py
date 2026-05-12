@@ -20,7 +20,11 @@ from app.core.state import (
     AuditFeedback as _LayeredAuditFeedback,
 )
 from app.core.schema_registry import schema_registry
-from app.tools import execute_audit_sql, get_table_schema, list_tables, search_expert_knowledge, query_fraud_ring
+from app.tools import (
+    execute_audit_sql, get_table_schema, list_tables, 
+    search_expert_knowledge, query_fraud_ring,
+    lookup_medical_schema, check_audit_governance
+)
 from app.skills import MedicalSchemaSkill, RuleExecutionSkill, SQLSafeExecutionSkill
 from app.experience import experience_manager
 from app.semantic_layer import SemanticRetriever
@@ -152,23 +156,27 @@ def _append_trace(state: dict, entry: str) -> List[str]:
     return trace[-MAX_TRACE_ENTRIES:]  # 只保留最新的 N 条
 
 class SequenceValidator:
-    """[V110.0] 强制流水线验证器：防止 Agent 跳步或造假"""
+    """[V111.0] 强制流水线验证器：防止 Agent 跳步、造假或绕过复杂协议"""
     @staticmethod
     def validate_step(state: dict):
-        methodology = state.get("methodology", "")
+        methodology = str(state.get("methodology", ""))
         trace = "; ".join(state.get("execution_trace", []) or [])
         
-        # 1. Graph 阶段校验
-        if ("Phase 1: Graph" in methodology or "图谱分析" in methodology) and state.get("retry_count", 0) < 1:
-            if "[图谱分析]" not in trace:
-                logger.warning("🚨 [SEQUENCE] 检测到试图跳过图谱阶段")
-                return False, "审计方法论指定了【图谱阶段】，但未检测到 `query_fraud_ring` 的执行结果。请先通过图谱挖掘团伙 ID，严禁直接猜测 ID 进行 SQL 查询。"
+        # 1. Graph 阶段校验 (针对团伙分析、关联查询)
+        # 判定依据：方法论中明确包含 "Graph" 或 "图谱" 关键字
+        if any(keyword in methodology for keyword in ["Phase 1: Graph", "图谱分析", "关联关系"]):
+            # 必须检测到图工具的执行记录 [图谱分析] 或 [Skill:Federated]
+            if not any(tag in trace for tag in ["[图谱分析]", "[Skill:Federated]", "query_fraud_ring"]):
+                # 除非是已经在执行 trace 中（即已经重试过或者正在工具链中）
+                if state.get("retry_count", 0) < 3: # 给予重试机会
+                    logger.warning("🚨 [SEQUENCE] 检测到绕过图谱协议的尝试")
+                    return False, "【协议违背拦截】审计方法论指定必须包含【图谱阶段】。检测到你试图绕过 Neo4j 直接进行 SQL 查询。这会导致查全率严重不足。请先调用 `query_fraud_ring` 工具获取关联团伙信息。"
         
-        # 2. 联邦查询校验
-        if "联邦查询" in methodology or "多源关联" in methodology:
-            if "[Federated]" not in trace and "federated" not in trace.lower() and "[Skill:Federated]" not in trace:
-                 logger.warning("🚨 [SEQUENCE] 检测到试图绕过联邦侧载")
-                 return False, "审计方法论提到了【联邦查询】，但找不到相关的物理侧载记录。请确保使用了 `FederatedAuditSkill` 工具。"
+        # 2. 联邦查询/侧载校验
+        if "联邦" in methodology or "Federated" in methodology:
+            if "[Federated]" not in trace and "temporary table" not in trace.lower():
+                # 如果方法论要求联邦，但执行轨迹里没有产生临时表或调用联邦 Skill
+                return False, "【协议违背拦截】方法论指定了【联邦查询】，但执行轨迹中未发现跨库侧载（Federated Sideloading）行为。请使用 `FederatedAuditSkill` 执行侧载后，再对生成的临时表进行 SQL 分析。"
                  
         return True, ""
 
@@ -241,7 +249,6 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     # 获取图谱本体
     ontology = neo4j_manager.get_ontology()
 
-    # ── [V90.5] 分区分层 Schema 注入：问题分类 → 表路由 → 全量 DDL ──────────
     # ── [V110.0] 语义路由器：注入避坑指南与术语映射 ──────────────
     avoidance_guide = semantic_retriever.get_avoidance_guides(user_input)
     if avoidance_guide:
@@ -351,61 +358,55 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     logger.info(f">>> [SKILLS] LLM 智能调度 Skills... (尝试 {retry + 1}/3)")
     llm, actual_model = await model_manager.get_llm_by_role("coder", retry_count=retry, config=config)
     
-    from app.tools import expand_medical_codes
-    tools = [MedicalSchemaSkill(), RuleExecutionSkill(), SQLSafeExecutionSkill(), FederatedAuditSkill(), query_fraud_ring, expand_medical_codes]
+    # [V118.5] 绑定硬化后的工具集
+    tools = [
+        execute_audit_sql, get_table_schema, list_tables, 
+        search_expert_knowledge, query_fraud_ring,
+        lookup_medical_schema, check_audit_governance
+    ]
     llm_with_tools = llm.bind_tools(tools)
     
     tasks_list = state.get("tasks", [])
     mem_context = cognitive_memory_manager.recall_context(state.get("session_id", "default"), "\n".join(tasks_list))
     
-    # 获取图谱本体
-    ontology = neo4j_manager.get_ontology()
-    
-    # ── [V90.5] 分区分层 Schema 注入：合并用户问题+子任务做分类，全量 DDL ─────────────
+    # ── [V90.5] 分区分层 Schema 注入 ─────────────────────────────────
     _user_q = " ".join(str(m.content) for m in state.get("messages", []) if getattr(m, "type", "") == "human")[:200]
     task_str = " ".join(tasks_list)
     schema_hint = _schema_injector.inject(user_question=f"{_user_q} {task_str}")
-    
-    # ── [V90.2] Schema 空时强制 tool 预查：绝不允许 LLM 猜字段 ─────────────
-    _schema_empty = "Schema 警告" in schema_hint or "未检索到" in schema_hint
-    if _schema_empty:
-        logger.warning("⚠️ [SCHEMA_GUARD] Schema 注入为空，执行强制预查...")
-        _fallback_skill = MedicalSchemaSkill()
-        _fallback_hint = await _fallback_skill._arun(task_str)
-        if _fallback_hint and "No matching" not in _fallback_hint:
-            schema_hint = _fallback_hint
-            _schema_empty = False
-            logger.info(f"✅ [SCHEMA_GUARD] 强制预查成功，已注入字段信息")
-    
-    # [V90.6] 提取原题供 coder 直接锚定，防止 methodology 漂移后无法回归
+
+    # [V90.6] 提取原题供 coder 直接锚定
     _original_q_coder = (_extract_original_question(state.get("messages", [])) or "")[:500]
     prompt = CODER_PROMPT.format_messages(
         original_question=_original_q_coder,
         messages=state["messages"], 
-        ontology=ontology,
+        ontology=neo4j_manager.get_ontology(),
         schema_info=schema_hint,
         methodology=state.get("methodology", ""),
         tasks="\n".join(tasks_list), 
         experiences=mem_context
     )
+
+    # ── [V120.5] 企业级“铁幕”熔断：无 DDL 严禁思考 ──────────────────────
+    _schema_empty = "Schema 警告" in schema_hint or "未检索到" in schema_hint
     
-    # [V90.2] Schema 仍为空时追加强制 tool 指令，禁止直接写 SQL
     if _schema_empty:
-        from langchain_core.messages import SystemMessage
-        prompt.append(SystemMessage(content=(
-            "⚠️ 【物理字段未注入 - 强制查证模式】\n"
-            "当前 Schema 为空，你**绝对禁止**直接编写任何 SQL。\n"
-            "你**必须**先调用 `lookup_medical_schema` 工具查询正确字段名，获得结果后再编写 SQL。\n"
-            "违反此规则的 SQL 将被物理拦截。"
+        logger.warning("🚨 [IRON_FIST] 物理隔离生效：Schema 为空，强制剥夺 SQL 生成权限，进入查证模式。")
+        prompt.insert(0, SystemMessage(content=(
+            "【物理真理铁律】：你当前不持有任何物理表结构信息。你被严禁直接编写 SQL！\n"
+            "你现在的唯一合法操作是调用 `lookup_medical_schema` 或 `check_audit_governance` 来获取真实的物理真相。\n"
+            "如果你直接编写了 SQL，系统将视其为严重事故并直接熔断。"
         )))
+
+    # [V118.3] 注入审计治理规则
+    governance_info = check_audit_governance.invoke({})
+    prompt.insert(0, SystemMessage(content=f"【审计合规红线】：\n{json.dumps(governance_info, ensure_ascii=False, indent=2)}"))
     
     if retry > 0 and state.get("error_log"):
         error_log = state["error_log"]
-        # [V90.2] 幻觉字段拦截后强制要求先查 schema
         if "物理拦截" in error_log or "幻觉字段" in error_log:
             prompt.append(HumanMessage(content=(
-                f"上一轮执行失败，原因：{error_log}\n"
-                "**强制要求**：你必须立即调用 `lookup_medical_schema` 工具查询正确的物理字段名，然后重写 SQL。禁止再次猜测字段。"
+                f"🚨 严重警告：上一轮执行触发了物理拦截，原因：{error_log}\n"
+                "你必须立即通过工具核实物理事实，禁止再次猜测。"
             )))
         else:
             prompt.append(HumanMessage(content=f"上一轮执行失败，原因：{error_log}\n请修正参数并重新调用工具。"))
@@ -499,17 +500,7 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                 "temp_table": state.get("temp_table")
             }
 
-            return {
-                "raw_data": combined_raw,
-                "sql_query": combined_sql,
-                "methodology": combined_meth,
-                "messages": [response] + tool_msgs,
-                "retry_count": retry + 1,
-                "sql_validated": True,
-                "error_log": None,
-                "execution_trace": trace,
-                "temp_table": state.get("temp_table")
-            }
+        combined_raw = "\n---\n".join(raw_data_list)
 
         # ── [V110.0] SQL 逻辑审查与 Sequence 验证 ───────────────────
         # 1. 逻辑审查 (L2 Agentic Linter)
@@ -595,6 +586,16 @@ async def critic_node(state: AuditState, config: RunnableConfig):
     
     response = await llm.ainvoke(prompt)
     feedback = str(response.content).strip()
+    
+    # [V113.0] 物理补救闭环：如果错误由 SQLGuardian 物理拦截器抛出，强制注入查表指令
+    error_log = str(state.get("error_log", ""))
+    if "【物理拦截】" in error_log:
+        logger.warning("🚨 [CRITIC] 检测到物理幻觉，强行修正为查表指令")
+        feedback = (
+            f"❌ [物理拦截自愈] {error_log}\n"
+            f"【最高优先级指令】：你当前生成的 SQL 包含物理表中不存在的字段。禁止尝试猜测或重写 SQL！"
+            f"你必须立即调用 `lookup_medical_schema` 工具来确认物理字段名。只有在拿到工具返回的真实字段列表后，才能再次尝试生成 SQL。"
+        )
     
     logger.info(f"💡 [CRITIC] 诊断建议: {feedback}")
     
@@ -756,8 +757,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     content = rendered.markdown
     logger.success(f"📋 [REPORTER] 五章节报告渲染完成 | 风险: {rendered.risk_level} | 金额: ¥{rendered.total_amount:,.2f}")
 
-    # ── Step 6: 构建结构化 AuditReport 对象（供下游节点使用） ──────────
-    # [V90.6] raw_data_list 是 SQL 原始结果 dict，需转为 AuditFinding 对象
+    # ── Step 6: 构建结构化 AuditReport 对象并执行证据溯源校验 [V111.0] ──────
     _safe_findings = []
     for _row in raw_data_list[:50]:
         if isinstance(_row, dict):
@@ -770,6 +770,24 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
             ))
         elif isinstance(_row, AuditFinding):
             _safe_findings.append(_row)
+            
+    # [V111.0] 证据溯源校验 (Fact-Check Pinning)
+    is_grounded, grounding_err = booster.verify_evidence_grounding(_safe_findings, raw_data_list)
+    if not is_grounded:
+        logger.warning(f"🚨 [FACT_CHECK] 发现报告幻觉: {grounding_err}")
+        # 如果是严重的证据虚造，强制退回 Critic 节点进行自我修复
+        return {
+            "error_log": f"【报告幻觉拦截】{grounding_err}",
+            "retry_count": state.get("retry_count", 0) + 1,
+            "structured_report": AuditReport(
+                summary=f"⚠️ [逻辑不一致] 报告已被系统拦截。原因：{grounding_err}",
+                findings=[],
+                total_amount=0.0,
+                finding_count=0,
+                risk_level="高"
+            )
+        }
+
     report = AuditReport(
         summary=rendered.summary,
         findings=_safe_findings,
@@ -981,4 +999,13 @@ class AgentGraph:
     def compile(self, checkpointer=None): return workflow
 
 def _record_usage_with_budget(role: str, response: Any, model_id: str, prompt: Any = ""):
-    usage_tracker.record_usage(model_id, 0, 0, prompt=prompt, response_text=str(getattr(response, "content", "")))
+    # [V110.0] 增强型用量审计：优先提取物理 Token 数，失败则降级为逻辑估算
+    usage = getattr(response, "usage_metadata", {})
+    if not usage and hasattr(response, "response_metadata"):
+         # 兼容部分 LangChain 版本的 metadata 结构
+         usage = response.response_metadata.get("token_usage", {})
+         
+    in_t = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+    out_t = usage.get("output_tokens", usage.get("completion_tokens", 0))
+    
+    usage_tracker.record_usage(model_id, in_t, out_t, prompt=prompt, response_text=str(getattr(response, "content", "")))

@@ -1,4 +1,5 @@
 import sqlglot
+import re
 from sqlglot import exp, parse_one
 from loguru import logger
 from typing import Tuple
@@ -38,22 +39,35 @@ class SQLLogicValidator:
 
     @staticmethod
     def agentic_linter(sql: str) -> Tuple[bool, str]:
-        """[V110.0] SQL 逻辑审查：反模式检测"""
+        """[V111.0] SQL 核心审计逻辑审查：拦截逻辑自杀与幻觉诱因"""
         sql_upper = sql.upper()
         
-        # 1. GROUP BY 主键检测 (针对“多次”任务)
-        if "GROUP BY" in sql_upper:
-            # 常见的主键或唯一标识
-            primary_keys = ["SETL_ID", "MSG_ID", "DET_ITEM_FEE_ID", "MDTRT_ID"]
-            for pk in primary_keys:
-                if pk in sql_upper:
-                    return False, f"反模式警告：检测到 GROUP BY 包含了 {pk}。在统计‘多次’或‘重复’行为时，按主键分组会导致逻辑失效（每个组永远只有1条记录）。建议按 psn_no 或 fixmedins_code 分组。"
-        
-        # 2. 字段前缀检查
+        # 1. 逻辑自杀检测：按唯一标识进行聚合统计 (QA-01 核心症结)
+        # 如果 SQL 中包含 COUNT/SUM 等聚合函数，检查 GROUP BY 是否包含了唯一主键
+        if "GROUP BY" in sql_upper and any(agg in sql_upper for agg in ["COUNT", "SUM", "AVG", "GROUPARRAY"]):
+            # 物理主键或唯一 ID，按这些字段分组会导致每个组永远只有 1 条记录，从而查不出“多次”
+            logic_suicide_keys = ["SETL_ID", "MSG_ID", "DET_ITEM_FEE_ID", "MDTRT_ID", "REC_ID"]
+            for pk in logic_suicide_keys:
+                # 检查 GROUP BY 子句中是否包含这些字段
+                group_by_match = re.search(r"GROUP\s+BY\s+(.*?)(ORDER\s+BY|HAVING|LIMIT|$)", sql_upper, re.DOTALL)
+                if group_by_match:
+                    group_by_content = group_by_match.group(1)
+                    if pk in group_by_content:
+                        return False, f"❌ [逻辑自杀拦截] 检测到在聚合任务中按唯一标识 `{pk}` 分组。这会导致每个分组仅含 1 条记录，无法检出‘多次’或‘重复’行为。建议改用 `psn_no` + `toDate(setl_time)`。"
+
+        # 2. 查全率保障：频率审计缺失 HAVING 子句
+        if "COUNT(" in sql_upper and "GROUP BY" in sql_upper and "HAVING" not in sql_upper:
+             # 如果是查异常频率但没写 HAVING，容易产生海量无关数据
+             return False, "⚠️ [性能/逻辑风险] 检测到聚合查询缺失 HAVING 子句。对于‘多次’或‘高频’审计，必须包含 `HAVING count(...) > n` 以过滤合法记录。"
+
+        # 3. 笛卡尔积陷阱：多表 JOIN 缺失条件
+        if "JOIN" in sql_upper and " ON " not in sql_upper and " USING " not in sql_upper:
+             return False, "❌ [计算爆炸拦截] 检测到 JOIN 语句缺失关联条件（ON/USING）。这将产生笛卡尔积，导致算力溢出及虚假数据幻觉。"
+
+        # 4. 字段前缀检查 (物理真理校验)
         if "FROM" in sql_upper and "FQZ_" not in sql_upper and "V_AUDIT" not in sql_upper:
-            # 排除系统查询
             if "SYSTEM." not in sql_upper and "INFORMATION_SCHEMA" not in sql_upper:
-                return False, "字段前缀检查失败：SQL 中未发现物理表前缀（如 fqz_ 或 v_audit_）。请务必使用 Physical Blueprint 中提供的表名。"
+                return False, "❌ [物理脱节] SQL 中未发现物理表前缀（如 fqz_）。请严格遵守 Schema Registry 中的表名定义。"
             
         return True, ""
 
