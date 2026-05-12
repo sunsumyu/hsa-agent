@@ -113,6 +113,41 @@ class _MetadataExtractor:
         logger.info(f"✔ 语义元数据提取完成: 共捕获 {len(extracted_data)} 个字段语义单元。")
         return extracted_data
 
+class MetadataMappingLayer:
+    """[V110.0] 企业级“语义-物理”映射层：解决业务术语混淆及字段幻觉"""
+    def __init__(self):
+        # 建立医保专用本体
+        self.ontology = {
+            "职工医保": {
+                "physical": "insutype = '310' 或 psn_type = '职工'",
+                "caveats": "注意：【职工医保】不等于【医院职工】。职工医保是指参保身份（看 insutype），医院职工是指身份标签。",
+                "related_fields": ["insutype", "psn_type"]
+            },
+            "医院职工": {
+                "physical": "emp_no IS NOT NULL 或 fixmedins_staff_flag = '1'",
+                "caveats": "注意：【医院职工】不等于【职工医保】。医院职工是指该人员属于医疗机构的工作人员（看 staff_flag）。",
+                "related_fields": ["emp_no", "fixmedins_staff_flag"]
+            },
+            "重复": {
+                "physical": "GROUP BY psn_no, dise_no, ... HAVING COUNT(*) > 1",
+                "caveats": "注意：查询【多次】或【重复】任务时，GROUP BY 绝对不能包含 setl_id 或 msg_id 等主键，否则会导致逻辑自杀。",
+                "related_fields": ["setl_id", "msg_id"]
+            },
+            "多次": {
+                "physical": "GROUP BY psn_no, ... HAVING COUNT(*) > 1",
+                "caveats": "注意：查询【多次】行为时，必须按人(psn_no)或项目分组，严禁按结算ID(setl_id)分组。",
+                "related_fields": ["setl_id"]
+            }
+        }
+
+    def detect(self, text: str) -> str:
+        """识别关键词并返回避坑指南"""
+        guides = []
+        for term, meta in self.ontology.items():
+            if term in text:
+                guides.append(f"### 💡 {term} 业务避坑指南\n- **物理映射建议**: {meta['physical']}\n- **风险提示**: {meta['caveats']}")
+        return "\n\n".join(guides)
+
 # [V66.2] 物理常驻：模块级嵌入模型单例，消除重复加载开销
 _GLOBAL_EMBEDDING_MODEL = None
 
@@ -235,6 +270,11 @@ class SemanticRetriever(_MetadataExtractor):
                 results.append(self.column_metadata[idx])
         
         return results
+
+    def get_avoidance_guides(self, query_text: str) -> str:
+        """[V110.0] 获取避坑指南注入文本"""
+        mapper = MetadataMappingLayer()
+        return mapper.detect(query_text)
 
     def format_for_prompt(self, items):
         """将检索结果格式化为带有防御性 Cast 建议的 Prompt 注入文本"""

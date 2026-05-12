@@ -374,3 +374,55 @@ async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
             "suggested_ontology": current_ontology,
             "suggestion": "检测到您可能使用了不存在的标签或属性。请参考上述 [Neo4j Graph Ontology] 重新编写 Cypher。重点：业务数据（患者等）可能尚未注入，如果 Ontology 为空，请先尝试 lookup_medical_schema。"
         }
+
+@tool
+def expand_medical_codes(intent: str) -> str:
+    """
+    [V110.0] 业务深度增强：语义扩展医疗编码 (ICD-10/ICD-9/三大目录)。
+    当任务涉及特定疾病类别（如“妇科”、“肿瘤”）时，调用此工具获取精确的物理编码范围。
+    """
+    # [V110.1] 知识库映射 (Mock 级，实际应对接专业 ICD 向量库)
+    MEDICAL_CODE_KB = {
+        "妇科": {
+            "icd10": ["O00", "O99"],
+            "icd9": ["54.51", "65.0", "71.9"],
+            "desc": "涉及妊娠、分娩和产褥期疾病及相关手术"
+        },
+        "肿瘤": {
+            "icd10": ["C00", "D48"],
+            "desc": "涉及恶性肿瘤、原位癌及性质未定肿瘤"
+        },
+        "眼科": {
+            "icd10": ["H00", "H59"],
+            "icd9": ["08.0", "16.9"],
+            "desc": "涉及眼和附器疾病及相关手术"
+        },
+        "牙科": {
+            "icd10": ["K00", "K14"],
+            "icd9": ["23.0", "24.9"],
+            "desc": "涉及口腔、涎腺和颌骨疾病"
+        },
+        "心内科": {
+            "icd10": ["I00", "I99"],
+            "icd9": ["35.0", "39.9"],
+            "desc": "涉及循环系统疾病及心脏介入手术"
+        }
+    }
+    
+    q = intent.strip()
+    matched = []
+    for k, v in MEDICAL_CODE_KB.items():
+        if k in q or q in k:
+            res = f"【{k}】专业编码映射建议：\n"
+            if "icd10" in v:
+                res += f"- ICD-10 (疾病): {v['icd10'][0]} 至 {v['icd10'][1]} (建议 SQL: dise_no LIKE '{v['icd10'][0][0]}%')\n"
+            if "icd9" in v:
+                res += f"- ICD-9-CM3 (手术): {', '.join(v['icd9'])} (建议 SQL: oper_no IN {tuple(v['icd9'])})\n"
+            res += f"- 业务说明: {v['desc']}"
+            matched.append(res)
+    
+    if not matched:
+        return f"当前标准编码库中未找到与 '{intent}' 直接相关的专业分类。建议：请直接尝试 LIKE '%{intent}%' 进行初步检索。"
+    
+    return "\n\n".join(matched)
+

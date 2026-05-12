@@ -158,4 +158,28 @@ class PrecisionBooster:
                 
         return rows_data
 
+    @staticmethod
+    def detect_anomalous_consistency(rows_data: List[Dict[str, Any]]) -> Optional[str]:
+        """[V110.0] 异常回溯机制：检测全量一致性数值"""
+        if not rows_data or len(rows_data) < 5: return None
+        
+        # 收集数值字段
+        field_values = {}
+        for row in rows_data:
+            for k, v in row.items():
+                try:
+                    curr_val = float(str(v).replace(",", ""))
+                    if k not in field_values: field_values[k] = []
+                    field_values[k].append(curr_val)
+                except:
+                    continue
+        
+        for field, values in field_values.items():
+            if len(values) == len(rows_data) and len(set(values)) == 1:
+                const_val = values[0]
+                # 排除 0, 1 等正常的小数值，以及年份等
+                if abs(const_val) > 100 and not (1900 < const_val < 2100):
+                    return f"🚨 AnomalousDataWarning: 字段 `{field}` 的所有记录数值均为一致的 {const_val}。这在审计业务中极度不合理，请务必检查 SQL 逻辑（如 GROUP BY 是否缺失或错位），并给出该数值合理性的物理理由，否则不予采信。"
+        return None
+
 booster = PrecisionBooster()

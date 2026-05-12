@@ -36,4 +36,25 @@ class SQLLogicValidator:
             logger.error(f"SQL AST 解析失败: {e}")
             return False, f"解析异常: {str(e)}"
 
+    @staticmethod
+    def agentic_linter(sql: str) -> Tuple[bool, str]:
+        """[V110.0] SQL 逻辑审查：反模式检测"""
+        sql_upper = sql.upper()
+        
+        # 1. GROUP BY 主键检测 (针对“多次”任务)
+        if "GROUP BY" in sql_upper:
+            # 常见的主键或唯一标识
+            primary_keys = ["SETL_ID", "MSG_ID", "DET_ITEM_FEE_ID", "MDTRT_ID"]
+            for pk in primary_keys:
+                if pk in sql_upper:
+                    return False, f"反模式警告：检测到 GROUP BY 包含了 {pk}。在统计‘多次’或‘重复’行为时，按主键分组会导致逻辑失效（每个组永远只有1条记录）。建议按 psn_no 或 fixmedins_code 分组。"
+        
+        # 2. 字段前缀检查
+        if "FROM" in sql_upper and "FQZ_" not in sql_upper and "V_AUDIT" not in sql_upper:
+            # 排除系统查询
+            if "SYSTEM." not in sql_upper and "INFORMATION_SCHEMA" not in sql_upper:
+                return False, "字段前缀检查失败：SQL 中未发现物理表前缀（如 fqz_ 或 v_audit_）。请务必使用 Physical Blueprint 中提供的表名。"
+            
+        return True, ""
+
 sql_validator = SQLLogicValidator()

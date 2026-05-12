@@ -151,6 +151,27 @@ def _append_trace(state: dict, entry: str) -> List[str]:
     trace.append(_sanitize_trace(entry))
     return trace[-MAX_TRACE_ENTRIES:]  # 只保留最新的 N 条
 
+class SequenceValidator:
+    """[V110.0] 强制流水线验证器：防止 Agent 跳步或造假"""
+    @staticmethod
+    def validate_step(state: dict):
+        methodology = state.get("methodology", "")
+        trace = "; ".join(state.get("execution_trace", []) or [])
+        
+        # 1. Graph 阶段校验
+        if ("Phase 1: Graph" in methodology or "图谱分析" in methodology) and state.get("retry_count", 0) < 1:
+            if "[图谱分析]" not in trace:
+                logger.warning("🚨 [SEQUENCE] 检测到试图跳过图谱阶段")
+                return False, "审计方法论指定了【图谱阶段】，但未检测到 `query_fraud_ring` 的执行结果。请先通过图谱挖掘团伙 ID，严禁直接猜测 ID 进行 SQL 查询。"
+        
+        # 2. 联邦查询校验
+        if "联邦查询" in methodology or "多源关联" in methodology:
+            if "[Federated]" not in trace and "federated" not in trace.lower() and "[Skill:Federated]" not in trace:
+                 logger.warning("🚨 [SEQUENCE] 检测到试图绕过联邦侧载")
+                 return False, "审计方法论提到了【联邦查询】，但找不到相关的物理侧载记录。请确保使用了 `FederatedAuditSkill` 工具。"
+                 
+        return True, ""
+
 
 
 async def planner_node(state: AuditState, config: RunnableConfig):
@@ -221,8 +242,12 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     ontology = neo4j_manager.get_ontology()
 
     # ── [V90.5] 分区分层 Schema 注入：问题分类 → 表路由 → 全量 DDL ──────────
-    schema_hint = _schema_injector.inject(user_question=user_input)
-    
+    # ── [V110.0] 语义路由器：注入避坑指南与术语映射 ──────────────
+    avoidance_guide = semantic_retriever.get_avoidance_guides(user_input)
+    if avoidance_guide:
+        logger.info("🎯 [SEMANTIC_ROUTER] 命中高敏词，注入避坑指南")
+        schema_hint = f"{schema_hint}\n\n{avoidance_guide}"
+
     # [V90.6] 直接使用本地 PLANNER_PROMPT v1.1.0 (含 original_question 锚定)，
     # 不再走 Langfuse 云端版本，避免云端缓存旧 prompt 导致原题锚失效
     prompt_template = PLANNER_PROMPT
@@ -326,7 +351,8 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     logger.info(f">>> [SKILLS] LLM 智能调度 Skills... (尝试 {retry + 1}/3)")
     llm, actual_model = await model_manager.get_llm_by_role("coder", retry_count=retry, config=config)
     
-    tools = [MedicalSchemaSkill(), RuleExecutionSkill(), SQLSafeExecutionSkill(), FederatedAuditSkill(), query_fraud_ring]
+    from app.tools import expand_medical_codes
+    tools = [MedicalSchemaSkill(), RuleExecutionSkill(), SQLSafeExecutionSkill(), FederatedAuditSkill(), query_fraud_ring, expand_medical_codes]
     llm_with_tools = llm.bind_tools(tools)
     
     tasks_list = state.get("tasks", [])
@@ -412,7 +438,13 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
         error_msg = ""
         
         _TOOL_MSG_MAX_LEN = 2000  # [V90.4] 源头截断：防止巨型工具返回污染消息链
+        import hashlib
+        import time
         for t_call, res in results:
+            # [V110.0] 工具调用审计：生成加密 TraceID
+            _seed = f"{t_call.get('name')}_{json.dumps(t_call.get('args'))}_{time.time()}"
+            trace_id = hashlib.sha256(_seed.encode()).hexdigest()[:10].upper()
+            
             if res is not None:
                 raw_content = str(res)
                 if len(raw_content) > _TOOL_MSG_MAX_LEN:
@@ -422,7 +454,9 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                 
                 if isinstance(res, dict):
                     if "trace_hint" in res:
-                        tool_traces.append(res["trace_hint"])
+                        tool_traces.append(f"[{trace_id}] {res['trace_hint']}")
+                    else:
+                        tool_traces.append(f"[{trace_id}] 执行工具 {t_call.get('name')}")
                     if "sql_logic" in res:
                         sql_logics.append(res["sql_logic"])
                     if "methodology" in res:
@@ -463,6 +497,57 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
                 "retry_count": retry + 1,
                 "execution_trace": trace,
                 "temp_table": state.get("temp_table")
+            }
+
+            return {
+                "raw_data": combined_raw,
+                "sql_query": combined_sql,
+                "methodology": combined_meth,
+                "messages": [response] + tool_msgs,
+                "retry_count": retry + 1,
+                "sql_validated": True,
+                "error_log": None,
+                "execution_trace": trace,
+                "temp_table": state.get("temp_table")
+            }
+
+        # ── [V110.0] SQL 逻辑审查与 Sequence 验证 ───────────────────
+        # 1. 逻辑审查 (L2 Agentic Linter)
+        from app.sql_validator import sql_validator
+        is_ok, linter_msg = sql_validator.agentic_linter(combined_sql)
+        if not is_ok:
+            logger.warning(f"🚨 [LINTER] SQL 逻辑审查拦截: {linter_msg}")
+            return {
+                "error_log": f"【SQL 逻辑审查拦截】{linter_msg}",
+                "sql_query": combined_sql,
+                "messages": [response] + tool_msgs,
+                "retry_count": retry + 1,
+                "execution_trace": trace
+            }
+
+        # 2. 状态机硬约束 (Sequence Validator)
+        ok, seq_msg = SequenceValidator.validate_step({"methodology": combined_meth, "execution_trace": trace})
+        if not ok:
+            return {
+                "error_log": f"【协议违背拦截】{seq_msg}",
+                "sql_query": combined_sql,
+                "messages": [response] + tool_msgs,
+                "retry_count": retry + 1,
+                "execution_trace": trace
+            }
+
+        # 3. 异常数值回溯 (Anomalous Data Warning)
+        from app.booster import booster
+        rows_for_anomaly = booster.parse_table_to_rows(combined_raw)
+        anomaly_msg = booster.detect_anomalous_consistency(rows_for_anomaly)
+        if anomaly_msg:
+            logger.warning(f"🚨 [ANOMALY] 发现异常数值分布")
+            return {
+                "error_log": anomaly_msg,
+                "sql_query": combined_sql,
+                "messages": [response] + tool_msgs,
+                "retry_count": retry + 1,
+                "execution_trace": trace
             }
 
         combined_raw = "\n---\n".join(raw_data_list)
