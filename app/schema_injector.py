@@ -192,11 +192,16 @@ class SchemaInjector:
         lines.append(f"- **敏感字段约束**: 涉及 {', '.join([f'`{f}`' for f in sensitive_fields])} 字段时，严禁输出明文，必须用于过滤或由系统自动脱敏。)")
         lines.append("- **性能强制分区**: 涉及明细表查询时，**必须** 显式包含 `setl_time` 时间范围过滤条件（推荐 2024 年内）。")
 
-        # 追加约束提示
-        lines.append(
-            f"\n**[物理约束总结]** 以上共注入 {total_injected} 个物理字段。你只能使用上述物理列。"
-            f"严禁在 WHERE/JOIN 中臆造任何字段名，否则将触发安全策略拦截。"
-        )
+        # ── [V121.0] 图谱能力注入 (Graph Sideloader Guidance) ──────────────
+        from app.neo4j_manager import neo4j_manager
+        graph_hints = neo4j_manager.get_audit_graph_hints()
+        lines.append(graph_hints)
+
+        # ── [V125.0 企业级审计红线 (High Recall Enforcement)] ──────────────
+        lines.append("\n## 🛑 [企业级审计红线] 严禁违反以下物理逻辑，否则召回率将严重不足：")
+        lines.append("- **[红线 1: 颗粒度陷阱]**：核查‘重复结算’、‘多次就医’时，`GROUP BY` **绝对禁止** 包含 `setl_id` 或 `msg_id`。必须按 `toDate(setl_time)`、`psn_no` 和 `fixmedins_code` 聚合。")
+        lines.append("- **[红线 2: 边界遗漏]**：核查‘分解住院’、‘重叠就医’时，必须使用 `>=` 或 `<=` 捕获‘当天出院即入院’的情形。")
+        lines.append("- **[红线 3: 性别穿透]**：核查‘性别冲突’时，必须通过 `hilist_name` 匹配妇科/男科关键词进行二次验证，不能仅依赖主表性别字段。")
 
         result = "\n".join(lines)
         logger.info(f"[SchemaInjector] 物理 Schema 注入: 域 {domain_desc} 表 {target_tables} 字段数 {total_injected} (已注入治理元数据)")

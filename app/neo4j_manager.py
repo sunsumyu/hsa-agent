@@ -11,6 +11,9 @@ import os
 import re
 from loguru import logger
 from typing import List, Dict, Any, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # ──────────────────────────────────────────────────────────────
@@ -338,6 +341,35 @@ class Neo4jManager:
         except Exception as e:
             logger.error(f"获取 Neo4j 本体失败: {e}")
             return "获取 Neo4j 本体结构失败。"
+
+    def get_audit_graph_hints(self) -> str:
+        """
+        [企业级] 返回图谱业务模式提示。
+        为 LLM 提供经过验证的 Cypher 查询模板，防止幻觉。
+        """
+        return """
+## 🕸️ HSA 医保审计图谱模式 (权威定义)
+
+### 1. 核心节点与关系
+- `(p:Patient {psn_no})`: 参保人
+- `(h:Hospital {fixmedins_code, name})`: 医疗机构
+- `(t:Phone {tel})`: 手机号
+- `(p)-[:VISITED {total_amt, count}]->(h)`: 就医关联
+- `(p)-[:HAS_PHONE]->(t)`: 联系方式关联
+
+### 2. 常用审计模式 (Cypher 模板)
+- **共享手机号团伙发现**: 
+  `MATCH (p1:Patient)-[:HAS_PHONE]->(t:Phone)<-[:HAS_PHONE]-(p2:Patient) WHERE p1.psn_no <> p2.psn_no RETURN p1.psn_no, p2.psn_no, t.tel`
+- **聚集性就医模式**: 
+  `MATCH (t:Phone {tel: $tel})<-[:HAS_PHONE]-(p:Patient)-[v:VISITED]->(h:Hospital) RETURN p.psn_no, h.name, v.total_amt`
+- **高频就医人员提取**: 
+  `MATCH (p:Patient)-[v:VISITED]->(h:Hospital) WHERE v.count > 10 RETURN p.psn_no, SUM(v.total_amt) AS total`
+
+### 3. 编写禁忌 (Strictly Prohibited)
+- ❌ 严禁使用 SQL 语法 (如 BETWEEN, LIKE)。
+- ❌ 严禁使用不存在的标签 (如 shared_contacts, Doctor)。
+- ❌ 严禁猜测关系名，必须使用 VISITED 或 HAS_PHONE。
+"""
 
 
 # ──────────────────────────────────────────────────────────────

@@ -111,7 +111,7 @@ class _MetadataExtractor:
 class MetadataMappingLayer:
     """[V110.0] 企业级“语义—物理”映射层：解决业务术语混淆及字段幻觉"""
     def __init__(self):
-        # 建立医保专用本体
+        # 建立医保专用本体 [V125.0 企业级高召回率版]
         self.ontology = {
             "职工医保": {
                 "physical": "insutype = '310' 或 psn_type = '职工'",
@@ -123,12 +123,23 @@ class MetadataMappingLayer:
                 "caveats": "注意：【医院职工】不等于【职工医保】。医院职工是指该人员属于医疗机构的工作人员（看 staff_flag）。",
                 "related_fields": ["emp_no", "fixmedins_staff_flag"]
             },
-            "重复": {
-                "physical": "GROUP BY psn_no, dise_no, ... HAVING COUNT(*) > 1",
-                "caveats": "注意：查询【多次】或【重复】任务时，GROUP BY 绝对不能包含 setl_id 或 msg_id 等主键，否则会导致逻辑自杀。",
-                "related_fields": ["setl_id", "msg_id"]
+            "重复结算/重复收费": {
+                "physical": "COUNT(DISTINCT setl_id) > 1",
+                "grouping_pattern": "GROUP BY psn_no, toDate(setl_time), fixmedins_code",
+                "caveats": "⚠️ [Recall 警告]：核查重复结算时，严禁按 setl_id 分组。必须按‘人+院+天’分组。只要同一天有多个结算 ID，即为漏检点。",
+                "related_fields": ["psn_no", "setl_time", "fixmedins_code", "setl_id"]
             },
-            "多次": {
+            "性别限制项目/冲突": {
+                "physical": "hilist_name LIKE '%妇科%' OR hilist_name LIKE '%子宫%' OR hilist_name LIKE '%前列腺%'",
+                "caveats": "⚠️ [Recall 警告]：核查性别冲突不仅要对比字段，必须穿透到诊疗项目名称。男性患者严禁出现涉及子宫、卵巢、阴道、妇科的项目；女性患者严禁出现前列腺相关项目。",
+                "related_fields": ["gend", "dise_name", "hilist_name"]
+            },
+            "分解住院/重叠住院": {
+                "physical": "A.end_date >= B.start_date AND A.psn_no = B.psn_no AND A.setl_id <> B.setl_id",
+                "caveats": "⚠️ [Recall 警告]：必须捕捉‘出院当天即入院’的情形（即 end_date = start_date）。此类‘触碰边界’是分解住院最常见的形态。严禁仅使用 > 号。",
+                "related_fields": ["start_date", "end_date", "psn_no"]
+            },
+            "多次/异常频率": {
                 "physical": "GROUP BY psn_no, ... HAVING COUNT(*) > 1",
                 "caveats": "注意：查询【多次】行为时，必须按人 (psn_no) 或项目分组，严禁按结算 ID (setl_id) 分组。",
                 "related_fields": ["setl_id"]
