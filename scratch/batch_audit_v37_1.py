@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 
 # 锁定绝对路径
-BASE_DIR = "e:/chain/hsa-agent-python"
+BASE_DIR = "e:/chain/hsa-agent"
 sys.path.append(BASE_DIR)
 os.chdir(BASE_DIR)
 
@@ -19,17 +19,17 @@ CHECKPOINT_FILE = os.path.join(BASE_DIR, "data/batch_v37_1_checkpoint.json")
 RESULTS_FILE = os.path.join(BASE_DIR, "data/batch_v37_1_results.json")
 
 async def batch_runner_v37_1():
-    print(f"🔥 [BATCH-AUDIT V37.1] 启动！工作目录: {os.getcwd()}")
+    print(f"🔥 [BATCH-AUDIT V37.1] 启动！工作目�? {os.getcwd()}")
     
     if not os.path.exists(SCENARIO_FILE):
-        print(f"❌ 错误: 找不到题库文件 {SCENARIO_FILE}")
+        print(f"�?错误: 找不到题库文�?{SCENARIO_FILE}")
         return
 
     with open(SCENARIO_FILE, "r", encoding="utf-8") as f:
         content = f.read()
     
     questions = re.findall(r'^\d+\.\s+(.+)$', content, re.MULTILINE)
-    print(f"📦 已解析 {len(questions)} 个业务场景。")
+    print(f"📦 已解�?{len(questions)} 个业务场景�?)
 
     start_index = 0
     results = []
@@ -68,7 +68,7 @@ async def batch_runner_v37_1():
 
                 latency = time.time() - start_ts
                 
-                # 增强版结果记录 (参考 RAG 评估维度)
+                # 增强版结果记�?(参�?RAG 评估维度)
                 res = {
                     "index": i + 1,
                     "query": q,
@@ -99,14 +99,15 @@ async def batch_runner_v37_1():
                 attempt += 1
                 if "429" in str(e):
                     wait_time = attempt * 15
-                    print(f"⚠️ 限流拦截，休眠 {wait_time}s...")
+                    print(f"⚠️ 限流拦截，休�?{wait_time}s...")
                     await asyncio.sleep(wait_time)
                 else:
-                    print(f"❌ 异常: {e}")
+                    print(f"�?异常: {e}")
                     results.append({"index": i+1, "query": q, "status": "FAIL", "error": str(e)})
                     success = True
 
-    print("🏁 [FINISH] 1000 场景审计全量完成！")
+    print("🏁 [FINISH] 1000 场景审计全量完成�?)
 
 if __name__ == "__main__":
     asyncio.run(batch_runner_v37_1())
+

@@ -71,12 +71,12 @@ git count-objects -vH
 Write-Host ""
 Write-Host "NEXT STEPS (manual):" -ForegroundColor Yellow
 Write-Host "  1. Re-add the remote (filter-repo strips it by design):"
-Write-Host "     git remote add origin https://github.com/sunsumyu/hsa-agent-python.git"
+Write-Host "     git remote add origin https://github.com/sunsumyu/hsa-agent.git"
 Write-Host ""
 Write-Host "  2. Inspect the rewritten history to verify:"
 Write-Host "     git log --all --oneline -- audit_checkpoints.db    # should show NOTHING"
 Write-Host ""
-Write-Host "  3. Force-push (DESTRUCTIVE â€” all collaborators must re-clone):"
+Write-Host "  3. Force-push (DESTRUCTIVE â€?all collaborators must re-clone):"
 Write-Host "     git push origin --force --all"
 Write-Host "     git push origin --force --tags"
 Write-Host ""
@@ -85,3 +85,4 @@ Write-Host "     if you also need to reduce the remote's storage (usually GitHub
 Write-Host "     automatically after 30 days)."
 Write-Host ""
 Write-Host "Safety net: if something went wrong, your old history is at tag '$backupTag'" -ForegroundColor Green
+

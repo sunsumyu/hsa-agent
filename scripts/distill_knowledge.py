@@ -1,7 +1,7 @@
 import os
 import re
 
-LOG_DIR = r"e:\chain\hsa-agent-python\docs-log"
+LOG_DIR = r"e:\chain\hsa-agent\docs-log"
 
 def distill():
     logs = [f for f in os.listdir(LOG_DIR) if f.startswith("log_")]
@@ -16,8 +16,7 @@ def distill():
         date_match = re.search(r"Date: (.*)", content)
         date = date_match.group(1) if date_match else "Unknown Date"
         
-        # 寻找错误和修复
-        errors = re.findall(r"ERROR.*", content)
+        # 寻找错误和修�?        errors = re.findall(r"ERROR.*", content)
         fixes = re.findall(r"(Fix|Refactor|Implement|Resolve).*", content)
         decisions = re.findall(r"(Decision|Policy|Shift).*", content)
         
@@ -29,10 +28,11 @@ def distill():
             "decisions": decisions[:3]
         })
         
-    with open(r"e:\chain\hsa-agent-python\artifacts\distilled_history.json", "w", encoding="utf-8") as f:
+    with open(r"e:\chain\hsa-agent\artifacts\distilled_history.json", "w", encoding="utf-8") as f:
         import json
         json.dump(summaries, f, indent=2, ensure_ascii=False)
     print(f"Distilled {len(summaries)} logs.")
 
 if __name__ == "__main__":
     distill()
+

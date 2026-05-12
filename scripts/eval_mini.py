@@ -11,7 +11,7 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 async def main():
-    dataset_path = r"e:\chain\hsa-agent-python\tests\eval\golden_dataset.json"
+    dataset_path = r"e:\chain\hsa-agent\tests\eval\golden_dataset.json"
     with open(dataset_path, "r", encoding="utf-8") as f:
         golden_data = json.load(f)
 
@@ -39,3 +39,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 
 BRAIN_DIR = r"C:\Users\AREN\.gemini\antigravity\brain"
-PROJECT_LOG_DIR = r"e:\chain\hsa-agent-python\docs-log"
+PROJECT_LOG_DIR = r"e:\chain\hsa-agent\docs-log"
 
 def extract_logs():
     if not os.path.exists(PROJECT_LOG_DIR):
@@ -19,8 +19,7 @@ def extract_logs():
         if not os.path.exists(log_path):
             continue
             
-        # 检查文件修改时间
-        mtime = datetime.fromtimestamp(os.path.getmtime(log_path))
+        # 检查文件修改时�?        mtime = datetime.fromtimestamp(os.path.getmtime(log_path))
         if mtime < two_months_ago:
             continue
             
@@ -29,12 +28,10 @@ def extract_logs():
             with open(log_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 
-            # 简单的关键词过滤，确保是医保/HSA/Audit相关的
-            if not any(k in content.lower() for k in ["hsa", "audit", "医保", "稽查", "sql", "clickhouse"]):
+            # 简单的关键词过滤，确保是医�?HSA/Audit相关�?            if not any(k in content.lower() for k in ["hsa", "audit", "医保", "稽查", "sql", "clickhouse"]):
                 continue
                 
-            # 保存到项目目录
-            safe_date = mtime.strftime("%Y%m%d_%H%M%S")
+            # 保存到项目目�?            safe_date = mtime.strftime("%Y%m%d_%H%M%S")
             filename = f"log_{safe_date}_{cid[:8]}.md"
             save_path = os.path.join(PROJECT_LOG_DIR, filename)
             
@@ -52,3 +49,4 @@ def extract_logs():
 
 if __name__ == "__main__":
     extract_logs()
+
