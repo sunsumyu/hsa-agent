@@ -53,6 +53,10 @@ bench_out.txt
 db_dump.txt
 status
 uuid
+*_debug.txt
+*_dump.txt
+*.log
+
 
 # ── 参考资料 / 大文件 (不应追踪) ────────────────────────────
 *.pdf
@@ -61,3 +65,6 @@ anthropic_agents_text.txt
 # ── 大仓库内脏文件 ────────────────────────────────────────
 scratch/
 docs-log/
+docs/
+tools/_history_chunk.md
+data/

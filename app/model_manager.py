@@ -212,7 +212,7 @@ class Reranker:
         return [{"index": i, "relevance_score": 1.0 - (i * 0.1)} for i in range(min(len(documents), top_n))]
 
 class ModelManager:
-    def __init__(self, config_path="app/llm_providers.json"):
+    def __init__(self, config_path="configs/llm_providers.json"):
         self.config_path = config_path
         self.providers: Dict[str, ModelConfig] = self._load_config()
         self._local_embedder = None

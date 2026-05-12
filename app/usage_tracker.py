@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Union, Any
 from app.schemas import ModelConfig, UsageStats, RoleConfigV2, AgentRole
 
 class UsageTracker:
-    def __init__(self, stats_path="data/usage_stats.json", config_path="app/endpoint_pools.json", role_path="app/role_configs.json"):
+    def __init__(self, stats_path="data/usage_stats.json", config_path="configs/endpoint_pools.json", role_path="configs/role_configs.json"):
         self.stats_path = stats_path
         self.config_path = config_path
         self.role_path = role_path

@@ -21,8 +21,8 @@ class EndpointState:
         self.stability = usage_tracker.get_stability_score(self.id)
 
 class EndpointPoolManager:
-    def __init__(self, pool_config_path="app/endpoint_pools.json", 
-                       role_config_path="app/role_configs.json"):
+    def __init__(self, pool_config_path="configs/endpoint_pools.json", 
+                       role_config_path="configs/role_configs.json"):
         self.pool_config_path = pool_config_path
         self.role_config_path = role_config_path
         self.pools: Dict[str, PoolConfig] = {}
