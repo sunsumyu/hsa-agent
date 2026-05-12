@@ -116,7 +116,8 @@ async def serve_dashboard():
 def run_monitor(port: int = 8089):
     os.makedirs("app/static", exist_ok=True)
     logger.info(f"🚀 [MOC] 算力管理中心正在启动: http://localhost:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    _host = os.getenv("MONITOR_HOST", "127.0.0.1")
+    uvicorn.run(app, host=_host, port=port)
 
 if __name__ == "__main__":
     run_monitor()

@@ -1,14 +1,25 @@
 import asyncio
 from typing import Type, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import BaseTool
 from loguru import logger
 from app.audit_rules import rule_engine
 from app.anomaly_algorithms import anomaly_detector
+from app.tools import _execute_audit_sql_logic
 
 class RuleExecutionInput(BaseModel):
     rule_id: str = Field(description="The ID or semantic name of the audit rule or anomaly algorithm to run (e.g., 'GENDER_CONFLICT', 'CROSS_HOSPITAL_OVERLAP', 'VIX_ANOMALY_SCAN').")
-    extra_filters: Optional[Dict[str, str]] = Field(default=None, description="Optional dynamic filters extracted from the user question.")
+    extra_filters: Optional[Dict[str, Any]] = Field(default=None, description="Optional dynamic filters extracted from the user question.")
+
+    @field_validator("extra_filters", mode="before")
+    @classmethod
+    def coerce_filters(cls, v):
+        """LLM 经常传非法类型（int/list 等），统一强转为 Dict[str,str]"""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return {str(k): str(val) for k, val in v.items()}
+        return None
     
 class RuleExecutionSkill(BaseTool):
     name: str = "run_audit_rule"

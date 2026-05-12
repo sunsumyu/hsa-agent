@@ -47,7 +47,7 @@ def bulk_upsert(models):
                 status = 'Warning'
             elif rem < tot:
                 status = 'Active'
-        except:
+        except Exception:
             pass
         upsert_model(conn, m['name'], m['platform'], m['remaining'], m['total'], status, m.get('hint', ''))
     conn.commit()

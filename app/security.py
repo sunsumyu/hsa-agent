@@ -36,6 +36,17 @@ class SQLGuardian:
         logger.info(f"🕵️ [SQLGuardian] 正在校验原始 SQL: {clean_sql[:300]}...")
         clean_sql = sql.replace('\\n', '\n').strip().rstrip(';； \n\r\t')
 
+        # [V90.6] Mongo / NoSQL 语法物理拦截：LLM 偶尔写出 {'$gte': ...} 当作 SQL 字面量
+        _mongo_ops = ["$gte", "$lte", "$gt", "$lt", "$eq", "$ne", "$in", "$nin", "$or", "$and", "$regex"]
+        for _op in _mongo_ops:
+            if _op in clean_sql:
+                logger.error(f"[SECURITY] 检测到 MongoDB 操作符 {_op} 混入 SQL")
+                raise SecurityViolationError(
+                    f"物理拦截：SQL 中混入了 MongoDB/NoSQL 操作符 `{_op}`。"
+                    f"ClickHouse SQL 不支持 `{{'$gte': '2024-01-01'}}` 这种语法，"
+                    f"请改写为 `setl_time >= '2024-01-01'` 这种标准 SQL 比较语法。"
+                )
+
         # ── Step 0: 字段知识图谱纠错 ────
         try:
             from app.neo4j_manager import field_kg
@@ -129,10 +140,60 @@ class SQLGuardian:
                 # 尝试用 FieldKG 再次解析（处理物理别名映射）
                 resolved = field_kg.resolve(col_name)
                 if not resolved:
-                    logger.error(f"[SECURITY] 发现物理不存在的幻觉字段: {col_name}")
+                    # [V90.2] 自愈建议：尝试模糊匹配给出最可能的正确字段
+                    suggestion = SQLGuardian._suggest_field(col_name)
+                    logger.error(f"[SECURITY] 发现物理不存在的幻觉字段: {col_name} | 建议: {suggestion}")
                     raise SecurityViolationError(
-                        f"物理拦截：字段 `{col_name}` 既不是物理列也不是合法别名。严禁猜测字段名，请仅使用 Physical Blueprint 中提供的字段。"
+                        f"物理拦截：字段 `{col_name}` 既不是物理列也不是合法别名。"
+                        f"{suggestion} "
+                        f"请调用 `lookup_medical_schema` 工具查询正确字段名后重写 SQL。"
                     )
+
+    @staticmethod
+    def _suggest_field(hallucinated: str) -> str:
+        """[V90.2] 对幻觉字段做模糊匹配，返回可能的正确字段建议"""
+        _COMMON_HALLUCINATIONS = {
+            "fee_amt": "medfee_sumamt",
+            "total_fee": "medfee_sumamt",
+            "amount": "medfee_sumamt",
+            "pay_amount": "fund_pay_sumamt",
+            "fund_amt": "fund_pay_sumamt",
+            "hosp_code": "fixmedins_code",
+            "hospital_id": "fixmedins_code",
+            "hosp_name": "fixmedins_name",
+            "hospital_name": "fixmedins_name",
+            "patient_id": "psn_no",
+            "patient_name": "psn_name",
+            "item_name": "hilist_name",
+            "drug_name": "hilist_name",
+            "det_item_name": "hilist_name",
+            "medical_category": "med_type",
+            "type_name": "med_type",
+            "settlement_time": "setl_time",
+            "settle_time": "setl_time",
+            "gender": "gend",
+            "sex": "gend",
+            # ── 虚拟计算指标：非物理字段，需通过 SQL 公式计算 ──
+            "vix": "非物理字段。变异指数需计算: stddevPop(medfee_sumamt)/avg(medfee_sumamt) AS vix",
+            "variation_index": "非物理字段。变异指数需计算: stddevPop(medfee_sumamt)/avg(medfee_sumamt) AS variation_index",
+            "overlap_hours": "非物理字段。需计算: dateDiff('hour', greatest(a.start_date, b.start_date), least(a.end_date, b.end_date)) AS overlap_hours",
+            "department_id": "非物理字段。科室信息在 dise_name 或 fixmedins_name 中",
+            "dept_id": "非物理字段。科室信息在 dise_name 或 fixmedins_name 中",
+            "visit_count": "非物理字段。需计算: COUNT(*) AS visit_count",
+            "admission_count": "非物理字段。需计算: COUNT(*) AS admission_count",
+            "age": "非物理字段。需计算: dateDiff('year', toDate(brdy), today()) AS age (brdy=出生日期字段)",
+            "los": "非物理字段。住院天数需计算: dateDiff('day', start_date, end_date) AS los",
+            "length_of_stay": "非物理字段。住院天数需计算: dateDiff('day', start_date, end_date) AS length_of_stay",
+        }
+        h = hallucinated.lower().strip()
+        if h in _COMMON_HALLUCINATIONS:
+            correct = _COMMON_HALLUCINATIONS[h]
+            return f"建议替换: `{hallucinated}` → `{correct}`。"
+        # 子串匹配
+        for wrong, correct in _COMMON_HALLUCINATIONS.items():
+            if wrong in h or h in wrong:
+                return f"建议替换: `{hallucinated}` → `{correct}`。"
+        return "无法自动推测正确字段。"
 
     @staticmethod
     def _refine_sql_traps(expression):
@@ -162,12 +223,21 @@ class SQLGuardian:
             has_index_filter = False
             has_time_filter = False
             
-            for predicate in expression.find_all((exp.EQ, exp.In, exp.GT, exp.LT, exp.Between)):
+            # [V90.3] 扩展谓词扫描：覆盖 >=, <= 以及函数包裹的时间条件 (如 toYear(toDateTime(setl_time)))
+            full_sql_upper = str(expression).upper()
+            for predicate in expression.find_all((exp.EQ, exp.In, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Between)):
                 pred_str = str(predicate).upper()
                 if "PSN_NO" in pred_str:
                     has_index_filter = True
                 if any(tf in pred_str for tf in ["SETL_TIME", "START_DATE", "END_DATE"]):
                     has_time_filter = True
+            # Fallback: 函数包裹的时间条件（如 toYear(toDateTime(setl_time)) = 2024）
+            if not has_time_filter:
+                if any(tf in full_sql_upper for tf in ["SETL_TIME", "START_DATE", "END_DATE"]):
+                    # 存在时间字段引用，检查是否在 WHERE 子句中
+                    where_clause = expression.find(exp.Where)
+                    if where_clause and any(tf in str(where_clause).upper() for tf in ["SETL_TIME", "START_DATE", "END_DATE"]):
+                        has_time_filter = True
             
             is_heavy_join = False
             if joins:

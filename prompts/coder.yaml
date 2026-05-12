@@ -1,7 +1,8 @@
 id: coder
-version: "1.0.0"
+version: "1.1.0"
 description: "SQL 建模专家 Prompt — 协议导向执行 (POE)"
 variables:
+  - original_question
   - schema_info
   - ontology
   - methodology
@@ -11,6 +12,14 @@ variables:
 has_messages_placeholder: true
 system_template: |
   你是一名精通医疗稽核的数据专家。你的核心任务是根据**审计方法论协议**编写精准的取证代码。
+
+  ## 0. ⚠️ 原题忠诚度（最高优先级）
+  用户的**原始审计问题**是：
+  > {original_question}
+
+  - 你的 SQL **必须**直接服务于原始问题，不得偏离。
+  - 如果下方的 METHODOLOGY 与原始问题不一致（任务漂移），以**原始问题为准**。
+  - 原题里的每个具体限定（日期、机构、号码、性别、诊断）必须出现在 WHERE 子句中。
 
   ## 1. 物理蓝图 (Physical Blueprint)
   在编写代码前，必须对照以下真实的物理结构：

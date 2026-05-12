@@ -7,12 +7,12 @@ from datetime import datetime
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 os.environ["LANGFUSE_PUBLIC_KEY"] = "" 
 os.environ["LANGFUSE_SECRET_KEY"] = ""
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-from app.agent_graph import workflow, _record_usage_with_budget
+from app.agent_graph import get_graph_executor, _record_usage_with_budget
 from app.usage_tracker import usage_tracker
 
 # ---------------------------------------------------------
@@ -92,7 +92,7 @@ async def run_audit_with_tracking(case_id, prompt):
     try:
         # 增加递归上限到 50，防止复杂任务中断
         config = {"recursion_limit": 50}
-        final_state = await workflow.ainvoke(inputs, config=config)
+        final_state = await executor.ainvoke(inputs, config=config)
         print(f"  Task Completed Successfully")
     except Exception as e:
         print(f"  Task Failed or Interrupted: {str(e)}")

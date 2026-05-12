@@ -47,7 +47,7 @@
       ]
     },
     "tier-1-bailian-preferred": {
-      "display_name": "百炼优先池 (DeepSeek-V3 / Qwen-Plus)",
+      "display_name": "百炼优先池 (DeepSeek + Qwen-Plus 多版本轮转)",
       "tools_support": true,
       "fallback_pool": "tier-2-chat",
       "endpoints": [
@@ -74,25 +74,36 @@
           "daily_quota": 1000000
         },
         {
-          "id": "qwen-72b-bailian",
-          "family": "qwen2.5-72b",
-          "platform": "bailian",
-          "provider": "dashscope",
-          "model_name": "qwen2.5-72b-instruct",
-          "api_key_env": "BAILIAN_API_KEY",
-          "base_url_env": "BAILIAN_BASE_URL",
-          "weight": 60,
-          "daily_quota": 1000000
-        },
-        {
-          "id": "qwen-plus-bailian",
+          "id": "qwen-plus-latest",
           "family": "qwen-plus",
           "platform": "bailian",
           "provider": "dashscope",
-          "model_name": "qwen-plus",
+          "model_name": "qwen-plus-latest",
           "api_key_env": "BAILIAN_API_KEY",
           "base_url_env": "BAILIAN_BASE_URL",
           "weight": 40,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-2025-07-28",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-2025-07-28",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 35,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-0112",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-0112",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 35,
           "daily_quota": 1000000
         }
       ]
@@ -131,33 +142,141 @@
       ]
     },
     "tier-2-chat": {
-      "display_name": "经济型/备份对话池",
+      "display_name": "经济型备份池 (Qwen-Plus/Turbo 多版本轮转)",
       "tools_support": true,
       "fallback_pool": null,
       "endpoints": [
         {
-          "id": "qwen-plus-bailian",
+          "id": "qwen-plus-2025-12-01",
           "family": "qwen-plus",
           "platform": "bailian",
           "provider": "dashscope",
-          "model_name": "qwen-plus",
+          "model_name": "qwen-plus-2025-12-01",
           "api_key_env": "BAILIAN_API_KEY",
           "base_url_env": "BAILIAN_BASE_URL",
           "weight": 50,
-          "daily_quota": 5000000,
-          "input_cost_1k": 0.0008,
-          "output_cost_1k": 0.002
+          "daily_quota": 1000000
         },
         {
-          "id": "qwen-turbo-bailian",
+          "id": "qwen-plus-character",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-character",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 45,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-1220",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-1220",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 45,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-2025-09-11",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-2025-09-11",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 40,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-2025-01-25",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-2025-01-25",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 40,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-2025-04-28",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-2025-04-28",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 35,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-plus-2025-07-14",
+          "family": "qwen-plus",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-plus-2025-07-14",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 35,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-turbo-1101",
           "family": "qwen-turbo",
           "platform": "bailian",
           "provider": "dashscope",
-          "model_name": "qwen-turbo",
+          "model_name": "qwen-turbo-1101",
           "api_key_env": "BAILIAN_API_KEY",
           "base_url_env": "BAILIAN_BASE_URL",
-          "weight": 20,
+          "weight": 50,
           "daily_quota": 10000000
+        },
+        {
+          "id": "qwen-turbo-latest",
+          "family": "qwen-turbo",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-turbo-latest",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 30,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-turbo-2025-02-11",
+          "family": "qwen-turbo",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-turbo-2025-02-11",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 25,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-turbo-2025-07-15",
+          "family": "qwen-turbo",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-turbo-2025-07-15",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 25,
+          "daily_quota": 1000000
+        },
+        {
+          "id": "qwen-turbo-2025-04-28",
+          "family": "qwen-turbo",
+          "platform": "bailian",
+          "provider": "dashscope",
+          "model_name": "qwen-turbo-2025-04-28",
+          "api_key_env": "BAILIAN_API_KEY",
+          "base_url_env": "BAILIAN_BASE_URL",
+          "weight": 25,
+          "daily_quota": 1000000
         }
       ]
     },

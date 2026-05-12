@@ -12,7 +12,7 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 # [V48.1 极致体验] 强制 HuggingFace 使用离线缓存或快速失败，杜绝网络超时卡死
 os.environ["HF_HUB_OFFLINE"] = "1"
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 from app.model_manager import model_manager
 from scripts.token_audit_test import TokenRoleTracker
 
@@ -28,8 +28,14 @@ JUDGE_PROMPT = """
 6. Professionalism (专业性): 审计逻辑是否符合医保监管规范与医学常识。
 7. Interpretability (可解释性): 报告是否通俗易懂，是否提供了清晰的证据链。
 
-请严格返回 JSON 格式:
-{"scores": {"success": 0, "recall": 0, "precision": 0, "faithfulness": 0, "relevance": 0, "professionalism": 0, "interpretability": 0}, "total": 0, "advice": "具体的优化建议..."}
+## 评审铁律
+- advice 字段**必须**给出至少一条具体、可操作的改进建议（指出报告中缺少什么或可以如何加强）。
+- 即使所有维度均满分，也**必须**给出至少一条"锦上添花"建议（如：可增加某类可视化图表、可补充某项交叉验证）。
+- 禁止输出空泛的赞美话术（如"保持"、"继续"、"很好"），advice 必须包含具体的报告章节名或技术手段。
+- advice 字段使用英文输出。
+
+请严格返回 JSON 格式 (无其他文字):
+{"scores": {"success": 0, "recall": 0, "precision": 0, "faithfulness": 0, "relevance": 0, "professionalism": 0, "interpretability": 0}, "total": 0, "advice": "Specific actionable suggestion..."}
 """
 
 # 2. 精选测试用例库 (Chapter 12 标准)
@@ -42,6 +48,7 @@ TEST_CASES = {
 
 class SmartAuditorBenchmark:
     def __init__(self):
+        self.executor, _ = get_graph_executor()
         self.tracker = TokenRoleTracker()
         self.tracker.patch()
         # 裁判模型
@@ -84,7 +91,7 @@ class SmartAuditorBenchmark:
         try:
             inputs = {"messages": [("user", case['prompt'])], "session_id": f"BENCH_{case_id}"}
             # 开启测试运行
-            final_state = await workflow.ainvoke(inputs, config={"recursion_limit": 30})
+            final_state = await self.executor.ainvoke(inputs, config={"recursion_limit": 30})
             duration = time.time() - start_time
             
             # 安全提取最终报告

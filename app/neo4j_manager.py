@@ -69,10 +69,10 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
     },
     {
         "canonical": "medfee_sumamt",
-        "aliases": ["医疗总费用", "结算金额", "total_fee", "total_amount", "medfee", "total_expense", "total_bill", "gross_amount", "medical_cost"],
+        "aliases": ["医疗总费用", "结算金额", "total_fee", "total_amount", "medfee", "total_expense", "total_bill", "gross_amount", "medical_cost", "fee_amt", "pay_amount", "fee_amount"],
         "table": "fqz_gz_jzsj_all_ql",
-        "desc": "医疗总费用（必须使用此字段，严禁使用 total_fee 或 amount）",
-        "forbidden_aliases": ["total_fee", "total_amount", "amount"]
+        "desc": "医疗总费用（必须使用此字段，严禁使用 total_fee 或 amount 或 fee_amt）",
+        "forbidden_aliases": ["total_fee", "total_amount", "amount", "fee_amt", "pay_amount"]
     },
     {
         "canonical": "fund_pay_sumamt",
@@ -129,6 +129,22 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
         "table": "fqz_gz_jzsj_all_ql",
         "desc": "参保人联系电话（提示：结算明细表中该字段可能为空，建议优先调用 query_fraud_ring 查图）",
         "forbidden_aliases": []
+    },
+    # ── 虚拟计算指标：物理不存在，需告知 LLM 如何计算 ──
+    {
+        "canonical": "__COMPUTED__",
+        "aliases": [],
+        "table": "__VIRTUAL__",
+        "desc": "以下字段是常见幻觉字段，物理不存在，必须通过 SQL 公式计算",
+        "forbidden_aliases": [
+            "vix", "variation_index", "变异指数",
+            "overlap_hours", "overlap_days",
+            "department_id", "dept_id", "dept_code",
+            "visit_count", "admission_count",
+            "age", "patient_age",
+            "readmission_flag", "is_readmission",
+            "los", "length_of_stay",
+        ]
     },
 ]
 
@@ -243,7 +259,9 @@ class Neo4jManager:
     def __init__(self):
         self.uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         self.user = os.getenv("NEO4J_USER", "neo4j")
-        self.password = os.getenv("NEO4J_PASSWORD", "password")
+        self.password = os.getenv("NEO4J_PASSWORD", "")
+        if not self.password:
+            logger.warning("[SECURITY] NEO4J_PASSWORD 未设置，Neo4j 连接将失败。请在 .env 中配置。")
         self.driver = None
         self.is_connected = False
         # [V59.3] 延迟加载：不在初始化时物理阻塞，仅在首次使用时建立连接

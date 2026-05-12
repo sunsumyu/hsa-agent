@@ -6,9 +6,10 @@ from loguru import logger
 sys.path.append(os.getcwd())
 
 from app.semantic_memory import cognitive_memory_manager
-from app.agent_graph import _workflow as workflow
+from app.agent_graph import get_graph_executor
 
 def test_memory_loop():
+    executor, _ = get_graph_executor()
     logger.info("=== [Phase 1: 经验灌输] ===")
     # 手动模拟一次成功的审计发现并存入长期记忆
     experience_topic = "重复收费审计"
@@ -29,7 +30,7 @@ def test_memory_loop():
     
     logger.info(f">>> 用户指令: {user_input}")
     
-    for output in workflow.stream(inputs, config=config):
+    for output in executor.stream(inputs, config=config):
         for node_name, state in output.items():
             logger.info(f"--- 节点执行完毕: {node_name} ---")
             if "messages" in state:

@@ -45,7 +45,7 @@ def shutdown_observability():
             print(">>> [Observability] 正在执行离场数据固化 (V14.6)...")
             try:
                 _tracer_provider.force_flush(2000)
-            except: pass
+            except Exception: pass
             _tracer_provider.shutdown()
             _tracer_provider = None
         

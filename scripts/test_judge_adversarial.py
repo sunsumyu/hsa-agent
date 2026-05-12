@@ -5,11 +5,12 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 
 async def test_judge_precision():
+    executor, _ = get_graph_executor()
     logger.info("🕵️‍♂️ [SCENARIO] 正在模拟：高迷惑性‘紧急手术’审计案例...")
     
     user_input = (
@@ -26,7 +27,7 @@ async def test_judge_precision():
 
     logger.info(f">>> 审计指令: {user_input}")
 
-    async for output in workflow.astream(inputs, config=config):
+    async for output in executor.astream(inputs, config=config):
         for node_name, state in output.items():
             if node_name == "CRITIC":
                 findings = state.get("structured_report").findings

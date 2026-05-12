@@ -47,7 +47,7 @@ class AuditJudge:
             # 提取 JSON
             result = json.loads(response.content[response.content.find("{"):response.content.rfind("}")+1])
             return result
-        except:
+        except (ValueError, KeyError, IndexError):
             return {"is_valid": True, "confidence_score": 50, "action": "PASS"}
 
 audit_judge = AuditJudge()

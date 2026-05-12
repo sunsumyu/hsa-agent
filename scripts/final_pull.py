@@ -8,7 +8,7 @@ async def force_pull():
     if sys.stdout.encoding.lower() != 'utf-8':
         try:
             sys.stdout.reconfigure(encoding='utf-8')
-        except: pass
+        except Exception: pass
     print("START: Force Extraction Mode (Case 1-3)...")
     executor, config = get_graph_executor()
     

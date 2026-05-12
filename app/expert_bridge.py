@@ -1,3 +1,4 @@
+import os
 import json
 import requests
 from loguru import logger
@@ -24,7 +25,7 @@ class ExpertReviewBridge:
             "total_amount": report_data.get("total_amount"),
             "findings_count": report_data.get("finding_count"),
             "dashboard_link": html_url,
-            "callback_token": "hsa_secret_2026", # 用于专家打分回传验证
+            "callback_token": os.getenv("EXPERT_CALLBACK_TOKEN", ""), # 从环境变量读取，严禁硬编码
             "priority": "HIGH" if report_data.get("risk_level") == "高" else "NORMAL"
         }
 

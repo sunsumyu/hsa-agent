@@ -8,9 +8,9 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 from app.model_manager import model_manager
 
 # 1. 工业级裁判 Prompt (符合 Chapter 12 标准)
@@ -20,8 +20,13 @@ JUDGE_PROMPT = """
 2. **逻辑专业性 (Professionalism)**: 审计思路是否符合医保稽核规范？
 3. **可解释性 (Interpretability)**: 结论是否清晰，是否提供了足够的证据链？
 
+## 评审要求
+- expert_advice 必须包含至少一条**具体可操作**的改进建议（指明缺少哪个章节/数据/交叉验证）。
+- 即使满分也必须给出"锦上添花"建议，禁止输出空泛赞美。
+- expert_advice 使用英文输出。
+
 请以 JSON 格式返回，严禁包含其他文字：
-{"scores": {"faithfulness": 9, "professionalism": 8, "interpretability": 9}, "total": 26, "expert_advice": "..."}
+{"scores": {"faithfulness": 9, "professionalism": 8, "interpretability": 9}, "total": 26, "expert_advice": "Specific actionable suggestion..."}
 """
 
 # 2. 精选 5 个 Chapter 12 工业级命题
@@ -35,11 +40,12 @@ INDUSTRIAL_CASES = [
 
 class Chapter12Evaluator:
     def __init__(self):
+        self.executor, _ = get_graph_executor()
         self.results = []
         # 使用 Gemini-1.5-Pro 作为终审裁判，确保公正性
         try:
             self.judge_model, _ = model_manager.get_adaptive_llm(model_id="gemini-1.5-pro")
-        except:
+        except Exception:
             # 降级到 qwen-max
             self.judge_model, _ = model_manager.get_adaptive_llm(model_id="qwen-max")
 
@@ -64,7 +70,7 @@ class Chapter12Evaluator:
             try:
                 inputs = {"messages": [("user", case['prompt'])]}
                 # 开启 50 层深度递归，允许智能体反复修正 SQL
-                final_state = await workflow.ainvoke(inputs, config={"recursion_limit": 50})
+                final_state = await self.executor.ainvoke(inputs, config={"recursion_limit": 50})
                 
                 duration = time.time() - start_time
                 report_content = final_state["messages"][-1].content

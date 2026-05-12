@@ -33,6 +33,12 @@ class EnrichedChatOpenAI(ChatOpenAI):
             fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
             is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
             
+            # [V90.6] 400 InvalidParameter (消息顺序等) 是请求级别 bug，不应熔断节点
+            _is_request_bug = "InvalidParameter" in err_msg or "Invalid messages" in err_msg
+            if _is_request_bug:
+                logger.warning(f"⚠️ [REQUEST_BUG] 节点 {m_id} 返回 400 参数错误 (不熔断): {err_msg[:200]}")
+                raise e
+            
             if not is_fatal and ("429" in err_msg or "limit" in err_msg.lower()):
                 import asyncio
                 retry_count = getattr(self, '_rate_limit_retry', 0)
@@ -59,6 +65,12 @@ class EnrichedChatOpenAI(ChatOpenAI):
             fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
             is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
             
+            # [V90.6] 400 InvalidParameter 不熔断
+            _is_request_bug = "InvalidParameter" in err_msg or "Invalid messages" in err_msg
+            if _is_request_bug:
+                logger.warning(f"⚠️ [REQUEST_BUG_SYNC] 节点 {m_id} 返回 400 参数错误 (不熔断): {err_msg[:200]}")
+                raise e
+            
             if not is_fatal and ("429" in err_msg or "limit" in err_msg.lower()):
                 import time
                 retry_count = getattr(self, '_rate_limit_retry_sync', 0)
@@ -75,9 +87,15 @@ class EnrichedChatOpenAI(ChatOpenAI):
 
     def _enrich_result(self, result, messages):
         # [V72.0] Anti-Chat Guard: 物理过滤闲聊废话
+        # [V90.6] Probe 豁免：探活消息 ("ping") 的回复必然是闲聊，不应触发熔断
+        _is_probe = (
+            len(messages) == 1
+            and hasattr(messages[0], "content")
+            and str(messages[0].content).strip().lower() in ("ping", "1", "hi", "test")
+        )
         content = str(result.generations[0].message.content)
         chatty_keywords = ["你好", "很高兴为您服务", "我是一个大语言模型", "作为一个AI", "有什么可以帮您", "抱歉"]
-        if any(kw in content for kw in chatty_keywords) and len(content) < 300:
+        if not _is_probe and any(kw in content for kw in chatty_keywords) and len(content) < 300:
             m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
             logger.warning(f"🚫 [ANTI_CHAT] 节点 {m_id} 输出了闲聊废话，强行判定为失败并切流。")
             endpoint_pool_manager.record_failure(m_id, "Detected conversational chatty response.")
@@ -377,7 +395,7 @@ class ModelManager:
                 probe_llm = self._create_llm(m_id, ep)
                 # 注入 ID 以确保探测失败也能精准熔断
                 probe_llm.endpoint_id = m_id 
-                await probe_llm.ainvoke([HumanMessage(content="1")], config={"timeout": 3.0})
+                await probe_llm.ainvoke([HumanMessage(content="ping")], config={"timeout": 3.0, "max_tokens": 1})
                 logger.info(f"✨ [Proactive-Probe] 节点 {m_id} 存活确认")
         except Exception as e:
             err_msg = str(e)

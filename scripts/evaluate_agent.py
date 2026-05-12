@@ -7,9 +7,9 @@ from typing import Dict, List, Any
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 from app.llm_judge import audit_judge
 from app.model_manager import model_manager
 
@@ -17,6 +17,7 @@ class HSAArenaEvaluator:
     """[V53.0] HSA 审计大模型竞技场：Win Rate 胜率对比工具"""
     
     def __init__(self):
+        self.executor, _ = get_graph_executor()
         self.cases = [
             {
                 "id": "CASE_001_COMPLEX",
@@ -39,7 +40,7 @@ class HSAArenaEvaluator:
         
         # 记录执行过程
         logger.info(f"🚀 [ARENA] 模型 {model_id} 正在处理案例...")
-        final_state = await workflow.ainvoke(inputs, config=config)
+        final_state = await self.executor.ainvoke(inputs, config=config)
         return final_state["messages"][-1].content
 
     async def judge_pair(self, query: str, output_a: str, output_b: str) -> str:

@@ -1,7 +1,16 @@
 import os
 import sys
+import warnings
 import pydantic
 from loguru import logger
+
+# [DEPRECATED] 此模块已被 agent_graph.py 完全取代，仅保留供旧版测试脚本兼容。
+# 新代码应使用: from app.agent_graph import get_graph_executor
+warnings.warn(
+    "app.agent is deprecated. Use app.agent_graph.get_graph_executor instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # [核心补丁] 修复 2026 年 LangChain 0.3+ 移除 pydantic_v1 导致的所有旧版模型驱动崩溃
 # 将 Pydantic v2 内置的 v1 兼容层直接映射回命名空间
@@ -18,7 +27,12 @@ import json
 import faiss
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
+try:
+    from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
+except ImportError:
+    AgentExecutor = None
+    create_openai_tools_agent = None
+    logger.warning("langchain_classic 未安装，agent.py 旧版 AgentExecutor 不可用。请迁移至 agent_graph.py。")
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage
 from langchain_community.vectorstores import FAISS

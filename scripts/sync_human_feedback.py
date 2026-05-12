@@ -5,7 +5,7 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
 from app.semantic_memory import cognitive_memory_manager
 from langchain_community.vectorstores import FAISS

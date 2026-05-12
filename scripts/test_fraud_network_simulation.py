@@ -5,11 +5,12 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 
 async def run_fraud_network_sim():
+    executor, _ = get_graph_executor()
     logger.info("🕸️ [SCENARIO] 正在开启：欺诈网络团伙分析模拟...")
     
     user_input = (
@@ -25,7 +26,7 @@ async def run_fraud_network_sim():
 
     logger.info(f">>> 审计指令: {user_input}")
 
-    async for output in workflow.astream(inputs, config=config):
+    async for output in executor.astream(inputs, config=config):
         for node_name, state in output.items():
             if node_name == "REPORTER":
                 report = state.get("structured_report")

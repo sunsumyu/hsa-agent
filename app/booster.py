@@ -45,7 +45,7 @@ class PrecisionBooster:
                 if clean_str.startswith("[") or clean_str.startswith("{"):
                     parsed = _json.loads(clean_str)
                     rows_data = parsed if isinstance(parsed, list) else [parsed]
-            except:
+            except (ValueError, KeyError):
                 pass
 
             # 1.2 尝试 ast.literal_eval 解析 (处理 Python 特有类型)
@@ -54,7 +54,7 @@ class PrecisionBooster:
                     eval_context = {"datetime": _dt, "date": _dt.date, "Decimal": _Decimal}
                     parsed = _ast.literal_eval(raw_data_str.strip())
                     rows_data = parsed if isinstance(parsed, list) else [parsed]
-                except:
+                except (ValueError, SyntaxError):
                     pass
 
             # 1.3 正则兜底 (处理 LLM 混入的杂质)
@@ -94,7 +94,7 @@ class PrecisionBooster:
                         
                         if score > best_score:
                             best_score, best_val = score, curr_val
-                    except:
+                    except (ValueError, TypeError):
                         continue
                 
                 total_sum += best_val
@@ -137,7 +137,7 @@ class PrecisionBooster:
                             row_dict[h] = float(val_str)
                         else:
                             row_dict[h] = val_str
-                    except: row_dict[h] = cols[i]
+                    except (ValueError, TypeError): row_dict[h] = cols[i]
                 rows_data.append(row_dict)
         
         # JSON 模式兜底
@@ -153,7 +153,7 @@ class PrecisionBooster:
                         if re.match(r"^-?\d+(\.\d+)?$", val):
                             row_dict[key] = float(val)
                         else: row_dict[key] = val
-                    except: row_dict[key] = val
+                    except (ValueError, TypeError): row_dict[key] = val
                 rows_data.append(row_dict)
                 
         return rows_data

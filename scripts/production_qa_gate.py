@@ -5,9 +5,9 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 from app.security import SQLGuardian
 from app.semantic_memory import cognitive_memory_manager
 
@@ -15,6 +15,7 @@ class HSAProductionQA:
     """[V50.0] HSA 生产环境 CI/CD 质检闸门"""
     
     def __init__(self):
+        self.executor, _ = get_graph_executor()
         self.results = {"functional": False, "safety": False, "visual": False}
         self.test_session = "ci_test_session_v50"
 
@@ -26,7 +27,7 @@ class HSAProductionQA:
         config = {"configurable": {"thread_id": self.test_session}}
         
         try:
-            final_state = await workflow.ainvoke(inputs, config=config)
+            final_state = await self.executor.ainvoke(inputs, config=config)
             report = final_state.get("structured_report")
             if report and report.total_amount > 0:
                 logger.success("✅ 功能回归测试通过：成功捕获预设违规。")

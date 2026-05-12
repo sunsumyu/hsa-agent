@@ -6,11 +6,12 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+# HF_HOME: use .env or system default
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 
 async def test_multimodal_penetration():
+    executor, _ = get_graph_executor()
     logger.info("=== [Phase 1: 多模态输入] ===")
     image_path = "handwritten_prescription_audit_demo_1777647786433.png"
     user_input = (
@@ -25,7 +26,7 @@ async def test_multimodal_penetration():
     config = {"configurable": {"thread_id": "multimodal_test_001"}}
     inputs = {"messages": [("user", user_input)]}
     
-    async for output in workflow.astream(inputs, config=config):
+    async for output in executor.astream(inputs, config=config):
         for node_name, state in output.items():
             logger.info(f"--- 节点执行完毕: {node_name} ---")
             if node_name == "REPORTER":

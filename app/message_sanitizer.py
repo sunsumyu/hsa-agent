@@ -28,6 +28,7 @@ app/message_sanitizer.py
 
 from __future__ import annotations
 
+import re as _re
 from typing import List, Any, Optional
 
 
@@ -94,39 +95,252 @@ def sanitize_for_thinking_mode(
     return safe_messages
 
 
+# ── 噪音特征 ──────────────────────────────────────────────────
+_NOISE_RE = _re.compile(
+    r"^[\s\d\.\,\;\:\'\"\\n\\t\#\*\-\+\=\!\?]*$"  # 纯标点/数字/空白
+)
+
+_NOISE_KEYWORDS = frozenset({
+    "ping", "pong", "ok", "1", "test", "hello", "hi",
+    "...", "null", "none", "undefined", ""
+})
+
+
+def remove_noise(messages: List[Any]) -> List[Any]:
+    """
+    [V90.5] 无条件去噪：删除所有无意义消息。始终执行，不受阈值控制。
+
+    删除条件（满足任一即删）：
+    - 内容为空 / 纯空白
+    - 内容为纯数字、纯标点
+    - 内容是已知探活词（ping, test, ok 等）
+    - 内容长度 < 3 且不是 ToolMessage（ToolMessage 可能有短状态码）
+    - AIMessage 内容为空且无 tool_calls
+    """
+    clean = []
+    for m in messages:
+        msg_type = getattr(m, "type", m.__class__.__name__).lower()
+        content = str(getattr(m, "content", "") or "").strip()
+
+        # 空内容 AI 且无 tool_calls → 丢弃
+        if msg_type == "ai":
+            has_tc = bool(getattr(m, "tool_calls", None))
+            if not content and not has_tc:
+                continue
+
+        # ToolMessage 不按内容过滤（即使短内容也有协议意义）
+        if msg_type == "tool":
+            clean.append(m)
+            continue
+
+        # 空内容
+        if not content:
+            continue
+
+        # 已知噪音词
+        if content.lower() in _NOISE_KEYWORDS:
+            continue
+
+        # 纯数字/标点/空白
+        if _NOISE_RE.match(content):
+            continue
+
+        # 内容太短（< 3 字符）且非 system
+        if len(content) < 3 and msg_type != "system":
+            continue
+
+        clean.append(m)
+    return clean
+
+
+def dedup_messages(messages: List[Any]) -> List[Any]:
+    """
+    [V90.5] 无条件去重：删除所有重复消息。始终执行，不受阈值控制。
+
+    去重规则：
+    - HumanMessage: 按 content 前 200 字符去重，只保留首条
+    - ToolMessage: 按 tool_call_id 去重，只保留最后一条
+    - AIMessage: 按 content 前 300 字符去重（含 tool_calls 的按 tool_call name 列表去重）
+    - SystemMessage: 按 content 前 200 字符去重，只保留首条
+    """
+    # Pass 1: 标记 ToolMessage 最后出现位置
+    last_tool_idx = {}
+    for i, m in enumerate(messages):
+        tid = getattr(m, "tool_call_id", None)
+        if tid:
+            last_tool_idx[tid] = i
+
+    seen_human = set()
+    seen_system = set()
+    seen_ai = set()
+    result = []
+
+    for i, m in enumerate(messages):
+        msg_type = getattr(m, "type", m.__class__.__name__).lower()
+        content = str(getattr(m, "content", "") or "")
+
+        if msg_type == "human":
+            key = content[:200].strip()
+            if key in seen_human:
+                continue
+            seen_human.add(key)
+
+        elif msg_type == "system":
+            key = content[:200].strip()
+            if key in seen_system:
+                continue
+            seen_system.add(key)
+
+        elif msg_type == "ai":
+            tc = getattr(m, "tool_calls", None) or []
+            if tc:
+                # 带 tool_calls 的 AI 按调用签名去重
+                key = str(sorted(c.get("name", "") for c in tc))
+            else:
+                key = content[:300].strip()
+            if key in seen_ai:
+                continue
+            seen_ai.add(key)
+
+        elif msg_type == "tool":
+            tid = getattr(m, "tool_call_id", None)
+            if tid and tid in last_tool_idx and i != last_tool_idx[tid]:
+                continue
+
+        result.append(m)
+    return result
+
+
+def compress_tool_content(messages: List[Any], max_len: int = 2000) -> List[Any]:
+    """
+    [V90.5] ToolMessage 内容压缩：截断过长返回值。始终执行。
+    """
+    compressed = []
+    for m in messages:
+        msg_type = getattr(m, "type", m.__class__.__name__).lower()
+        if msg_type == "tool":
+            content = str(getattr(m, "content", "") or "")
+            if len(content) > max_len:
+                try:
+                    from langchain_core.messages import ToolMessage as _TM
+                    truncated = content[:max_len] + f"\n... [截断 {len(content)-max_len} 字符]"
+                    new_msg = _TM(content=truncated, tool_call_id=getattr(m, "tool_call_id", ""))
+                    compressed.append(new_msg)
+                    continue
+                except ImportError:
+                    pass
+        compressed.append(m)
+    return compressed
+
+
+def trim_overflow(messages: List[Any], max_total: int = 12, keep_head: int = 2, keep_tail: int = 6) -> List[Any]:
+    """
+    [V90.5] 超限裁剪：仅在总量超标时执行，保留头尾关键消息。
+    与去重/去噪无关，独立职责。
+    """
+    if len(messages) <= max_total:
+        return messages
+    return messages[:keep_head] + messages[-keep_tail:]
+
+
+def ensure_tool_pairing(messages: List[Any]) -> List[Any]:
+    """
+    [V90.6] 配对完整性校验：确保每条 ToolMessage 前方存在对应的 AIMessage(tool_calls)。
+
+    API 约束（百炼/OpenAI 通用）：
+        messages with role "tool" must be a response to a preceding message with "tool_calls"
+
+    本函数在所有裁剪/去重/降级之后执行，作为最终安全网：
+        1. 收集所有 AIMessage 中声明的 tool_call_id
+        2. 移除任何找不到对应 tool_call_id 的孤儿 ToolMessage
+        3. 移除所有 tool_calls 对应的 ToolMessage 都被移除的空壳 AIMessage
+    """
+    # Pass 1: 收集所有 AI 消息声明的 tool_call_id → set
+    declared_ids: set = set()
+    for m in messages:
+        msg_type = getattr(m, "type", m.__class__.__name__).lower()
+        if msg_type == "ai":
+            for tc in getattr(m, "tool_calls", []) or []:
+                tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                if tid:
+                    declared_ids.add(tid)
+
+    # Pass 2: 收集实际存在的 ToolMessage 的 tool_call_id
+    present_tool_ids: set = set()
+    result = []
+    for m in messages:
+        msg_type = getattr(m, "type", m.__class__.__name__).lower()
+        if msg_type == "tool":
+            tid = getattr(m, "tool_call_id", None)
+            if tid and tid not in declared_ids:
+                # 孤儿 ToolMessage：前方无对应 AI tool_calls → 丢弃
+                continue
+            if tid:
+                present_tool_ids.add(tid)
+        result.append(m)
+
+    # Pass 3: 清理空壳 AI — 如果 AI 只有 tool_calls 但所有对应 ToolMessage 都不存在
+    final = []
+    for m in result:
+        msg_type = getattr(m, "type", m.__class__.__name__).lower()
+        if msg_type == "ai":
+            tc_list = getattr(m, "tool_calls", []) or []
+            if tc_list:
+                # 检查是否至少有一个 tool_call 的响应存在
+                has_any_response = any(
+                    (tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)) in present_tool_ids
+                    for tc in tc_list
+                )
+                content = str(getattr(m, "content", "") or "").strip()
+                if not has_any_response and not content:
+                    # 空壳 AI：只有 tool_calls 但无任何响应也无文本内容 → 丢弃
+                    continue
+        final.append(m)
+
+    return final
+
+
 def trim_and_sanitize(
     left: List[Any],
     right: List[Any],
-    max_total: int = 15,
-    keep_head: int = 3,
-    keep_tail: int = 7,
+    max_total: int = 12,
+    keep_head: int = 2,
+    keep_tail: int = 6,
     ai_label_prefix: str = "[Agent历史分析结果]",
 ) -> List[Any]:
     """
-    合并两段消息历史，裁剪过长部分，并对结果进行 Thinking Mode 净化。
+    [V90.6] 企业级消息合并 reducer。
 
-    适合作为 LangGraph Annotated 字段的 reducer 函数使用：
-        messages: Annotated[Sequence[BaseMessage], trim_and_sanitize]
-
-    Args:
-        left: 旧消息列表
-        right: 新消息列表
-        max_total: 超过此数量时触发裁剪
-        keep_head: 裁剪时保留头部消息数（含系统消息和首条用户消息）
-        keep_tail: 裁剪时保留尾部消息数（最新进展）
-        ai_label_prefix: 降级 AIMessage 时的标签前缀
-
-    Returns:
-        净化且裁剪后的消息列表
+    六个独立阶段：
+        1. 去噪 (remove_noise)          — 删除所有无意义消息
+        2. 去重 (dedup_messages)         — 删除所有重复消息
+        3. 压缩 (compress_tool_content)  — 截断过长的 ToolMessage
+        4. 净化 (sanitize_for_thinking_mode) — Thinking Mode 兼容
+        5. 裁剪 (trim_overflow)          — 仅在超限时裁剪非关键中间消息
+        6. 配对校验 (ensure_tool_pairing) — 确保 ToolMessage 有对应的 AI tool_calls
     """
     combined = list(left or []) + list(right or [])
-    # 先净化，再裁剪（顺序很重要：净化可能减少总数）
-    combined = sanitize_for_thinking_mode(combined, ai_label_prefix=ai_label_prefix)
 
-    if len(combined) > max_total:
-        head = combined[:keep_head]
-        tail = combined[-keep_tail:]
-        combined = head + tail
+    # [V90.6] 物理转换：tuple ("user"/"human"/"ai"/"system", content) → Message 对象
+    # LangGraph 入口可能传 tuple，sanitizer 的所有子函数依赖 .type/.content 属性
+    from langchain_core.messages import HumanMessage as _HM, AIMessage as _AM, SystemMessage as _SM
+    _ROLE_MAP = {"user": _HM, "human": _HM, "ai": _AM, "assistant": _AM, "system": _SM}
+    _converted = []
+    for m in combined:
+        if isinstance(m, tuple) and len(m) >= 2:
+            role_str = str(m[0]).lower()
+            msg_cls = _ROLE_MAP.get(role_str, _HM)
+            _converted.append(msg_cls(content=str(m[1])))
+        else:
+            _converted.append(m)
+    combined = _converted
+
+    combined = remove_noise(combined)
+    combined = dedup_messages(combined)
+    combined = compress_tool_content(combined, max_len=2000)
+    combined = sanitize_for_thinking_mode(combined, ai_label_prefix=ai_label_prefix)
+    combined = trim_overflow(combined, max_total=max_total, keep_head=keep_head, keep_tail=keep_tail)
+    combined = ensure_tool_pairing(combined)
 
     return combined
 

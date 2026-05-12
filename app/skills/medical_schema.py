@@ -9,31 +9,24 @@ class MedicalSchemaInput(BaseModel):
 
 class MedicalSchemaSkill(BaseTool):
     name: str = "lookup_medical_schema"
-    description: str = "Search for physical database schema fields based on business keywords to avoid hallucinating field names."
+    description: str = "Search for physical database schema fields based on business keywords. Returns the FULL field list of relevant tables to avoid hallucinating field names."
     args_schema: Type[BaseModel] = MedicalSchemaInput
 
     def _run(self, keywords: str) -> str:
-        # 1. Try deterministic mapping from FieldKnowledgeGraph first
+        # [V90.5] 分区分层注入：根据关键词分类定表，返回目标表全量 DDL
+        # 1. 全量 DDL（主力信息源）
+        ddl_hint = schema_injector.inject(user_question=keywords, include_warning=True)
+
+        # 2. 知识图谱补充（别名映射、禁用字段提示）
         kg_hint = field_kg.format_for_prompt(max_fields=6)
-        
-        # 2. Augment with semantic search from SchemaInjector
-        injector_hint = schema_injector.inject(user_question=keywords, top_k=5, include_warning=False)
-        
-        correction_hint = (
-            "\n**[🚨 高频错误字段纠正]**\n"
-            "- 如果你想用 `det_item_name` 或 `item_name`，**必须**改用 `hilist_name`。\n"
-            "- 如果你想用 `medical_category` 或 `type_name`，**必须**改用 `med_type`。\n"
-            "- 如果你想用 `hosp_code`，**必须**改用 `fixmedins_code`。"
-        )
-        
-        combined_hint = f"{kg_hint}\n\n**[语义相关字段召回]**\n{injector_hint}\n{correction_hint}"
-        
-        if not injector_hint or "未检索到" in injector_hint:
+
+        if not ddl_hint or "Schema 警告" in ddl_hint:
             if kg_hint:
                 return kg_hint
             return "No matching schema fields found. Please try different keywords or use get_table_schema."
-        
-        return combined_hint
-        
+
+        combined = f"{ddl_hint}\n\n{kg_hint}"
+        return combined
+
     async def _arun(self, keywords: str) -> str:
         return self._run(keywords)

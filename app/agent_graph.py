@@ -9,7 +9,6 @@ import asyncio
 import sys
 
 from app.usage_tracker import usage_tracker
-from app.compressor import trace_compressor
 from app.model_manager import model_manager
 from app.neo4j_manager import field_kg, neo4j_manager
 from app.prompts import PLANNER_PROMPT, CODER_PROMPT, ANALYST_PROMPT, REPORTER_PROMPT, AUDITOR_PROMPT
@@ -73,6 +72,31 @@ def _merge_dict(left: Dict, right: Dict) -> Dict:
     new = (left or {}).copy()
     new.update(right or {})
     return new
+
+
+def _extract_original_question(messages) -> str:
+    """
+    [V90.6] 鲁棒提取用户原始问题，兼容 tuple/HumanMessage/dict 三种形式。
+    LangGraph 在不同阶段消息形态不同：
+        - 入口阶段：("user", "...") tuple
+        - 经过节点后：HumanMessage(content="...")
+        - 反序列化时：{"type": "human", "content": "..."}
+    """
+    for m in (messages or []):
+        # 形式 1: tuple ("user"/"human", content)
+        if isinstance(m, tuple) and len(m) >= 2:
+            role = str(m[0]).lower()
+            if role in ("user", "human"):
+                return str(m[1])
+        # 形式 2: HumanMessage 对象（有 .type 属性）
+        msg_type = getattr(m, "type", "")
+        if str(msg_type).lower() == "human":
+            return str(getattr(m, "content", ""))
+        # 形式 3: dict {"type": "human", "content": "..."}
+        if isinstance(m, dict):
+            if str(m.get("type", m.get("role", ""))).lower() in ("human", "user"):
+                return str(m.get("content", ""))
+    return ""
 
 class AuditState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], _trim_messages]
@@ -196,11 +220,14 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     # 获取图谱本体
     ontology = neo4j_manager.get_ontology()
 
-    # ── [V67.5] 注入任务相关的精准 Schema 片段（M4 注入器）──────────
-    schema_hint = _schema_injector.inject(user_question=user_input, top_k=6)
+    # ── [V90.5] 分区分层 Schema 注入：问题分类 → 表路由 → 全量 DDL ──────────
+    schema_hint = _schema_injector.inject(user_question=user_input)
     
-    prompt_template = get_langfuse_prompt("planner-audit-v1", fallback=PLANNER_PROMPT)
+    # [V90.6] 直接使用本地 PLANNER_PROMPT v1.1.0 (含 original_question 锚定)，
+    # 不再走 Langfuse 云端版本，避免云端缓存旧 prompt 导致原题锚失效
+    prompt_template = PLANNER_PROMPT
     prompt = prompt_template.format_messages(
+        original_question=user_input[:500],
         messages=state["messages"], 
         experiences=mem_context, 
         ontology=ontology,
@@ -308,11 +335,26 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     # 获取图谱本体
     ontology = neo4j_manager.get_ontology()
     
-    # ── [V67.5] 精准 Schema 注入：根据子任务召回物理字段 ─────────────
+    # ── [V90.5] 分区分层 Schema 注入：合并用户问题+子任务做分类，全量 DDL ─────────────
+    _user_q = " ".join(str(m.content) for m in state.get("messages", []) if getattr(m, "type", "") == "human")[:200]
     task_str = " ".join(tasks_list)
-    schema_hint = _schema_injector.inject(user_question=task_str, top_k=10)
+    schema_hint = _schema_injector.inject(user_question=f"{_user_q} {task_str}")
     
+    # ── [V90.2] Schema 空时强制 tool 预查：绝不允许 LLM 猜字段 ─────────────
+    _schema_empty = "Schema 警告" in schema_hint or "未检索到" in schema_hint
+    if _schema_empty:
+        logger.warning("⚠️ [SCHEMA_GUARD] Schema 注入为空，执行强制预查...")
+        _fallback_skill = MedicalSchemaSkill()
+        _fallback_hint = await _fallback_skill._arun(task_str)
+        if _fallback_hint and "No matching" not in _fallback_hint:
+            schema_hint = _fallback_hint
+            _schema_empty = False
+            logger.info(f"✅ [SCHEMA_GUARD] 强制预查成功，已注入字段信息")
+    
+    # [V90.6] 提取原题供 coder 直接锚定，防止 methodology 漂移后无法回归
+    _original_q_coder = (_extract_original_question(state.get("messages", [])) or "")[:500]
     prompt = CODER_PROMPT.format_messages(
+        original_question=_original_q_coder,
         messages=state["messages"], 
         ontology=ontology,
         schema_info=schema_hint,
@@ -321,8 +363,26 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
         experiences=mem_context
     )
     
+    # [V90.2] Schema 仍为空时追加强制 tool 指令，禁止直接写 SQL
+    if _schema_empty:
+        from langchain_core.messages import SystemMessage
+        prompt.append(SystemMessage(content=(
+            "⚠️ 【物理字段未注入 - 强制查证模式】\n"
+            "当前 Schema 为空，你**绝对禁止**直接编写任何 SQL。\n"
+            "你**必须**先调用 `lookup_medical_schema` 工具查询正确字段名，获得结果后再编写 SQL。\n"
+            "违反此规则的 SQL 将被物理拦截。"
+        )))
+    
     if retry > 0 and state.get("error_log"):
-        prompt.append(HumanMessage(content=f"上一轮执行失败，原因：{state['error_log']}\n请修正参数并重新调用工具。"))
+        error_log = state["error_log"]
+        # [V90.2] 幻觉字段拦截后强制要求先查 schema
+        if "物理拦截" in error_log or "幻觉字段" in error_log:
+            prompt.append(HumanMessage(content=(
+                f"上一轮执行失败，原因：{error_log}\n"
+                "**强制要求**：你必须立即调用 `lookup_medical_schema` 工具查询正确的物理字段名，然后重写 SQL。禁止再次猜测字段。"
+            )))
+        else:
+            prompt.append(HumanMessage(content=f"上一轮执行失败，原因：{error_log}\n请修正参数并重新调用工具。"))
     
     obs_config = build_obs_config(config, "sqlexec", state)
     response = await llm_with_tools.ainvoke(prompt, config=obs_config)
@@ -331,10 +391,14 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     if getattr(response, "tool_calls", None):
         async def invoke_tool(t_call):
             t_instance = next((t for t in tools if t.name == t_call["name"]), None)
-            if t_instance:
+            if not t_instance:
+                return t_call, {"status": "ERROR", "error_message": f"Unknown tool: {t_call['name']}"}
+            try:
                 res = await t_instance.ainvoke(t_call["args"])
                 return t_call, res
-            return t_call, None
+            except Exception as e:
+                logger.warning(f"⚠️ [TOOL_INVOKE] {t_call['name']} 调用失败 (参数验证/执行异常): {e}")
+                return t_call, {"status": "ERROR", "error_message": f"Tool {t_call['name']} failed: {e}"}
 
         eval_tasks = [invoke_tool(tc) for tc in response.tool_calls]
         results = await asyncio.gather(*eval_tasks)
@@ -347,9 +411,13 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
         has_error = False
         error_msg = ""
         
+        _TOOL_MSG_MAX_LEN = 2000  # [V90.4] 源头截断：防止巨型工具返回污染消息链
         for t_call, res in results:
             if res is not None:
-                tool_msg = ToolMessage(content=str(res), tool_call_id=t_call["id"])
+                raw_content = str(res)
+                if len(raw_content) > _TOOL_MSG_MAX_LEN:
+                    raw_content = raw_content[:_TOOL_MSG_MAX_LEN] + f"\n... [截断 {len(raw_content)-_TOOL_MSG_MAX_LEN} 字符]"
+                tool_msg = ToolMessage(content=raw_content, tool_call_id=t_call["id"])
                 tool_msgs.append(tool_msg)
                 
                 if isinstance(res, dict):
@@ -426,11 +494,18 @@ async def critic_node(state: AuditState, config: RunnableConfig):
     llm, _ = await model_manager.get_llm_by_role("reporter", config=config)
     
     from app.prompts import CRITIC_PROMPT
+    # [V90.6] 提取原始用户问题，锚定 Critic 修复方向，防止任务漂移
+    _all_msgs = state.get("messages", [])
+    _original_q = _extract_original_question(_all_msgs) or "未获取到原始问题"
+    _original_q = _original_q[:300]
+    # [V90.4] CRITIC 只需要最近 2 条消息（最后的 AI 回复 + Tool 结果），不需要完整历史
+    _critic_msgs = _all_msgs[-2:] if len(_all_msgs) > 2 else _all_msgs
     prompt = CRITIC_PROMPT.format_messages(
+        original_question=_original_q,
         methodology=state.get("methodology", "未定义协议"),
-        raw_data=state.get("raw_data", "无数据"),
+        raw_data=state.get("raw_data", "无数据")[:1000],
         error_log=state.get("error_log", "无报错日志"),
-        messages=state["messages"]
+        messages=_critic_msgs
     )
     
     response = await llm.ainvoke(prompt)
@@ -544,7 +619,9 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 
     sql_query = state.get("sql_query", "")
     methodology = state.get("methodology", "")
-    execution_trace = list(state.get("execution_trace") or [])
+    # [V90.2] 输入侧清洗：过滤内部路由标记防止泄露到报告
+    from app.protocol_filter import sanitize as _sanitize_output
+    execution_trace = [_sanitize_output(t) for t in (state.get("execution_trace") or []) if _sanitize_output(t).strip()]
 
     # ── Step 4: 调用 LLM 只生成第四章"核查结论"（约 150~300 字）───────
     llm_conclusion = ""
@@ -595,9 +672,22 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     logger.success(f"📋 [REPORTER] 五章节报告渲染完成 | 风险: {rendered.risk_level} | 金额: ¥{rendered.total_amount:,.2f}")
 
     # ── Step 6: 构建结构化 AuditReport 对象（供下游节点使用） ──────────
+    # [V90.6] raw_data_list 是 SQL 原始结果 dict，需转为 AuditFinding 对象
+    _safe_findings = []
+    for _row in raw_data_list[:50]:
+        if isinstance(_row, dict):
+            _safe_findings.append(AuditFinding(
+                violation_type=_row.get("violation_type", "待核实"),
+                evidence=str(_row)[:500],
+                amount=float(_row.get("amount", _row.get("medfee_sumamt", _row.get("det_item_fee", 0))) or 0),
+                count=int(_row.get("count", 1)),
+                policy_basis=_row.get("policy_basis", "《医保基金监管条例》"),
+            ))
+        elif isinstance(_row, AuditFinding):
+            _safe_findings.append(_row)
     report = AuditReport(
         summary=rendered.summary,
-        findings=raw_data_list,
+        findings=_safe_findings,
         total_amount=rendered.total_amount,
         finding_count=rendered.finding_count,
         risk_level=rendered.risk_level,
@@ -758,7 +848,8 @@ def build_graph():
     """
     return _build_workflow_skeleton().compile()
 
-# 全局编译好的工作流
+# 全局编译好的工作流 (遗留兼容: 10+ 脚本直接使用 workflow.astream())
+# 新代码请使用 get_graph_executor() 以获得 checkpointer 和 model_id 支持
 workflow = build_graph()
 
 # ────────────────────────────────────────────────────────────────

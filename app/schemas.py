@@ -91,3 +91,10 @@ class UsageStats(BaseModel):
     blacklist_expiry: Dict[str, float] = Field(default_factory=dict)
     stability_scores: Dict[str, float] = Field(default_factory=dict)
     last_probe_date: Optional[str] = None
+
+class ResolveRequest(BaseModel):
+    """冲突解决请求体 (从 main.py 迁移至此，集中管理 Pydantic 模型)。"""
+    finding_a: str
+    finding_b: str
+    keep_a: bool
+    keep_b: bool

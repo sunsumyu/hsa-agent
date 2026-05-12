@@ -77,10 +77,19 @@ async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return
             
         return "MySQL 暂不支持在此路径执行。"
     except Exception as e:
-        logger.error(f"[SQL_EXEC_ERROR] {e}")
+        err_str = str(e)
+        logger.error(f"[SQL_EXEC_ERROR] {err_str}")
+        # [V90.6] 针对基础设施错误给出清晰诊断，避免 LLM 盲目重试
+        if "404" in err_str or "Connection refused" in err_str or "无法建立" in err_str:
+            return {
+                "status": "ERROR",
+                "error_message": f"⚠️ ClickHouse 数据库未启动或不可达。请检查服务状态。原始错误: {err_str[:200]}",
+                "sql_logic": sql,
+                "is_infra_error": True
+            }
         return {
             "status": "ERROR",
-            "error_message": str(e),
+            "error_message": err_str,
             "sql_logic": sql
         }
 

@@ -47,6 +47,17 @@ data/usage_stats.json
 *.tmp
 *.swp
 
+# ── 根目录运行时产物 (不应追踪) ─────────────────────────────
+=
+bench_out.txt
+db_dump.txt
+status
+uuid
+
+# ── 参考资料 / 大文件 (不应追踪) ────────────────────────────
+*.pdf
+anthropic_agents_text.txt
+
 # ── 大仓库内脏文件 ────────────────────────────────────────
 scratch/
 docs-log/

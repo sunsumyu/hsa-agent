@@ -30,11 +30,9 @@ from pydantic import BaseModel, Field
 # ── 辅助 Reducer 函数 ─────────────────────────────────────────
 
 def _default_message_reducer(left: List, right: List) -> List:
-    """默认消息合并策略: 简单拼接。
-    实际项目可通过 monkey-patch 或工厂函数替换为带截断/净化的版本。
-    """
-    combined = list(left or []) + list(right or [])
-    return combined
+    """[V90.4] 企业级消息合并：委托给 message_sanitizer 的去重+压缩+净化 pipeline。"""
+    from app.message_sanitizer import trim_and_sanitize
+    return trim_and_sanitize(left, right, max_total=10, keep_head=2, keep_tail=6)
 
 
 def _merge_dict(left: Dict, right: Dict) -> Dict:

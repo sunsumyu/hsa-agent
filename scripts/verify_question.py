@@ -7,9 +7,10 @@ sys.path.append(os.getcwd())
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["LANGFUSE_PUBLIC_KEY"] = "" # 禁用观测以加速单次测试
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 
 async def main():
+    executor, _ = get_graph_executor()
     question = "核查 2024 年是否存在同一天、同一患者、在同一医院多次收取的结算费用？"
     print(f"Starting Task: {question}")
     print("-" * 50)
@@ -20,7 +21,7 @@ async def main():
     }
     
     final_content = ""
-    async for event in workflow.astream(inputs, stream_mode="updates"):
+    async for event in executor.astream(inputs, stream_mode="updates"):
         for node_name, output in event.items():
             print(f"Node [{node_name}] Done")
             if node_name == "REPORTER":

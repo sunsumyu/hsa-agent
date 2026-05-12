@@ -8,7 +8,14 @@ from app.db_conn import get_clickhouse_client
 from app.neo4j_manager import neo4j_manager
 
 class FederatedAuditInput(BaseModel):
-    cypher_query: str = Field(description="The Cypher query to execute in Neo4j to find fraud patterns/IDs.")
+    cypher_query: str = Field(description=(
+        "The Cypher query to execute in Neo4j. "
+        "IMPORTANT Cypher syntax rules: "
+        "(1) Do NOT use SQL syntax like BETWEEN, use comparison operators instead: n.date >= '2024-01-01' AND n.date <= '2024-12-31'. "
+        "(2) Use single colon for labels: (n:Patient), not (n:Patient:Person). "
+        "(3) Use --> for directed relationships. "
+        "(4) RETURN must include the target_field."
+    ))
     target_field: str = Field(default="psn_no", description="The field name in the Cypher result to use as the primary key for the sideloader (e.g., 'psn_no', 'hosp_code').")
     description: str = Field(description="A brief description of what this federated query is looking for.")
 

@@ -21,7 +21,7 @@ def get_clickhouse_client():
         try:
             _CK_GLOBAL_CLIENT.query("SELECT 1")
             return _CK_GLOBAL_CLIENT
-        except:
+        except Exception:
             _CK_GLOBAL_CLIENT = None
 
     host = _os.getenv("CLICKHOUSE_HOST", "localhost")

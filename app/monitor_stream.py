@@ -9,9 +9,10 @@ from loguru import logger
 
 # 环境初始化
 sys.path.append(os.getcwd())
-os.environ["HF_HOME"] = "E:\\hf_cache"
+if os.getenv("HF_HOME"):
+    os.environ["HF_HOME"] = os.getenv("HF_HOME")  # 保留环境变量, 但不硬编码路径
 
-from app.agent_graph import workflow
+from app.agent_graph import get_graph_executor
 
 class AuditStreamProcessor:
     """[V48.0] 生产级审计监控流处理器"""
@@ -38,7 +39,8 @@ class AuditStreamProcessor:
         
         try:
             # 执行异步审计图谱
-            final_state = await workflow.ainvoke(inputs, config=config)
+            agent, _ = get_graph_executor()
+            final_state = await agent.ainvoke(inputs, config=config)
             
             # 提取最终报告
             report_msg = final_state["messages"][-1].content
@@ -75,7 +77,7 @@ class AuditStreamProcessor:
                 with open(self.queue_file, "r", encoding="utf-8") as f:
                     try:
                         events = json.load(f)
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         events = []
                 
                 if events:
