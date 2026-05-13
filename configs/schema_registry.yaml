@@ -64,6 +64,14 @@ tables:
       - { name: dise_name,        type: String,   desc: "诊断名称" }
       - { name: medfee_sumamt,    type: Float64,  desc: "医疗总费用" }
       - { name: fund_pay_sumamt,  type: Float64,  desc: "基金支付总额" }
+      - { name: adm_dept_code,    type: String,   desc: "入院科室编码" }
+      - { name: adm_dept_name,    type: String,   desc: "入院科室名称" }
+      - { name: dscg_dept_name,   type: String,   desc: "出院科室名称" }
+      - { name: inhosp_stas,      type: String,   desc: "在院状态" }
+      - { name: hifp_pay,         type: Float64,  desc: "统筹基金支付" }
+      - { name: acct_pay,         type: Float64,  desc: "个人账户支付" }
+      - { name: cash_payamt,      type: Float64,  desc: "现金支付金额" }
+      - { name: admdvs_name,      type: String,   desc: "行政区划名称" }
 
   - name: fqz_drug_mcs_info_list
     alias: 医保限制目录

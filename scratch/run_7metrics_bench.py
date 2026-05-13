@@ -45,6 +45,7 @@ if sys.platform == "win32":
 from app.agent_graph import workflow, _record_usage_with_budget
 from app.model_manager import model_manager
 from app.usage_tracker import usage_tracker
+from app.observability import init_observability, shutdown_observability
 
 # ── LangChain Callback: 每次 LLM 调用前后完整打印 ────────────────────
 SEP  = "=" * 72
@@ -425,7 +426,7 @@ def print_summary(results: list):
     for zh in dim_zh:
         table.add_column(zh, justify="right")
     table.add_column("Total", justify="right", style="bold yellow")
-    table.add_column("Actual/Pred", justify="right")
+    table.add_column("Actual/Pred", justify="right", no_wrap=True, width=18)
 
     tot_pre = tot_act = 0
     dim_sum = {d: 0 for d in dims}
@@ -493,6 +494,13 @@ async def main():
 
     # [V74.1] 物理持久化：不再启动时清空黑名单，确保坏掉的模型（如 V3）被持久锁定。
     logger.info("🛡️ [算力治理] 启动时保留历史黑名单状态，防止报废模型复活。")
+
+    # [V75.0] 企业级观测激活：确保 Benchmark 过程被全量追踪
+    init_observability()
+    
+    # 注册退出钩子以确保 Trace 数据完整性
+    import atexit
+    atexit.register(shutdown_observability)
 
     results = []
     for case in TEST_CASES:

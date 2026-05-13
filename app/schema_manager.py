@@ -9,7 +9,7 @@ class SchemaManager:
     [V80.0 企业级] 物理 Schema 统一管理器。
     负责从数据库同步真相，并为安全拦截和 Prompt 注入提供唯一权威数据源。
     """
-    CACHE_PATH = "e:/chain/hsa-agent/artifacts/physical_schema_cache.json"
+    CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "physical_schema_cache.json")
     
     def __init__(self):
         self._schema_cache: Dict[str, List[str]] = {}
@@ -21,22 +21,23 @@ class SchemaManager:
         logger.info("🔄 [SchemaManager] 正在从 ClickHouse 同步物理真相...")
         client = get_clickhouse_client()
         try:
-            # 1. 抓取主表及核心表的字段清单
-            tables = ["fqz_gz_jzsj_all_ql", "fqz_all_yy_yd_1", "fqz_drug_mcs_info_list"]
+            # 1. 抓取主表及核心表的字段清单 (V128.5 新增 fqz_fymx_test)
+            tables = ["fqz_gz_jzsj_all_ql", "fqz_all_yy_yd_1", "fqz_drug_mcs_info_list", "fqz_fymx_test"]
             new_cache = {}
             new_metadata = []
             
             for table in tables:
-                res = client.query(f"DESCRIBE TABLE {table}")
-                cols = [row[0].lower() for row in res.result_rows]
+                # [V128.7] 适配 CharsetProxy 的 List[Dict] 标准化输出
+                rows = client.query(f"DESCRIBE TABLE {table}")
+                cols = [row["name"].lower() for row in rows]
                 new_cache[table.upper()] = cols
                 
                 # 构造元数据用于 Prompt 注入
-                for row in res.result_rows:
+                for row in rows:
                     new_metadata.append({
-                        "field": row[0].lower(),
-                        "type": row[1],
-                        "desc": row[3] or row[0], # 使用数据库 Comment
+                        "field": row["name"].lower(),
+                        "type": row["type"],
+                        "desc": row.get("comment", row["name"]), # 使用数据库 Comment
                         "table": table
                     })
             

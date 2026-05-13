@@ -23,7 +23,8 @@ from app.core.schema_registry import schema_registry
 from app.tools import (
     execute_audit_sql, get_table_schema, list_tables, 
     search_expert_knowledge, query_fraud_ring,
-    lookup_medical_schema, check_audit_governance
+    lookup_medical_schema, check_audit_governance,
+    federated_graph_sideloader
 )
 from app.skills import MedicalSchemaSkill, RuleExecutionSkill, SQLSafeExecutionSkill
 from app.experience import experience_manager
@@ -302,13 +303,14 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     from app.skills import MedicalSchemaSkill, RuleExecutionSkill, SQLSafeExecutionSkill, FederatedAuditSkill
     retry = state.get("retry_count", 0)
     if retry >= MAX_RETRIES:
-        logger.error(f"🛑 [SQLEXEC] 达到重试上限，强制熔断并汇报失败。")
+        logger.error(f"🛑 [SQLEXEC] 达到重试上限，强制熔断并汇报空集。")
         return {
-            "raw_data": "【审计异常】由于系统未能生成有效逻辑，任务已强制终止。",
+            "raw_data": "[]",
             "sql_query": state.get("sql_query", "-- 多次尝试执行失败，未保留最终有效 SQL"),
             "methodology": state.get("methodology", ""),
             "sql_validated": True,
-            "error_log": "REACHED_MAX_RETRIES"
+            "error_log": "REACHED_MAX_RETRIES",
+            "metadata": {**state.get("metadata", {}), "is_fallback": True}
         }
 
     # 优先走 Fast Route
@@ -362,7 +364,8 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     tools = [
         execute_audit_sql, get_table_schema, list_tables, 
         search_expert_knowledge, query_fraud_ring,
-        lookup_medical_schema, check_audit_governance
+        lookup_medical_schema, check_audit_governance,
+        federated_graph_sideloader
     ]
     llm_with_tools = llm.bind_tools(tools)
     
@@ -489,7 +492,12 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
         combined_meth = "\n\n".join(methodologies) if methodologies else ""
 
         if has_error:
-            logger.warning(f"Skill 报错: {error_msg}")
+            # [V128.3] 日志降噪治理：如果是物理拦截等业务异常，不再打 WARNING，交给后续的 CRITIC 节点展示
+            if "物理拦截" in error_msg or "幻觉字段" in error_msg:
+                logger.info(f"🛡️ [GOVERNANCE] 技能层拦截: {error_msg}")
+            else:
+                logger.warning(f"⚠️ [SKILL_ERROR] {error_msg}")
+                
             return {
                 "error_log": error_msg,
                 "sql_query": combined_sql,
@@ -557,9 +565,8 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     
     # 无工具调用，尝试解析内容
     return {
-        "error_log": "Agent did not output a tool call.",
-        "messages": [response],
-        "retry_count": retry + 1
+        "error_log": None,  # [V130.1] 不作为异常拦截，允许自然结束并进入 CONSOLIDATOR
+        "messages": [response]
     }
 
 async def critic_node(state: AuditState, config: RunnableConfig):
@@ -584,20 +591,21 @@ async def critic_node(state: AuditState, config: RunnableConfig):
         messages=_critic_msgs
     )
     
-    response = await llm.ainvoke(prompt)
-    feedback = str(response.content).strip()
-    
-    # [V113.0] 物理补救闭环：如果错误由 SQLGuardian 物理拦截器抛出，强制注入查表指令
-    error_log = str(state.get("error_log", ""))
-    if "【物理拦截】" in error_log:
-        logger.warning("🚨 [CRITIC] 检测到物理幻觉，强行修正为查表指令")
+    # [V129.0 Escape Hatch] 增加最大重试限度校验
+    if retry >= MAX_RETRIES - 1:
+        logger.warning(f"🛑 [CRITIC] 已达到最大反思次数 ({MAX_RETRIES})，激活逃生舱，进入降级报告模式。")
         feedback = (
-            f"❌ [物理拦截自愈] {error_log}\n"
-            f"【最高优先级指令】：你当前生成的 SQL 包含物理表中不存在的字段。禁止尝试猜测或重写 SQL！"
-            f"你必须立即调用 `lookup_medical_schema` 工具来确认物理字段名。只有在拿到工具返回的真实字段列表后，才能再次尝试生成 SQL。"
+            "⚠️ [系统提示：已进入降级报告模式]\n"
+            "经过多次尝试，系统由于物理 Schema 缺失或逻辑冲突，无法生成完美的取证 SQL。\n"
+            "请直接基于当前已获取的有限事实输出一份“受限核查报告”，并在报告中明确指出由于缺少某某关键字段（如明细字段）导致无法穿透。"
         )
+        from langchain_core.messages import AIMessage as _AIMessage
+        response = _AIMessage(content=feedback)
+    else:
+        response = await llm.ainvoke(prompt)
+        feedback = str(response.content)
     
-    logger.info(f"💡 [CRITIC] 诊断建议: {feedback}")
+    logger.info(f"💡 [CRITIC] 诊断建议: {feedback[:100]}...")
     
     return {
         "error_log": f"[CRITIC 反馈] {feedback}",
@@ -635,18 +643,27 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         hard_sum, hard_count, _ = booster.calculate_hard_metrics(clean_data)
     except DataExtractionError as e:
         logger.error(f"🚨 [State Desync] 强约束拦截：数据解析层熔断 -> {e}")
-        # 【V62.0 状态单向约束】如果取不到真实数据，直接把错误推回给状态机，绝对不能进入 LLM 结论生成
+        
+        # [V129.1] 修复：保证绝对出件，即使数据熔断也要输出降级报告
+        error_msg_render = (
+            f"> **🛑 [系统级故障] 证据提取失败。**\n"
+            f"> 由于底层的物理探针未能传递合法的数据载荷（或受到安全拦截），本次审计被强制终止。\n"
+            f"> \n> **中断原因**：{e}\n"
+        )
+        from langchain_core.messages import AIMessage as _AIMessage
+        final_msg = _AIMessage(content=error_msg_render)
+        
         return {
             "error_log": f"数据解析失败: {e}",
             "retry_count": state.get("retry_count", 0) + 1,
-            # [不再兜底 0，而是生成显式的错误报告]
             "structured_report": AuditReport(
                 summary="❌ [系统级故障] 证据提取失败。上游物理探针未能传递合法的数据载荷，出于安全隔离策略，终止报告渲染。",
                 findings=[],
                 total_amount=0.0,
                 finding_count=0,
                 risk_level="高"
-            )
+            ),
+            "messages": [final_msg]
         }
 
     # ── Step 2: 解析原始数据为结构化 List[Dict]（供渲染器生成证据表格） ───
@@ -720,7 +737,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
             "要求：\n"
             "1. 结论必须明确（发现或未发现违规）。\n"
             "2. 必须引用下方的“审计方法论”中的核心判定标准，展示核查的专业性。\n"
-            "3. 如果发现条数为 0，必须说明核查已穿透相关结算明细，验证了业务逻辑的完整性，确保无遗漏。\n"
+            "3. 如果发现条数为 0，必须说明核查已穿透相关底层原始数据，验证了业务逻辑的完整性，确保无遗漏。\n"
             "4. 给出具有可操作性的后续整改或监测建议。\n\n"
             f"审计任务：{user_question[:300]}\n\n"
             f"审计方法论：{methodology[:500]}\n\n"
@@ -771,20 +788,25 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         elif isinstance(_row, AuditFinding):
             _safe_findings.append(_row)
             
-    # [V111.0] 证据溯源校验 (Fact-Check Pinning)
+    # [V128.8] 证据对撞双重校验 (Dual Grounding Gate)
+    # 1. [V129.0 优化] 语义一致性：仅检查“核查结论”段，防止背景任务词汇干扰
+    is_aligned, alignment_err = booster.verify_semantic_alignment(sql_query, llm_conclusion)
+    
+    # [V129.1 Semantic Relaxing] 语义对撞降级为观测指标，不再阻断出件
+    if not is_aligned:
+        logger.warning(f"🚨 [SEMANTIC_MISMATCH] 报告语义偏离物理证据 (已降级为观测指标): {alignment_err}")
+        content = f"> **⚠️ 风险提示：本报告引述的结论与底层物理探针支持的数据维度存在偏差，部分事实可能来源于推断。**\n> 详情：{alignment_err}\n\n{content}"
+
+    # 2. 证据溯源：检查具体数值/ID 是否真实存在于 Raw Data
     is_grounded, grounding_err = booster.verify_evidence_grounding(_safe_findings, raw_data_list)
     if not is_grounded:
-        logger.warning(f"🚨 [FACT_CHECK] 发现报告幻觉: {grounding_err}")
-        # 如果是严重的证据虚造，强制退回 Critic 节点进行自我修复
+        logger.warning(f"🚨 [FACT_CHECK] 发现报告数值幻觉: {grounding_err}")
         return {
-            "error_log": f"【报告幻觉拦截】{grounding_err}",
+            "error_log": f"【证据链断裂拦截】{grounding_err}",
             "retry_count": state.get("retry_count", 0) + 1,
             "structured_report": AuditReport(
-                summary=f"⚠️ [逻辑不一致] 报告已被系统拦截。原因：{grounding_err}",
-                findings=[],
-                total_amount=0.0,
-                finding_count=0,
-                risk_level="高"
+                summary=f"⚠️ [逻辑不一致] 证据无法闭环。原因：{grounding_err}",
+                findings=[], total_amount=0.0, finding_count=0, risk_level="高"
             )
         }
 
@@ -797,7 +819,8 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     )
 
     # ── Step 7: 记录到长程记忆 + 生成 HTML 仪表盘 ───────────────────
-    final_msg = AIMessage(content=content)
+    from langchain_core.messages import AIMessage as _AIMessage
+    final_msg = _AIMessage(content=content)
     cognitive_memory_manager.add_message(state.get("session_id", "default"), final_msg, importance=0.9)
 
     try:

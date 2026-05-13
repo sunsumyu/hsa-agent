@@ -10,6 +10,7 @@
 import os
 import re
 from loguru import logger
+from app.perf_monitor import perf_monitor
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
@@ -60,14 +61,14 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
         "canonical": "start_date",
         "aliases": ["adm_date", "admit_date", "in_date", "admission_date", "start_time"],
         "table": "fqz_gz_jzsj_all_ql",
-        "desc": "住院开始日期",
+        "desc": "住院开始日期。⚠️注意：若在 GROUP BY 中使用了 toStartOfDay() 等函数处理此字段，SELECT 中也必须使用相同的函数，严禁选原始字段。",
         "forbidden_aliases": ["adm_date", "admit_date"]
     },
     {
         "canonical": "end_date",
         "aliases": ["dis_date", "discharge_date", "out_date", "finish_date"],
         "table": "fqz_gz_jzsj_all_ql",
-        "desc": "住院结束日期",
+        "desc": "住院结束日期。⚠️注意：若在 GROUP BY 中使用了 toStartOfDay() 等函数处理此字段，SELECT 中也必须使用相同的函数，严禁选原始字段。",
         "forbidden_aliases": ["dis_date", "discharge_date"]
     },
     {
@@ -88,7 +89,7 @@ FIELD_ALIAS_REGISTRY: List[Dict] = [
         "canonical": "setl_time",
         "aliases": ["settle_time", "settlement_date", "setl_time"],
         "table": "fqz_gz_jzsj_all_ql",
-        "desc": "医疗费用结算时间",
+        "desc": "医疗费用结算时间。⚠️注意：若在 GROUP BY 中使用了 toStartOfDay() 等函数处理此字段，SELECT 中也必须使用相同的函数，严禁选原始字段。",
         "forbidden_aliases": ["settle_time"]
     },
     {
@@ -279,6 +280,8 @@ class Neo4jManager:
             logger.warning("[SECURITY] NEO4J_PASSWORD 未设置，Neo4j 连接将失败。请在 .env 中配置。")
         self.driver = None
         self.is_connected = False
+        # [V131.0] 防重试标志：连接失败后不再重复尝试和打印日志
+        self._connection_attempted = False
         # [V59.3] 延迟加载：不在初始化时物理阻塞，仅在首次使用时建立连接
         # self._init_connection() 
 
@@ -308,12 +311,14 @@ class Neo4jManager:
                 logger.error(f"❌ [NEO4J ERROR] 真实图数据库连接失败: {e}。")
             self.driver = None
             self.is_connected = False
+            self._connection_attempted = True  # [V131.0] 标记已尝试，不再重试
 
     def get_driver(self):
-        if not self.driver:
+        # [V131.0] 已尝试连接且失败过，不再重试（防止重复打印路由错误日志）
+        if not self.driver and not self._connection_attempted:
             self._init_connection()
         if not self.is_connected:
-            raise RuntimeError("Neo4j 服务未连接，无法执行图查询。")
+            raise RuntimeError("Neo4j 服务未连接，无法执行图查询。请检查 .env 中的 NEO4J_URI（建议使用 bolt://）和 Neo4j 服务状态。")
         return self.driver
 
     def get_ontology(self) -> str:

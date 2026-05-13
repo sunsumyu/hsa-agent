@@ -13,6 +13,15 @@ _os.environ['no_proxy'] = 'localhost,127.0.0.1,::1'
 
 _CK_GLOBAL_CLIENT = None
 
+class SqlExecError(Exception):
+    """
+    [V131.0] 结构化 SQL 执行异常。
+    与普通 Exception 区分，便于上层调用方单一来源地记录日志，
+    避免同一错误在多个层次重复输出。
+    """
+    pass
+
+
 class CharsetProxy:
     """[V111.0] 工业级编码代理：确保 ClickHouse 返回的数据在任何环境下均为干净的 UTF-8。
     
@@ -76,8 +85,9 @@ class CharsetProxy:
             
         except Exception as e:
             clean_msg = self._clean_error_message(str(e))
-            logger.error(f"❌ [CharsetProxy] 查询执行失败: {clean_msg}")
-            raise Exception(clean_msg)
+            # [V131.0] 日志去重治理：层级分流原则——此处不再打印 ERROR，改为抛出结构化异常
+            # 由上层的调用方（tools.py）統一记录日志，避免同一错误被打印多次
+            raise SqlExecError(clean_msg)
 
     def execute(self, sql, *args, **kwargs):
         """兼容性接口：映射到 query"""

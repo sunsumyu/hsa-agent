@@ -7,16 +7,18 @@ app/tools.py
 """
 
 import os
+import re
 import json
 import asyncio
 from typing import List, Dict, Any, Tuple
 from loguru import logger
 from langchain_core.tools import tool
 
-from app.db_conn import get_clickhouse_client
+from app.db_conn import get_clickhouse_client, SqlExecError
 from app.audit_rules import rule_engine
 from app.anomaly_algorithms import anomaly_detector
 from app.security import SQLGuardian
+from app.perf_monitor import perf_monitor
 
 # ──────────────────────────────────────────────────────────
 # 辅助函数
@@ -50,50 +52,112 @@ def _sanitize_results(records: List[Dict], tolerance: int = 1000) -> List[Dict]:
             if '\ufffd' in val:
                 row[key] = "[数据源乱码/GBK编码冲突]"
             
-            # 3. 基础脱敏
+            # 3. 基础脱敏 (V128.9 自适应脱敏)
             has_binary = any(ord(c) < 32 and c not in '\n\r\t' for c in val)
             if has_binary:
                 # [V110.0] 分级脱敏策略：在 Benchmark 模式下，允许放行非脱敏字段用于“证据验证”
                 if os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true":
+                    # 仅做部分掩码，不做全量 REDACTED
+                    if len(val) > 4:
+                        row[key] = val[:2] + "**" + val[-2:]
                     continue
                 row[key] = "[REDACTED/ENCRYPTED]"
                 
         cleaned.append(row)
     return cleaned
 
+@perf_monitor.time_it("AUDIT_ENGINE")
 async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return_raw: bool = False, tolerance: int = 1000) -> Any:
     """
-    [V72.0] 核心执行逻辑：支持业务感知的容差控制
+    [V131.0] 核心执行逻辑：支持 SQL 自愈中间件 + 单一源日志分流。
     """
+    async def _run_sql(safe_sql: str):
+        client = get_clickhouse_client()
+        return await asyncio.to_thread(client.query, safe_sql)
+
+    def _heal_group_by_215(sql_text: str, err_str: str) -> str:
+        """
+        [V132.1] 强化版 Code 215 自愈器：支持全限定列名提取与鲁棒性正则。
+        """
+        # 改进正则：支持提取 default.table.col 这种全限定名中的最后一节
+        match = re.search(r"Column\s+'(?:[^']+\.)*([^']+)'\s+is\s+not\s+under\s+aggregate", err_str, re.IGNORECASE)
+        if not match:
+            return sql_text
+
+        bad_col = match.group(1)
+        logger.warning(f"🔧 [SQL_HEALER] 识别到未分组字段: `{bad_col}`，执行 AST 级修复...")
+
+        # 改进正则：更精准地定位 GROUP BY 结尾，处理可能存在的分号
+        # 逻辑：在 GROUP BY 块的最后一个字段后追加 , bad_col
+        new_sql = re.sub(
+            r'(GROUP\s+BY\s+)(.*?)(\s*(?:HAVING|ORDER\s+BY|LIMIT|;|$))',
+            lambda m: f"{m.group(1)}{m.group(2).strip()}, {bad_col}{m.group(3)}",
+            sql_text, count=1, flags=re.IGNORECASE | re.DOTALL
+        )
+        if new_sql == sql_text:
+            return sql_text  # 没有 GROUP BY，无法修复
+
+        logger.info(f"✅ [SQL_HEALER] SQL 已自愈，重试中…")
+        return new_sql
+
     try:
         safe_sql = SQLGuardian.validate_sql(sql)
-        
+
         if db_type.lower() == "clickhouse":
-            client = get_clickhouse_client()
-            # result 已经是 List[Dict] (由 CharsetProxy 标准化)
-            result = await asyncio.to_thread(client.query, safe_sql)
-            
+            try:
+                result = await _run_sql(safe_sql)
+            except SqlExecError as first_err:
+                err_str = str(first_err)
+                # [V131.0] Code 215 自愈：一次自动修复 + 重试
+                if "Code: 215" in err_str:
+                    healed = _heal_group_by_215(safe_sql, err_str)
+                    if healed != safe_sql:
+                        try:
+                            result = await _run_sql(healed)
+                            safe_sql = healed  # 修复成功，使用新 SQL
+                        except SqlExecError as retry_err:
+                            # 修复后仍失败，统一在此打 ERROR 并返回
+                            final_err = str(retry_err)
+                            logger.error(f"[SQL_EXEC_ERROR] 自愈失败: {final_err}")
+                            return {"status": "ERROR", "error_message": final_err, "sql_logic": healed}
+                    else:
+                        # 无法自愈，直接报错
+                        logger.error(f"[SQL_EXEC_ERROR] {err_str}")
+                        return {"status": "ERROR", "error_message": err_str, "sql_logic": safe_sql}
+                else:
+                    # 其他错误，单一记录并返回
+                    if "404" in err_str or "Connection refused" in err_str or "无法建立" in err_str:
+                        logger.error(f"[INFRA_ERROR] ClickHouse 不可达: {err_str[:150]}")
+                        return {
+                            "status": "ERROR",
+                            "error_message": f"⚠️ ClickHouse 数据库未启动或不可达。请检查服务状态。原始错误: {err_str[:200]}",
+                            "sql_logic": sql, "is_infra_error": True
+                        }
+                    logger.error(f"[SQL_EXEC_ERROR] {err_str}")
+                    return {"status": "ERROR", "error_message": err_str, "sql_logic": safe_sql}
+
             if return_raw:
                 return _sanitize_results(result, tolerance=tolerance)
-            return f"查询成功，返回 {len(result)} 条记录。"
             
-        return "MySQL 暂不支持在此路径执行。"
+            # [V132.0] 企业级响应重构：始终返回结构化载荷，确保 Booster 数据解析不熔断
+            return {
+                "status": "SUCCESS",
+                "message": f"查询成功，返回 {len(result)} 条记录。",
+                "records_sample": _sanitize_results(result, tolerance=5), # 默认返回 5 条样值供审计证据链
+                "sql_logic": safe_sql
+            }
+
+        return {"status": "ERROR", "error_message": "MySQL 暂不支持在此路径执行。", "sql_logic": sql}
+
     except Exception as e:
         err_str = str(e)
+        from app.security import SecurityViolationError
+        if isinstance(e, SecurityViolationError):
+            logger.debug(f"[SQL_GOVERNANCE] 执行拦截: {err_str}")
+            return {"status": "ERROR", "error_message": err_str, "sql_logic": sql}
+        # 其他未预期异常（如 SQLGuardian 或其他错误），单一记录
         logger.error(f"[SQL_EXEC_ERROR] {err_str}")
-        # [V90.6] 针对基础设施错误给出清晰诊断，避免 LLM 盲目重试
-        if "404" in err_str or "Connection refused" in err_str or "无法建立" in err_str:
-            return {
-                "status": "ERROR",
-                "error_message": f"⚠️ ClickHouse 数据库未启动或不可达。请检查服务状态。原始错误: {err_str[:200]}",
-                "sql_logic": sql,
-                "is_infra_error": True
-            }
-        return {
-            "status": "ERROR",
-            "error_message": err_str,
-            "sql_logic": sql
-        }
+        return {"status": "ERROR", "error_message": err_str, "sql_logic": sql}
 
 # ──────────────────────────────────────────────────────────
 # 暴露给 Agent 的工具集 (Decorated Tools)
@@ -241,6 +305,7 @@ def search_expert_knowledge(query: str) -> str:
     return "\n\n".join(matched)
 
 @tool
+@perf_monitor.time_it("RULE_ENGINE_EXEC")
 async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:
     """
     [V59.4] 执行预定义的物理违规规则匹配。
@@ -292,6 +357,7 @@ async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:
         }
 
 @tool
+@perf_monitor.time_it("ANOMALY_ALGO_EXEC")
 async def run_anomaly_detection(algorithm_id: str) -> Dict[str, Any]:
     """
     [V59.4] 运行统计学异常检测算法。
@@ -358,6 +424,7 @@ def get_embeddings():
 # ──────────────────────────────────────────────────────────
 
 @tool
+@perf_monitor.time_it("NEO4J_GRAPH_QUERY")
 async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
     """
     [V59.6] 执行 Neo4j Cypher 查询，用于发现隐蔽的医疗欺诈团伙。
@@ -412,51 +479,92 @@ async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
 @tool
 def expand_medical_codes(intent: str) -> str:
     """
-    [V110.0] 业务深度增强：语义扩展医疗编码 (ICD-10/ICD-9/三大目录)。
-    当任务涉及特定疾病类别（如“妇科”、“肿瘤”）时，调用此工具获取精确的物理编码范围。
+    [V125.0] 业务深度增强：从知识库检索医疗编码建议 (ICD-10/ICD-9)。
     """
-    # [V110.1] 知识库映射 (Mock 级，实际应对接专业 ICD 向量库)
-    MEDICAL_CODE_KB = {
-        "妇科": {
-            "icd10": ["O00", "O99"],
-            "icd9": ["54.51", "65.0", "71.9"],
-            "desc": "涉及妊娠、分娩和产褥期疾病及相关手术"
-        },
-        "肿瘤": {
-            "icd10": ["C00", "D48"],
-            "desc": "涉及恶性肿瘤、原位癌及性质未定肿瘤"
-        },
-        "眼科": {
-            "icd10": ["H00", "H59"],
-            "icd9": ["08.0", "16.9"],
-            "desc": "涉及眼和附器疾病及相关手术"
-        },
-        "牙科": {
-            "icd10": ["K00", "K14"],
-            "icd9": ["23.0", "24.9"],
-            "desc": "涉及口腔、涎腺和颌骨疾病"
-        },
-        "心内科": {
-            "icd10": ["I00", "I99"],
-            "icd9": ["35.0", "39.9"],
-            "desc": "涉及循环系统疾病及心脏介入手术"
-        }
-    }
+    kb_path = "configs/audit_knowledge_base.json"
+    try:
+        import json
+        with open(kb_path, "r", encoding="utf-8") as f:
+            kb = json.load(f).get("medical_codes", {})
+    except:
+        return "⚠️ 知识库加载失败"
     
     q = intent.strip()
     matched = []
-    for k, v in MEDICAL_CODE_KB.items():
+    for k, v in kb.items():
         if k in q or q in k:
             res = f"【{k}】专业编码映射建议：\n"
             if "icd10" in v:
-                res += f"- ICD-10 (疾病): {v['icd10'][0]} 至 {v['icd10'][1]} (建议 SQL: dise_no LIKE '{v['icd10'][0][0]}%')\n"
-            if "icd9" in v:
-                res += f"- ICD-9-CM3 (手术): {', '.join(v['icd9'])} (建议 SQL: oper_no IN {tuple(v['icd9'])})\n"
-            res += f"- 业务说明: {v['desc']}"
+                res += f"- ICD-10 (疾病): {v['icd10'][0]} 至 {v['icd10'][1]}\n"
+            res += f"- 业务说明: {v.get('desc', '')}"
             matched.append(res)
     
     if not matched:
-        return f"当前标准编码库中未找到与 '{intent}' 直接相关的专业分类。建议：请直接尝试 LIKE '%{intent}%' 进行初步检索。"
+        return f"未找到与 '{intent}' 相关的专业分类。建议直接尝试 LIKE '%{intent}%'。"
     
     return "\n\n".join(matched)
 
+@tool
+@perf_monitor.time_it("FEDERATED_SIDELOADER")
+async def federated_graph_sideloader(cypher: str, return_key: str = "") -> Dict[str, Any]:
+    """
+    [企业级联邦侧载工具] 
+    执行 Cypher 图谱检索，并将发现的核心实体 ID 自动侧载到 ClickHouse 内存临时表。
+    适用于：团伙欺诈、共用号码等跨库多步推理场景。
+    参数:
+    - cypher: Neo4j 查询语句。
+    - return_key: 需要提取的实体 ID 字段名（如果不填则默认提取第一列）。
+    """
+    from app.neo4j_manager import neo4j_manager
+    import time
+    import hashlib
+    
+    logger.info(f"🕸️ [SIDELOADER] 开始联邦查询 (Neo4j -> ClickHouse)")
+    try:
+        def _exec_cypher():
+            driver = neo4j_manager.get_driver()
+            with driver.session() as session:
+                return [dict(record) for record in session.run(cypher)]
+                
+        records = await asyncio.to_thread(_exec_cypher)
+        if not records:
+            return {"status": "SUCCESS", "message": "图谱查询完成，未发现匹配团伙/节点。", "count": 0}
+            
+        ids = []
+        for r in records:
+            if return_key and return_key in r:
+                val = r[return_key]
+            else:
+                val = list(r.values())[0] if r else None
+            if val: ids.append(str(val))
+            
+        ids = list(set(ids))
+        if not ids:
+             return {"status": "ERROR", "error_message": "无法从 Cypher 结果中提取有效的实体 ID 进行侧载。"}
+             
+        batch_id = hashlib.md5(f"{time.time()}_{len(ids)}".encode()).hexdigest()[:8]
+        temp_table = f"fqz_temp_sl_{batch_id}"
+        
+        client = get_clickhouse_client()
+        create_sql = f"CREATE TABLE IF NOT EXISTS {temp_table} (id String) ENGINE = Memory"
+        
+        try:
+            if hasattr(client.client, 'execute'):
+                client.client.execute(create_sql)
+                client.client.execute(f"INSERT INTO {temp_table} (id) VALUES", [(x,) for x in ids])
+            else:
+                client.client.command(create_sql)
+                client.client.insert(temp_table, [[x] for x in ids], column_names=['id'])
+        except Exception as insert_e:
+            logger.error(f"ClickHouse 写入临时表失败: {insert_e}")
+            return {"status": "ERROR", "error_message": f"侧载到 ClickHouse 失败: {insert_e}"}
+            
+        return {
+            "status": "SIDELOADED",
+            "message": f"侧载成功！在 Neo4j 中发现了 {len(ids)} 个目标实体。",
+            "temp_table": temp_table,
+            "instruction": f"请立即编写 SQL，使用 INNER JOIN {temp_table} ON 主表的关键ID = {temp_table}.id 来关联查询明细及报销金额。"
+        }
+    except Exception as e:
+        logger.error(f"❌ [SIDELOADER ERROR] 联邦侧载失败: {e}")
+        return {"status": "ERROR", "error_message": str(e)}

@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool
 from loguru import logger
 from app.db_conn import get_clickhouse_client
 from app.neo4j_manager import neo4j_manager
+from app.perf_monitor import perf_monitor
 
 class FederatedAuditInput(BaseModel):
     cypher_query: str = Field(description=(
@@ -26,9 +27,14 @@ class FederatedAuditSkill(BaseTool):
     避免将海量 ID 传回大模型上下文，解决 OOM 和 SQL 长度限制问题。
     """
     name: str = "federated_graph_sideloader"
-    description: str = "Execute a Graph query and automatically 'sideload' large results into a ClickHouse temporary table for subsequent SQL joining."
+    description: str = (
+        "【企业级三阶段审计技能】首先执行 Graph (Cypher) 查询发现关联团伙。 "
+        "此技能会返回一个 ClickHouse 临时表名。 "
+        "你必须分两步执行：(1) 调用此工具获取临时表名；(2) 在后续 SQL 中使用该表进行 JOIN。"
+    )
     args_schema: Type[BaseModel] = FederatedAuditInput
 
+    @perf_monitor.time_it("FEDERATED_SIDELOADER")
     async def _arun(self, cypher_query: str, target_field: str = "psn_no", description: str = "") -> Dict[str, Any]:
         logger.info(f"🕸️ [Sideloader] Starting Federated Query: {description}")
         

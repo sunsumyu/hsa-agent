@@ -188,6 +188,10 @@ class SchemaInjector:
 
         lines.append("\n## 🚨 [审计治理与安全禁区 - 强制合规提示]")
         lines.append(f"- **禁止访问的幻觉表**: {', '.join([f'`{t}`' for t in forbidden_tables])} (严禁猜测，这些表物理不存在或被禁止直接访问。)")
+        lines.append("- **主子表分离原则 (Header-Detail Separation)**:")
+        lines.append("   - 结算主表 (`fqz_gz_jzsj_all_ql`): 仅用于核查总金额、就诊天数、时间重叠等“就诊行为”逻辑。")
+        lines.append("   - 费用明细表 (`fqz_fymx_test`): 仅用于核查药品编码、耗材单价、具体项目等“收费明细”逻辑。")
+        lines.append("   - 严禁在主表中搜索 `hilist_code` 等明细字段。")
         lines.append(f"- **合法表前缀**: 物理表名必须以 {', '.join([f'`{p}`' for p in valid_prefixes])} 开头。)")
         lines.append(f"- **敏感字段约束**: 涉及 {', '.join([f'`{f}`' for f in sensitive_fields])} 字段时，严禁输出明文，必须用于过滤或由系统自动脱敏。)")
         lines.append("- **性能强制分区**: 涉及明细表查询时，**必须** 显式包含 `setl_time` 时间范围过滤条件（推荐 2024 年内）。")
@@ -197,11 +201,11 @@ class SchemaInjector:
         graph_hints = neo4j_manager.get_audit_graph_hints()
         lines.append(graph_hints)
 
-        # ── [V125.0 企业级审计红线 (High Recall Enforcement)] ──────────────
+        # ── [V125.0 企业级审计红线 (High Recall & Statistical Rigor)] ──────────────
         lines.append("\n## 🛑 [企业级审计红线] 严禁违反以下物理逻辑，否则召回率将严重不足：")
-        lines.append("- **[红线 1: 颗粒度陷阱]**：核查‘重复结算’、‘多次就医’时，`GROUP BY` **绝对禁止** 包含 `setl_id` 或 `msg_id`。必须按 `toDate(setl_time)`、`psn_no` 和 `fixmedins_code` 聚合。")
-        lines.append("- **[红线 2: 边界遗漏]**：核查‘分解住院’、‘重叠就医’时，必须使用 `>=` 或 `<=` 捕获‘当天出院即入院’的情形。")
-        lines.append("- **[红线 3: 性别穿透]**：核查‘性别冲突’时，必须通过 `hilist_name` 匹配妇科/男科关键词进行二次验证，不能仅依赖主表性别字段。")
+        lines.append("- **[红线 1: 统计学基线]**：核查‘大额’或‘异常频率’时，严禁使用硬编码阈值。必须先通过子查询计算 `quantile(0.95)(...)` 或 `avg(...) * 3` 作为对比基线。")
+        lines.append("- **[红线 2: 颗粒度陷阱]**：核查‘重复结算’、‘多次就医’时，`GROUP BY` **绝对禁止** 包含 `setl_id` 或 `msg_id`。必须按 `toDate(setl_time)`、`psn_no` 和 `fixmedins_code` 聚合。")
+        lines.append("- **[红线 3: 联邦两阶段]**：使用 `federated_graph_sideloader` 时，严禁在 SQL 中使用占位符。你必须分两阶段执行：(1) 先调用工具获取 `temp_table` 名；(2) 再在后续 SQL 中 JOIN 该表。")
 
         result = "\n".join(lines)
         logger.info(f"[SchemaInjector] 物理 Schema 注入: 域 {domain_desc} 表 {target_tables} 字段数 {total_injected} (已注入治理元数据)")

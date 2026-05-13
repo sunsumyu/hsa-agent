@@ -111,6 +111,16 @@ class SQLGuardian:
         # 6. 代价审计 (Systemic Fix V71.0)
         SQLGuardian._audit_expression_complexity(expression)
         
+        # ── [V132.0] 企业级自愈：自动对齐 ClickHouse 的大小写敏感表名 ────
+        all_physical_tables = {t.lower(): t for t in schema_registry.get_all_table_names()}
+        for table_node in expression.find_all(exp.Table):
+            t_name_lower = table_node.this.this.lower()
+            if t_name_lower in all_physical_tables:
+                actual_name = all_physical_tables[t_name_lower]
+                if table_node.this.this != actual_name:
+                    logger.warning(f"🔧 [SQLGuardian] 检测到表名大小写差异，已自动修正: {table_node.this.this} -> {actual_name}")
+                    table_node.this.set("this", actual_name)
+
         return expression.sql(dialect="clickhouse")
 
     @staticmethod
@@ -128,9 +138,16 @@ class SQLGuardian:
         # 2. 构建针对当前表的“物理真理库”
         physical_columns = set()
         for t_name in tables:
+            # 路径 A: 从 YAML 静态注册表读取
             entry = schema_registry.get_table(t_name)
             if entry:
                 physical_columns.update([c.lower() for c in entry.field_names])
+            
+            # 路径 B [V128.6 企业级补强]: 从物理同步管理器 (SchemaManager) 读取
+            from app.schema_manager import schema_manager
+            dynamic_cols = schema_manager._schema_cache.get(t_name.upper(), [])
+            if dynamic_cols:
+                physical_columns.update([c.lower() for c in dynamic_cols])
         
         # 3. 常见聚合函数与本地别名
         local_aliases = {alias.alias.lower() for alias in expression.find_all(exp.Alias)}
@@ -156,11 +173,12 @@ class SQLGuardian:
                     resolved = field_kg.resolve(col_name)
                     if not resolved:
                         suggestion = SQLGuardian._suggest_field(col_name)
-                        logger.error(f"🚨 [SECURITY] 物理字段幻觉拦截: 表 {tables} 中不存在字段 `{col_name}`")
+                        # [V128.1] 治理层解耦：判定层记 WARNING，避免 ERROR 堆叠
+                        logger.warning(f"🛡️ [SQLGuardian] 物理字段拦截: {tables} -> `{col_name}`")
                         raise SecurityViolationError(
                             f"【物理拦截】字段 `{col_name}` 在当前表 {tables} 中不存在！"
                             f"{suggestion} "
-                            f"严禁通过 Prompt 瞎猜字段。请立即调用 `lookup_medical_schema` 工具获取物理表 `{tables[0]}` 的正确字段名。"
+                            f"请通过 `lookup_medical_schema` 工具获取正确物理字段。"
                         )
             
             # 校验函数 (exp.Func) [V113.0 新增]

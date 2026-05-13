@@ -12,6 +12,12 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 # [V48.1 极致体验] 强制 HuggingFace 使用离线缓存或快速失败，杜绝网络超时卡死
 os.environ["HF_HUB_OFFLINE"] = "1"
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+
 from app.agent_graph import get_graph_executor
 from app.model_manager import model_manager
 from scripts.token_audit_test import TokenRoleTracker
