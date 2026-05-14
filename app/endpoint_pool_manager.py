@@ -94,7 +94,13 @@ class EndpointPoolManager:
         best_family = max(family_groups.keys(), key=lambda f: sum(c[1] for c in family_groups[f]))
         candidates = family_groups[best_family]
 
-        # 3. 在选中的家族内按权重随机选择平台
+        # 3. 选择逻辑：默认随机，开启稳定路由后则选择最高分
+        if os.getenv("AUDIT_STABLE_ROUTING", "false").lower() == "true":
+            best_ep = max(candidates, key=lambda c: c[1])[0]
+            logger.info(f"🎯 [StableRouting] 确定性选择最高分节点: {best_ep.id}")
+            return best_ep
+
+        # 4. 在选中的家族内按权重随机选择平台
         total_score = sum(c[1] for c in candidates)
         r = random.uniform(0, total_score)
         upto = 0

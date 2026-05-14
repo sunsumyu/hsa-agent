@@ -251,6 +251,9 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     ontology = neo4j_manager.get_ontology()
 
     # ── [V110.0] 语义路由器：注入避坑指南与术语映射 ──────────────
+    relevant_items = semantic_retriever.get_relevant_columns([user_input])
+    schema_hint = semantic_retriever.format_for_prompt(relevant_items)
+    
     avoidance_guide = semantic_retriever.get_avoidance_guides(user_input)
     if avoidance_guide:
         logger.info("🎯 [SEMANTIC_ROUTER] 命中高敏词，注入避坑指南")
@@ -829,8 +832,9 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
             "total_amount": report.total_amount,
             "finding_count": report.finding_count,
             "risk_level": report.risk_level,
-            "findings": raw_data_list[:20], # 仪表盘仅展示前20条
-            "risk_scores": report.risk_scores
+            # [V134.1 修复] 仪表盘必须传入带 evidence 字段的 AuditFinding 字典，而非原始 SQL 记录
+            "findings": [f.model_dump() for f in report.findings[:20]], 
+            "risk_scores": getattr(report, "risk_scores", {})
         }
         html_path = f"data/reports/dashboard_{state.get('session_id', 'latest')}.html"
         os.makedirs("data/reports", exist_ok=True)

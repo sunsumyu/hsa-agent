@@ -166,9 +166,29 @@ class SchemaInjector:
             if not table_fields:
                 continue
 
-            lines.append(f"\n### 物理表 `{table_name}` ({len(table_fields)} 个字段)")
+            lines.append(f"\n### 物理表 `{table_name}` ({len(table_fields)} 个字段，注入 Top 35)")
             lines.append("| 字段名 | 类型 | 说明 |")
             lines.append("|--------|------|------|")
+
+            # [V134.0 P2-优化] 限制字段注入数量，避免全量 97 字段 -> 3000 tokens
+            # 优先级：根据用户问题中的关键词排序，只取 Top 35
+            _MAX_FIELDS = 35
+            if len(table_fields) > _MAX_FIELDS:
+                _q = user_question.lower()
+                def _field_score(f):
+                    name = f.get("field", "").lower()
+                    desc = f.get("desc", "").lower()
+                    # 第一优先级：字段名直接在问题中出现
+                    if name in _q: return 100
+                    # 第二优先级：核心业务字段必须常驻
+                    _CORE_FIELDS = {"psn_no","setl_id","setl_time","med_type","medfee_sumamt",
+                                    "fund_pay_sumamt","fixmedins_code","start_date","end_date",
+                                    "gend","dise_name","ipt_days","psn_name","brdy"}
+                    if name in _CORE_FIELDS: return 90
+                    # 第三优先级：描述包含问题关键词
+                    if any(kw in desc for kw in _q.split()): return 50
+                    return 0
+                table_fields = sorted(table_fields, key=_field_score, reverse=True)[:_MAX_FIELDS]
 
             for f in table_fields:
                 fname = f["field"]

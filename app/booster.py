@@ -250,8 +250,10 @@ class PrecisionBooster:
 
         # ── 阶段 2：候选词提取──────────────────────────────────────────────
         CANDIDATE_KEYWORDS = {
-            "明细":    ["FYMX", "HILIST", "DET_ITEM", "ITEM_CODE", "JZSJ"],
-            "具体项目": ["HILIST", "DET_ITEM", "ITEM_CODE"],
+            "明细":    ["FYMX", "HILIST", "DET_ITEM", "ITEM_CODE", "JZSJ", "B."],
+            "具体项目": ["HILIST", "DET_ITEM", "ITEM_CODE", "B."],
+            "收费项目": ["HILIST", "ITEM_CODE", "ITEM_NAME", "B."],
+            "单价":    ["PRIC", "B."],
             "科室":    ["DEPT"],
             "性别":    ["GEND"],
             "年龄":    ["AGE", "BRDY"],

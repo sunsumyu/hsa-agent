@@ -13,6 +13,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from loguru import logger
+from app.redis_client import redis_manager
 # from sentence_transformers import SentenceTransformer, util - Lazy loaded below
 
 # ============================================================
@@ -112,12 +113,27 @@ class SemanticMemory:
             logger.info(f"💡 [经验学习] 已成功沉淀审计经验: {topic}")
         except Exception as e:
             logger.error(f"经验学习失败: {e}")
+        
+        # [V140.2] 同时同步至 Redis L1 缓存，加速后续热点查询
+        redis_manager.set_cache(f"exp:{topic}", content, expire_hours=72)
 
     def recall_expert_knowledge(self, query: str, k: int = 2) -> List[Document]:
         """检索跨会话的专家经验"""
+        # 1. 优先尝试 Redis 快速路径
+        cached = redis_manager.get_cache(f"exp_query:{query}")
+        if cached:
+            logger.success(f"⚡ [REDIS] 命中专家经验缓存: {query[:15]}...")
+            return [Document(page_content=cached)]
+
         if not os.path.exists(os.path.join(self.storage_path, "index.faiss")): return []
         vector_store = FAISS.load_local(self.storage_path, self._embeddings, allow_dangerous_deserialization=True)
-        return vector_store.similarity_search(query, k=k)
+        results = vector_store.similarity_search(query, k=k)
+        
+        # 2. 回填 Redis (命中前 1 条即可)
+        if results:
+            redis_manager.set_cache(f"exp_query:{query}", results[0].page_content)
+            
+        return results
 
 class CognitiveMemoryManager:
     """[V47.7] 本地化认知记忆中心"""
@@ -203,7 +219,10 @@ class SQLCacheManager:
         self.lookup[q_strip] = sql
         with open(self.cache_file, "w", encoding="utf-8") as f:
             json.dump(self.cache, f, ensure_ascii=False)
-        logger.success(f"💾 [SQL Cache] 已固化审计策略至语义缓存: {question[:15]}...")
+        
+        # [V140.2] 分布式同步：存入 Redis L1 缓存
+        redis_manager.set_cache(f"sql_cache:{q_strip}", sql, expire_hours=48)
+        logger.success(f"💾 [SQL Cache] 已固化审计策略至分布式缓存: {question[:15]}...")
 
     def search(self, question: str, threshold: float = 0.80):
         """[V112.0] 高性能语义搜索：使用 NumPy 替代 Torch 以降低延迟并解决环境冲突"""
@@ -211,9 +230,16 @@ class SQLCacheManager:
         
         # 1. 精确匹配优先（O(1) 物理拦截，极其飞快）
         q_strip = question.strip()
+        # A. 内存字典匹配 (L0)
         if q_strip in self.lookup:
             logger.success(f"⚡ [SQL Cache] 字典精确命中: {question[:15]}...")
             return self.lookup[q_strip]
+        
+        # B. Redis 分布式缓存匹配 (L1)
+        cached_sql = redis_manager.get_cache(f"sql_cache:{q_strip}")
+        if cached_sql:
+            logger.success(f"🚀 [REDIS] SQL 缓存命中: {question[:15]}...")
+            return cached_sql
                 
         # 2. 语义相似度匹配 (针对相似表达进行模糊拦截)
         if not self.engine: return None

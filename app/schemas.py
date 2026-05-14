@@ -80,6 +80,7 @@ class PoolConfig(BaseModel):
 class RoleConfigV2(BaseModel):
     """角色配置 V2 (池化版)"""
     pool: str
+    preferred_endpoint: Optional[str] = None  # [V134.2] 可选：强制绑定特定端点以确保测试一致性
     max_input_tokens: int = 4000
     max_output_tokens: int = 2000
 

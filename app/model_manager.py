@@ -10,6 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import requests
 from app.usage_tracker import usage_tracker
 from app.endpoint_pool_manager import endpoint_pool_manager
+from app.redis_client import redis_manager
 from app.schemas import ModelConfig, EndpointConfig, RoleConfigV2
 from app.observability import get_callbacks
 from dotenv import load_dotenv
@@ -372,40 +373,26 @@ class ModelManager:
             llm, m_id = self.get_adaptive_llm(model_id=model_override)
         else:
             role_cfg = endpoint_pool_manager.roles.get(role)
-            pool_id = role_cfg.pool if role_cfg else "tier-1-chat"
-            llm, m_id = self._get_llm_from_pool(pool_id)
-
-        # 2. 物理嗅探 (Pre-flight Probing)
-        if retry_count > 5:
-            raise ValueError(f"🚨 [算力绝望] 角色 {role} 对应的所有备选节点均已进入封禁期。")
-
-        from langchain_core.messages import HumanMessage
-        try:
-            pool = endpoint_pool_manager.pools.get(endpoint_pool_manager.roles[role].pool if role in endpoint_pool_manager.roles else "tier-1-chat")
-            ep = next((e for e in pool.endpoints if e.id == m_id), None)
-            
-            if ep:
-                # [V76.2] 物理前置校验：如果节点已在黑名单，严禁发起主动嗅探，防止产生噪音
-                state = endpoint_pool_manager.states.get(m_id)
-                if state and state.is_cooling:
-                    logger.warning(f"🚷 [Proactive-Probe] 节点 {m_id} 仍在冷冻期，直接跳过寻址。")
-                    return await self.get_llm_by_role(role, retry_count + 1, config)
-
-                logger.info(f"🔍 [Proactive-Probe] 正在验证角色 {role} 的首选节点: {m_id}...")
-                probe_llm = self._create_llm(m_id, ep)
-                # 注入 ID 以确保探测失败也能精准熔断
-                probe_llm.endpoint_id = m_id 
-                await probe_llm.ainvoke([HumanMessage(content="ping")], config={"timeout": 3.0, "max_tokens": 1})
-                logger.info(f"✨ [Proactive-Probe] 节点 {m_id} 存活确认")
-        except Exception as e:
-            err_msg = str(e)
-            if any(sig in err_msg.lower() for sig in ["429", "quota", "limit", "rate", "体验模式", "chatty"]):
-                logger.warning(f"⛔ [Proactive-Probe] 节点 {m_id} 验证失败（配额/闲聊拦截），触发全局熔断。")
-                endpoint_pool_manager.record_failure(m_id, err_msg)
-                return await self.get_llm_by_role(role, retry_count + 1, config)
+            # [V134.2 优化] 支持角色绑定特定端点，实现测试环境的“确定性路径”
+            if role_cfg and hasattr(role_cfg, "preferred_endpoint") and role_cfg.preferred_endpoint:
+                logger.info(f"📍 [Role-Binding] 角色 {role} 强制绑定端点: {role_cfg.preferred_endpoint}")
+                llm, m_id = self.get_adaptive_llm(model_id=role_cfg.preferred_endpoint)
             else:
-                logger.debug(f"ℹ️ [Proactive-Probe] 节点 {m_id} 探测异常 (非配额问题，暂不熔断): {err_msg}")
-        
+                pool_id = role_cfg.pool if role_cfg else "tier-1-chat"
+                llm, m_id = self._get_llm_from_pool(pool_id)
+
+        # [V134.0 P3] Proactive Probe -> FastCheck (no network ping)
+        if retry_count > 5:
+            raise ValueError(f'All nodes for role {role} are banned.')
+
+        import time as _time
+        state = endpoint_pool_manager.states.get(m_id)
+        # [V134.1 修复] 增加时间校验：如果 cooldown 已过，应允许其通过，否则会导致死循环寻址。
+        if state and state.is_cooling and _time.time() < state.cooldown_until:
+            logger.warning(f'[FastCheck] Node {m_id} still in cooldown, switching.')
+            return await self.get_llm_by_role(role, retry_count + 1, config)
+
+        logger.debug(f'[FastCheck] Node {m_id} is ready.')
         return llm, m_id
 
     def get_reranker(self, reranker_id: str = "gte-rerank"):
@@ -445,7 +432,12 @@ class ModelManager:
                             blacklisted += 1
                         else:
                             healthy += 1
-                logger.info(f"[HealthCheck] healthy={healthy} blacklisted={blacklisted}")
+                        
+                        # [V140.3] 同步全局节点状态至 Redis，实现集群共享黑名单
+                        if ep_id:
+                            redis_manager.record_node_health(ep_id, ep_id not in usage_tracker.blacklist)
+                            
+                logger.info(f"[HealthCheck] healthy={healthy} blacklisted={blacklisted} (Synced to Redis)")
             except asyncio.CancelledError:
                 logger.info("[HealthCheck] 收到取消信号, 优雅退出")
                 break
