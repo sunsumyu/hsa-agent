@@ -117,14 +117,22 @@ def get_clickhouse_client():
     
     # 路径 1: Native 协议 (Port 9000) - 经测试在该环境最稳定，避开 8123 端口冲突
     try:
-        logger.info(f"🔌 [DB_CONN] 路径 1: 尝试 Native 协议 ({host}:9000)...")
-        import clickhouse_driver
-        client = clickhouse_driver.Client(
-            host=host, port=9000, user=user, password=password,
-            connect_timeout=5, send_receive_timeout=10
-        )
-        client.execute("SELECT 1")
-        logger.success("✅ [DB_CONN] 路径 1 (Native 9000) 连接成功！")
+        import socket
+        # [V131.2] 预检：先通过 Socket 探测端口是否开放，避免 clickhouse-driver 打印内部 Traceback
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            if s.connect_ex((host, 9000)) == 0:
+                logger.info(f"🔌 [DB_CONN] 路径 1: 尝试 Native 协议 ({host}:9000)...")
+                import clickhouse_driver
+                client = clickhouse_driver.Client(
+                    host=host, port=9000, user=user, password=password,
+                    connect_timeout=3, send_receive_timeout=5
+                )
+                client.execute("SELECT 1")
+                logger.success("✅ [DB_CONN] 路径 1 (Native 9000) 连接成功！")
+            else:
+                logger.debug(f"[DB_CONN] 跳过路径 1: {host}:9000 未开放")
+                client = None
     except Exception as e1:
         logger.warning(f"⚠️ [DB_CONN] 路径 1 (Native) 失败: {e1}")
         client = None

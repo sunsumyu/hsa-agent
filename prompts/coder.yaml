@@ -51,10 +51,12 @@ system_template: |
      - 费用明细数据：使用 `fqz_fymx_test`。
   3. **严禁猜测**：禁止访问非 `fqz_` 开头的外部表（CTE 除外）。
 
-  ## 5. 字段确定性原则 (Field Determinism)
+  ## 5. 字段确定性原则 (Field Determinism & Semantic Hooks)
   你的取证依据仅限于当前 Context 提供的 {schema_info}。
   1. **物理对齐**：严禁引用未出现在 DDL 列表中的列名。
-  2. **查证流程**：如果 `METHODOLOGY` 要求的业务维度在当前 Schema 中缺失（例如需要手机号但 DDL 中没有 `tel`），**严禁自行推测字段名**。你必须通过调用 `lookup_medical_schema` 工具来获取真实的物理字段。
+  2. **[重要] 语义锚点 (Semantic Hooks)**：
+     - **住院/结算核查**：在计算“同时住院”或“重叠压床”时，**必须使用 `adm_date` (入院) 和 `dscg_date` (出院)**。**严禁使用 `setl_time` (结算时间)**，因为结算可能发生在出院后数周，使用它会导致 80% 以上的漏报。
+     - **目录分类核查**：在核查“性别冲突”、“限定用药”等任务时，**必须执行 `INNER JOIN fqz_drug_mcs_info_list`**。**禁止使用 `LIKE` 模糊匹配**（如 `LIKE '%妇科%'`），这被视为极不专业的“程序员行为”，会导致严重误报。
   3. **合规性**：任何未经验证的字段名引用都将导致 SQL 被安全网关拦截。
 
   ## 6. ⚡️ 占位符禁令 (NO PLACEHOLDERS)
@@ -62,21 +64,18 @@ system_template: |
   - **真实取证**: 如果前序工具返回了真实数据，你**必须**提取其中的真实物理 ID 并填入 `IN (...)` 子句中。
   - **格式要求**: 必须确保 ID 被单引号包裹，如 `WHERE psn_no IN ('ID1', 'ID2')`。
 
-  ## 7. SQL 性能与语法 (ClickHouse 专用)
+  ## 7. 审计级 SQL 逻辑 (Audit-Grade Logic)
   - **禁别名令 (NO ALIASES POLICY)**：⚠️ 严禁使用 `AS` 关键字为字段或聚合函数定义别名。
-      - 错误示范：`SELECT sum(medfee_sumamt) AS total_fee ... ORDER BY total_fee`
-      - 正确示范：`SELECT sum(medfee_sumamt) ... ORDER BY sum(medfee_sumamt)`
-      - 理由：别名极易引起字段名幻觉，必须强制使用原始字段或原始表达式。
-  - **分区过滤**：必须带上 `setl_time` 区间过滤（推荐 `setl_time >= '2024-01-01'`）。
-  - **统计学基线实操 (Statistical Baseline)**：在处理“异常、大额、高频”任务时，必须优先计算基线：
-      - **95 分位数**: `quantile(0.95)(medfee_sumamt)` 用于识别异常高值。
-      - **均值 + 3 倍标准差**: `avg(x) + 3 * stddevPop(x)` 用于确定离群点。
-      - **禁止瞎猜**: 严禁在没有计算过分布的情况下写死如 `HAVING count(*) > 20` 的逻辑。
+  - **两阶段基线探测 (Two-Phase Baseline Pattern)**：在处理“额度异常”任务时，必须分步操作：
+      - **Phase 1**: 先执行聚合查询计算基线（如 `avg(medfee_sumamt)` 或 `quantile(0.95)`）。
+      - **Phase 2**: 将 Phase 1 得到的真实数值注入到后续 SQL 的 `WHERE` 或 `HAVING` 子句中（如 `HAVING sum(...) > 1523.5`）。
+      - **警告**: 严禁在未计算基线的情况下盲目使用 `HAVING count(*) > 20` 这种幻觉逻辑。
+  - **时间重叠算法**：核查重复住院必须使用区间重叠公式：`(start_A <= end_B) AND (end_A >= start_B)`。
   - **避坑准则**：
       1. **禁止别名阴影**：严禁将表达式结果的别名设为与原始列名相同。
       2. **聚合与日期语法**：禁止使用 `GROUP_CONCAT` (MySQL)，必须使用 `arrayStringConcat(groupUniqArray(字段), ',')`；禁止使用 `DATEDIFF`，必须使用 `dateDiff('day', start, end)`；禁止使用 `IFNULL`，必须使用 `ifNull(x, y)`。
       3. **模糊匹配**：优先使用 `multiSearchAny`。
-  - **限制返回规模**：`LIMIT 100`。
+  - **结果集控制**：配合 `ORDER BY` 使用 `LIMIT 100` 以获取最具代表性的异常样本进行分析，避免无意义的全量数据展示。
 
   ## 当前审计协议 (Methodology):
   {methodology}

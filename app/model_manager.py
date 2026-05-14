@@ -217,6 +217,18 @@ class ModelManager:
         self.config_path = config_path
         self.providers: Dict[str, ModelConfig] = self._load_config()
         self._local_embedder = None
+        self._async_client = None
+
+    @property
+    def async_client(self):
+        """[V142.0] 全局共享异步 HTTP 客户端：解决 Event loop is closed 报错并提升连接池性能"""
+        import httpx
+        if self._async_client is None or self._async_client.is_closed:
+            self._async_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+            )
+        return self._async_client
         
     @property
     def local_embedder(self):
@@ -322,7 +334,8 @@ class ModelManager:
                     temperature=temperature,
                     timeout=60.0,
                     streaming=True,
-                    default_headers=default_headers
+                    default_headers=default_headers,
+                    http_async_client=self.async_client  # [V142.0] 注入共享客户端
                 )
                 # [V81.0] 物理绕过：使用 object.__setattr__ 绕过 Pydantic 的初始化校验，确保 ID 强绑定
                 object.__setattr__(llm, 'endpoint_id', name)

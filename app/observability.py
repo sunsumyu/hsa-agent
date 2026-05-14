@@ -88,9 +88,20 @@ def init_observability():
         })
         
         provider = TracerProvider(resource=resource)
-        exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4517", insecure=True)
-        processor = BatchSpanProcessor(exporter, max_queue_size=1024, max_export_batch_size=256, schedule_delay_millis=5000)
-        provider.add_span_processor(processor)
+        
+        # [V131.5] 增加物理探测：若端口未开放，则不加载 Exporter，防止后台重试报错干扰用户
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            is_collector_up = (s.connect_ex(("127.0.0.1", 4517)) == 0)
+
+        if is_collector_up:
+            exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4517", insecure=True)
+            processor = BatchSpanProcessor(exporter, max_queue_size=1024, max_export_batch_size=256, schedule_delay_millis=5000)
+            provider.add_span_processor(processor)
+            logger.info(">>> [Observability] OTel 导出器已挂载至 127.0.0.1:4517")
+        else:
+            logger.debug(">>> [Observability] Phoenix 采集器未就绪，Trace 导出已自动旁路（防止报错干扰）")
         
         _tracer_provider = provider
         trace.set_tracer_provider(provider)
@@ -105,19 +116,33 @@ def init_observability():
     except Exception as e:
         logger.error(f"[Observability] OTel 初始化异常: {e}")
 
-    # 2. Langfuse 物理初始化 (V40.0)
+    # 2. Langfuse 物理初始化 (V131.6 加固型：增加云端连通性预检)
     try:
         pk = os.getenv("LANGFUSE_PUBLIC_KEY")
         sk = os.getenv("LANGFUSE_SECRET_KEY")
-        host = os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+        host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
         
         if pk and sk:
-            # 初始化 Client 用于 Prompt Management
-            _langfuse_client = Langfuse(public_key=pk, secret_key=sk, host=host)
-            # 初始化 Handler 用于 Trace 追踪 (V4.x 铁腕逻辑：移除所有显式参数，自动适配环境变量)
-            from langfuse.langchain import CallbackHandler
-            _langfuse_handler = CallbackHandler(public_key=pk)
-            logger.info(">>> [Observability] Langfuse 4.x 托管链路已物理激活")
+            # [V131.6] 连通性预检：避免在国内网络环境下因 cloud.langfuse.com 超时导致的系统卡顿
+            import socket
+            is_langfuse_reachable = False
+            try:
+                # 提取 host (处理 https:// 前缀)
+                clean_host = host.replace("https://", "").replace("http://", "").split(":")[0]
+                with socket.create_connection((clean_host, 443), timeout=1.5):
+                    is_langfuse_reachable = True
+            except:
+                pass
+
+            if is_langfuse_reachable:
+                # 初始化 Client 用于 Prompt Management
+                _langfuse_client = Langfuse(public_key=pk, secret_key=sk, host=host)
+                # 初始化 Handler 用于 Trace 追踪
+                from langfuse.langchain import CallbackHandler
+                _langfuse_handler = CallbackHandler(public_key=pk)
+                logger.info(f">>> [Observability] Langfuse 云端链路已激活 ({clean_host})")
+            else:
+                logger.warning(">>> [Observability] Langfuse 云端不可达，已自动切换至本地脱机模式")
     except Exception as e:
         logger.warning(f"[Observability] Langfuse 物理初始化失败: {e}")
 

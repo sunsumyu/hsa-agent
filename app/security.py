@@ -57,8 +57,11 @@ class SQLGuardian:
         except Exception as kg_err:
             logger.debug(f"[SQLGuardian] FieldKG 不可用，跳过字段纠错: {kg_err}")
 
-        # 1. 物理检查堆叠查询
-        if ";" in clean_sql or "；" in clean_sql:
+        # 1. 物理检查堆叠查询 [V143.0 优化]：使用正则移除字符串字面量后再检查分号，防止误报。
+        # 移除单引号和双引号包裹的内容
+        temp_sql = re.sub(r"'(?:''|[^'])*'", "", clean_sql)
+        temp_sql = re.sub(r'"(?:""|[^"])*"', "", temp_sql)
+        if ";" in temp_sql or "；" in temp_sql:
             logger.error(f"[SECURITY] 检测到非法堆叠查询攻击! [Raw]: {repr(sql)} | [Cleaned]: {repr(clean_sql)}")
             raise SecurityViolationError("物理拦截：检测到堆叠查询意图，系统已拒绝执行。")
 

@@ -38,36 +38,52 @@ class SQLLogicValidator:
             return False, f"解析异常: {str(e)}"
 
     @staticmethod
+    def _load_governance_config():
+        import yaml
+        import os
+        config_path = "configs/audit_governance.yaml"
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        return {}
+
+    @staticmethod
     def agentic_linter(sql: str) -> Tuple[bool, str]:
-        """[V111.0] SQL 核心审计逻辑审查：拦截逻辑自杀与幻觉诱因"""
+        """[V150.0] 框架级 SQL 治理引擎：由外部配置驱动，支持跨项目复用"""
         sql_upper = sql.upper()
-        
-        # 1. 逻辑自杀检测：按唯一标识进行聚合统计 (QA-01 核心症结)
-        # 如果 SQL 中包含 COUNT/SUM 等聚合函数，检查 GROUP BY 是否包含了唯一主键
-        if "GROUP BY" in sql_upper and any(agg in sql_upper for agg in ["COUNT", "SUM", "AVG", "GROUPARRAY"]):
-            # 物理主键或唯一 ID，按这些字段分组会导致每个组永远只有 1 条记录，从而查不出“多次”
-            logic_suicide_keys = ["SETL_ID", "MSG_ID", "DET_ITEM_FEE_ID", "MDTRT_ID", "REC_ID"]
-            for pk in logic_suicide_keys:
-                # 检查 GROUP BY 子句中是否包含这些字段
-                group_by_match = re.search(r"GROUP\s+BY\s+(.*?)(ORDER\s+BY|HAVING|LIMIT|$)", sql_upper, re.DOTALL)
-                if group_by_match:
-                    group_by_content = group_by_match.group(1)
-                    if pk in group_by_content:
-                        return False, f"❌ [逻辑自杀拦截] 检测到在聚合任务中按唯一标识 `{pk}` 分组。这会导致每个分组仅含 1 条记录，无法检出‘多次’或‘重复’行为。建议改用 `psn_no` + `toDate(setl_time)`。"
+        config = SQLLogicValidator._load_governance_config()
+        rules = config.get("interception_rules", [])
 
-        # 2. 查全率保障：频率审计缺失 HAVING 子句
-        if "COUNT(" in sql_upper and "GROUP BY" in sql_upper and "HAVING" not in sql_upper:
-             # 如果是查异常频率但没写 HAVING，容易产生海量无关数据
-             return False, "⚠️ [性能/逻辑风险] 检测到聚合查询缺失 HAVING 子句。对于‘多次’或‘高频’审计，必须包含 `HAVING count(...) > n` 以过滤合法记录。"
+        # 1. 基础架构校验 (主键聚合拦截)
+        if "GROUP BY" in sql_upper and any(agg in sql_upper for agg in ["COUNT", "SUM", "AVG"]):
+            forbidden_pks = ["SETL_ID", "MSG_ID", "REC_ID"]
+            for pk in forbidden_pks:
+                if pk in sql_upper.split("GROUP BY")[-1]:
+                    return False, f"❌ [架构拦截] 聚合查询禁止按唯一 ID `{pk}` 分组。"
 
-        # 3. 笛卡尔积陷阱：多表 JOIN 缺失条件
+        # 2. 动态业务规则拦截 (从 YAML 加载)
+        for rule in rules:
+            rule_id = rule.get("id")
+            # 模糊匹配拦截逻辑
+            if rule_id == "no_fuzzy_matching":
+                keywords = rule.get("keywords", [])
+                if "LIKE" in sql_upper and any(kw.upper() in sql_upper for kw in keywords):
+                    return False, f"❌ [治理拦截] {rule.get('name')}: {rule.get('description')}"
+            
+            # 时间维度拦截逻辑
+            if rule_id == "temporal_dimension_check":
+                triggers = rule.get("trigger_keywords", [])
+                if any(kw.upper() in sql_upper for kw in triggers):
+                    forbidden = rule.get("forbidden_fields", [])
+                    mandatory = rule.get("mandatory_fields", [])
+                    if any(f.upper() in sql_upper for f in forbidden) and not any(m.upper() in sql_upper for m in mandatory):
+                        return False, f"❌ [维度拦截] {rule.get('name')}: {rule.get('description')}"
+
+        # 3. 通用安全校验
         if "JOIN" in sql_upper and " ON " not in sql_upper and " USING " not in sql_upper:
-             return False, "❌ [计算爆炸拦截] 检测到 JOIN 语句缺失关联条件（ON/USING）。这将产生笛卡尔积，导致算力溢出及虚假数据幻觉。"
+             return False, "❌ [安全拦截] JOIN 语句缺失关联条件，禁止执行潜在的笛卡尔积查询。"
 
-        # 4. 字段前缀检查 (物理真理校验)
-        if "FROM" in sql_upper and "FQZ_" not in sql_upper and "V_AUDIT" not in sql_upper:
-            if "SYSTEM." not in sql_upper and "INFORMATION_SCHEMA" not in sql_upper:
-                return False, "❌ [物理脱节] SQL 中未发现物理表前缀（如 fqz_）。请严格遵守 Schema Registry 中的表名定义。"
+        return True, ""
             
         return True, ""
 

@@ -734,14 +734,14 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     try:
         llm, _ = await model_manager.get_llm_by_role("reporter", config=config)
 
-        # [V59.1] 极简 Conclusion Prompt：强调核查广度与方法的透明度
+        # [V140.0] 事实强制对齐 (Fact-Forced Alignment) Prompt 升级
         CONCLUSION_PROMPT = (
             "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~300 字的「核查结论」。\n"
             "要求：\n"
-            "1. 结论必须明确（发现或未发现违规）。\n"
-            "2. 必须引用下方的“审计方法论”中的核心判定标准，展示核查的专业性。\n"
-            "3. 如果发现条数为 0，必须说明核查已穿透相关底层原始数据，验证了业务逻辑的完整性，确保无遗漏。\n"
-            "4. 给出具有可操作性的后续整改或监测建议。\n\n"
+            "1. **事实强制对齐**：检查下方“数据摘要”中的条数。如果条数 > 0，结论必须明确指出发现了违规嫌疑。严禁在有数据的情况下使用“未发现违规”等敷衍辞令。\n"
+            "2. **专业引用**：必须引用下方的“审计方法论”中的核心判定标准（如：三表关联、日期区间对撞），展示核查的专业性。\n"
+            "3. **透明度**：如果发现条数为 0，必须说明核查已穿透底层原始数据并验证了业务完整性，确保无遗漏，并分析可能的原因。\n"
+            "4. **整改建议**：给出具有可操作性的后续整改或监测建议。\n\n"
             f"审计任务：{user_question[:300]}\n\n"
             f"审计方法论：{methodology[:500]}\n\n"
             f"执行轨迹：{'; '.join(execution_trace[-3:]) if execution_trace else '已完成物理数据核查'}\n\n"
@@ -795,10 +795,17 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     # 1. [V129.0 优化] 语义一致性：仅检查“核查结论”段，防止背景任务词汇干扰
     is_aligned, alignment_err = booster.verify_semantic_alignment(sql_query, llm_conclusion)
     
-    # [V129.1 Semantic Relaxing] 语义对撞降级为观测指标，不再阻断出件
+    # [V129.1] 语义对撞硬拦截：防止报告内容偏离物理证据
     if not is_aligned:
-        logger.warning(f"🚨 [SEMANTIC_MISMATCH] 报告语义偏离物理证据 (已降级为观测指标): {alignment_err}")
-        content = f"> **⚠️ 风险提示：本报告引述的结论与底层物理探针支持的数据维度存在偏差，部分事实可能来源于推断。**\n> 详情：{alignment_err}\n\n{content}"
+        logger.error(f"🚨 [SEMANTIC_MISMATCH] 报告语义偏离物理证据，触发取证修正: {alignment_err}")
+        return {
+            "error_log": f"【语义对撞拦截】报告中提到的实体（如：{alignment_err}）在底层 SQL 取证结果中未发现支撑。请重新核对 SQL 逻辑或修正报告描述。",
+            "retry_count": state.get("retry_count", 0) + 1,
+            "structured_report": AuditReport(
+                summary=f"⚠️ [逻辑校验失败] 报告结论缺乏物理证据支撑。详情：{alignment_err}",
+                findings=[], total_amount=0.0, finding_count=0, risk_level="高"
+            )
+        }
 
     # 2. 证据溯源：检查具体数值/ID 是否真实存在于 Raw Data
     is_grounded, grounding_err = booster.verify_evidence_grounding(_safe_findings, raw_data_list)

@@ -44,7 +44,7 @@ async def test_7_metrics_judge():
     
     full_input = f"{JUDGE_PROMPT}\n\n审计任务: {mock_task}\n生成的报告: {mock_report}"
     
-    llm, _ = model_manager.get_adaptive_llm(model_id="doubao-pro-32k") # 切换至火山引擎豆包
+    llm, _ = await model_manager.get_llm_by_role("planner_heavy")
     print("[JUDGE] Analyzing and scoring...\n")
     
     try:

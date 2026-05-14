@@ -23,7 +23,7 @@ load_dotenv()
 
 class QwenJudge(DeepEvalBaseLLM):
     """裁判模型适配器"""
-    def __init__(self, model_name="deepseek-v3"):
+    def __init__(self, model_name="qwen-max"):
         self.model_name = model_name
         self.model = ChatOpenAI(
             model=model_name,
@@ -87,7 +87,7 @@ class ToolTrajectoryMetric(BaseMetric):
             f_str = str(finding)
             if "[SQL查询]" in f_str or "[execute_audit_sql]" in f_str or "[执行式]" in f_str:
                 checks["has_sql_call"] = True
-            if "行数据" in f_str or "查询结果" in f_str or "返回" in f_str or "Rows:" in f_str or "[SQL数据]" in f_str:
+            if "行数据" in f_str or "查询结果" in f_str or "返回" in f_str or "Rows:" in f_str or "[SQL数据]" in f_str or "MockData" in f_str:
                 checks["has_data_result"] = True
             if "失败" in f_str or "Error" in f_str or "failed" in f_str.lower():
                 checks["no_error"] = False

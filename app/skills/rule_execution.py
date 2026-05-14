@@ -36,10 +36,10 @@ class RuleExecutionSkill(BaseTool):
         elif "DECOMPOSITION" in key or "分解" in key: target_id = "DECOMPOSITION_HOSPITALIZATION"
         elif "CROSS" in key or "重复住院" in key or "同时" in key: target_id = "CROSS_HOSPITAL_OVERLAP"
         elif "REPEAT_BILLING" in key or "重复收费" in key: target_id = "REPEAT_BILLING_DETECTOR"
-        elif "CONTACT_SHARING" in key or "联系方式" in key: target_id = "CONTACT_SHARING_DETECTOR"
-        elif "VIX" in key or "变异" in key: target_id = "VIX_ANOMALY_SCAN"
+        elif "CONTACT_SHARING" in key or "联系方式" in key: target_id = "CONTACT_SHARING"
+        elif "VIX" in key or "变异" in key: target_id = "DYNAMIC_VIX_SCAN"
         elif "OUTLIER" in key or "离群" in key: target_id = "STATISTICAL_OUTLIER_DETECTOR"
-        elif "CLUSTER" in key or "聚集" in key: target_id = "CLUSTER_ENCOUNTER_DETECTOR"
+        elif "CLUSTER" in key or "聚集" in key: target_id = "FEDERATED_CLUSTER_CYPHER"
         elif "MAD" in key or "稳健" in key: target_id = "ROBUST_MAD_DETECTOR"
         else: target_id = key
         

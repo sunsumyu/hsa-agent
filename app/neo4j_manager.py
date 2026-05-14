@@ -295,10 +295,22 @@ class Neo4jManager:
                     logger.warning("[NEO4J] 检测到本地环境使用 neo4j:// 协议，可能导致路由失败。正在尝试降级为 bolt://...")
                     connection_uri = connection_uri.replace("neo4j://", "bolt://")
 
+            # [V131.7] 增加物理探测：避免在网络不佳时产生 defunct connection 错误
+            import socket
+            host = connection_uri.split("//")[1].split(":")[0]
+            try:
+                # 探测 7687 端口是否开放
+                with socket.create_connection((host, 7687), timeout=2.0):
+                    pass
+            except Exception as e_probe:
+                logger.warning(f">>> [NEO4J] 物理探测失败 ({host}:7687): {e_probe}。将自动降级为内存图谱。")
+                self._connection_attempted = True
+                return
+
             self.driver = GraphDatabase.driver(
                 connection_uri, 
                 auth=(self.user, self.password),
-                connection_timeout=60.0  # [V117.0] 增加超时容忍度
+                connection_timeout=15.0  # [V131.7] 降低超时时间，快速失败
             )
             self.driver.verify_connectivity()
             self.is_connected = True

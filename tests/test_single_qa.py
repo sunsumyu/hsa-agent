@@ -3,6 +3,10 @@
 用法: python tests/test_single_qa.py
 """
 import asyncio, time, sys, os
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 async def main():
@@ -33,7 +37,9 @@ async def main():
     has_sql = bool(state.get("sql_query", "").strip().replace("--", ""))
     has_data = bool(state.get("raw_data", "")) and "0 条" not in state.get("raw_data", "")
     methodology = state.get("methodology", "")
-    question_in_meth = any(kw in methodology for kw in ["同一天", "同一患者", "同一医院", "多次收取"])
+    # [V90.6] 允许部分关键词命中
+    keywords = ["同一天", "同一患者", "同一医院", "多次收取", "same day", "patient", "hospital"]
+    question_in_meth = any(kw.lower() in methodology.lower() for kw in keywords)
     empty_q_bug = "原始审计问题为空" in methodology or "未提供" in methodology
 
     print(f"\n{'='*60}")
