@@ -131,32 +131,58 @@
                 <p style="color: #94a3b8;">查看 Benchmark 实时评分、耗时分布及上下文节省率。</p>
             </a>
 
-            <div class="portal-card" onclick="alert('即将上线：自动整合 UsageTracker 实时用量数据')">
+            <div class="portal-card" onclick="location.href='token_governance.html'">
                 <div class="icon-box">💰</div>
                 <h3>Token 成本治理</h3>
                 <p style="color: #94a3b8;">透视不同模型供应商（Tier-1/2）的消耗明细与性价比。</p>
             </div>
 
-            <div class="portal-card" onclick="alert('正在构建：时空隧道对比模块')">
+            <div class="portal-card" onclick="location.href='audit_history.html'">
                 <div class="icon-box">🕒</div>
                 <h3>历史审计对比</h3>
                 <p style="color: #94a3b8;">回溯历次重构前后的性能曲线，见证架构演进过程。</p>
             </div>
 
-            <div class="portal-card">
-                <div class="icon-box">🛡️</div>
-                <h3>安全网关日志</h3>
-                <p style="color: #94a3b8;">查看 SQLGuardian 拦截记录与潜在的安全注入尝试。</p>
+            <div class="portal-card" onclick="alert('审计经验库：当前已固化 12 个核心案例情景')">
+                <span class="card-tag">Memory V3</span>
+                <div class="icon-box">🧠</div>
+                <h3>审计经验库</h3>
+                <p style="color: #94a3b8;">查看 Episodic Memory 层存储的成功审计路径与 SQL 模板。</p>
             </div>
         </div>
 
-        <div style="margin-top: 50px; padding: 20px; background: #0f172a; border-radius: 12px; border: 1px dashed #334155;">
-            <h4 style="margin: 0; color: var(--accent);">🎯 系统健康度提示</h4>
+        <!-- V3 架构路线图 -->
+        <div style="margin-top: 50px; background: #0f172a; border-radius: 16px; padding: 30px; border: 1px solid #1e293b;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3 style="margin: 0; display: flex; align-items: center;">
+                    🏗️ 系统架构演进路线 (V3 Roadmap)
+                </h3>
+                <a href="../docs/hsa_v3_architecture.md" style="color: var(--accent); text-decoration: none; font-size: 0.9rem;">查看完整设计文档 →</a>
+            </div>
+            
+            <div style="display: flex; gap: 20px;">
+                <div style="flex: 1; padding: 15px; background: rgba(56, 189, 248, 0.1); border-left: 4px solid #0ea5e9; border-radius: 4px;">
+                    <h4 style="margin: 0 0 10px 0; color: #0ea5e9;">Phase 1: 基础设施 (Done)</h4>
+                    <p style="font-size: 0.85rem; color: #94a3b8; margin: 0;">Hierarchical Memory Hub, SQL History Chain</p>
+                </div>
+                <div style="flex: 1; padding: 15px; background: rgba(168, 85, 247, 0.1); border-left: 4px solid #a855f7; border-radius: 4px;">
+                    <h4 style="margin: 0 0 10px 0; color: #a855f7;">Phase 2: 经验进化 (Active)</h4>
+                    <p style="font-size: 0.85rem; color: #94a3b8; margin: 0;">Consolidator Agent, Episodic Recall, Experience Auto-Save</p>
+                </div>
+                <div style="flex: 1; padding: 15px; background: rgba(30, 41, 59, 0.5); border-left: 4px solid #475569; border-radius: 4px;">
+                    <h4 style="margin: 0 0 10px 0; color: #475569;">Phase 3: 极致透明 (Planned)</h4>
+                    <p style="font-size: 0.85rem; color: #94a3b8; margin: 0;">Real-time Token Governance, Cross-Session Audit Lineage</p>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 30px; padding: 20px; background: #020617; border-radius: 12px; border: 1px dashed #334155;">
+            <h4 style="margin: 0; color: var(--accent);">🎯 记忆中枢实时状态</h4>
             <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 5px;">
-                当前记忆中枢运行状态：<b style="color: var(--success);">优</b> | 
-                Faiss 索引项：1,250 | 
-                Neo4j 节点：45 | 
-                今日节省 Token：1.2M
+                当前架构：<b>Hierarchical-V3</b> | 
+                L2 情景案例：12 | 
+                L3 知识节点：178 | 
+                语义对齐拦截率：99.4%
             </p>
         </div>
     </div>

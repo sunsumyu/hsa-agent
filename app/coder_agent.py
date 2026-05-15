@@ -109,6 +109,7 @@ class AuditCoderAgent:
         return {
             "raw_data": processed["raw_data"],
             "sql_query": processed["sql_query"],
+            "sql_history": processed["sql_history"], # [V178.9] 证据链持久化
             "methodology": processed["methodology"],
             "messages": [response] + processed["tool_msgs"],
             "retry_count": retry + 1,
@@ -162,7 +163,8 @@ class AuditCoderAgent:
         return {
             "tool_msgs": tool_msgs,
             "raw_data": "\n---\n".join(raw_data_list),
-            "sql_query": "\n---\n".join(sql_logics),
+            "sql_query": sql_logics[-1] if sql_logics else "",
+            "sql_history": sql_logics, # [V178.9] 证据链全量化
             "methodology": "\n\n".join(methodologies),
             "execution_trace": state.get("execution_trace", []) + tool_traces,
             "has_error": has_error,

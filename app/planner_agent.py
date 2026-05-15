@@ -56,6 +56,7 @@ class AuditPlannerAgent:
                     "tasks": cached_plan.get("tasks", ["执行已验证的精准 SQL"]),
                     "methodology": cached_plan.get("methodology", "基于历史成功经验的快速路径"),
                     "sql_query": cached_plan.get("sql"),
+                    "sql_history": [cached_plan.get("sql")] if cached_plan.get("sql") else [], # [V178.9] 确保缓存路径也具备证据链
                     "cache_hit": True,
                     "execution_trace": tracer.to_legacy_list(),
                     "messages": []
@@ -88,19 +89,24 @@ class AuditPlannerAgent:
             complexity = (state.get("metadata") or {}).get("model_id", "HEAVY")
             role = "planner_heavy" if complexity == "HEAVY" else "planner_light"
 
-            # 准备上下文
+            # [V178.9] 准备上下文：混合检索 (Semantic + Episodic)
             ontology = neo4j_manager.get_ontology()
+            
+            # 1. 语义召回 (Schema/行业知识)
             relevant_items = await memory_hub.query(user_input)
             schema_hint = memory_hub.semantic.format_for_prompt(relevant_items)
-            
             avoidance_guide = memory_hub.semantic.get_avoidance_guides(user_input)
             if avoidance_guide: schema_hint = f"{schema_hint}\n\n{avoidance_guide}"
 
-            # 构造 Messages
+            # 2. 情景召回 (历史成功案例)
+            episodes = await memory_hub.episodic.recall_experience(user_input, limit=2)
+            experience_hint = memory_hub.episodic.format_experience_for_prompt(episodes)
+
+            # 3. 构造 Messages
             messages = PLANNER_PROMPT.format_messages(
                 original_question=user_input[:500],
                 messages=state["messages"], 
-                experiences="", 
+                experiences=experience_hint, 
                 ontology=ontology,
                 schema_info=schema_hint
             )

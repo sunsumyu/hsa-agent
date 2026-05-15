@@ -50,10 +50,14 @@ def _merge_dict(left: Dict, right: Dict) -> Dict:
     new.update(right or {})
     return new
 
+def _merge_list(left: List, right: List) -> List:
+    return (left or []) + (right or [])
+
 class AuditState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], _trim_messages]
     tasks: List[str]
     sql_query: str
+    sql_history: Annotated[List[str], _merge_list]  # [V178.9] 全量 SQL 证据链
     raw_data: str
     audit_findings: List[_LayeredAuditFinding]
     structured_report: Optional[_LayeredAuditReport]
@@ -135,7 +139,13 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 
     prompt_text = report_renderer.prepare_conclusion_prompt(user_question, methodology, execution_trace, hard_count, hard_sum)
     try:
-        response = await llm_provider.chat(role="reporter", messages=[HumanMessage(content=prompt_text)], config=config, state=state)
+        response = await llm_provider.chat(
+            role="reporter", 
+            messages=[HumanMessage(content=prompt_text)], 
+            config=config, 
+            state=state,
+            max_tokens=1000 # [V178.9] 防止长篇专业结论被物理截断
+        )
         llm_conclusion = str(response.content).strip()
     except Exception as e:
         logger.error(f"结论生成失败: {e}")
@@ -146,6 +156,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         llm_conclusion=llm_conclusion,
         raw_data=raw_data_list,
         sql_query=state.get("sql_query"),
+        sql_history=state.get("sql_history", []), # [V178.9] 传入全量 SQL 历史
         methodology=methodology,
         table_info=f"{schema_registry.get_main_table()}",
         total_amount=hard_sum,
@@ -162,7 +173,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 async def consolidator_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ConsolidatorAgent 执行经验固化"""
     from app.consolidator_agent import consolidator_agent
-    return consolidator_agent.consolidate(state)
+    return await consolidator_agent.consolidate(state)
 
 async def human_approval_node(state: AuditState, config: RunnableConfig):
     """[V173.1] 人机协作拦截点：将任务提交至动态任务池并挂起"""

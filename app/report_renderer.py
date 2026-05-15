@@ -141,17 +141,18 @@ class AuditReportRenderer:
         return [_coerce(r) for r in raw_data_list[:50]] if isinstance(raw_data_list, list) else []
 
     def prepare_conclusion_prompt(self, user_question: str, methodology: str, execution_trace: List[str], hard_count: int, hard_sum: float) -> str:
-        """构造事实强制对齐的 LLM Prompt"""
+        """构造事实强制对齐且逻辑白盒化的 LLM Prompt [V178.9]"""
         return (
-            "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~300 字的「核查结论」。\n"
+            "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~400 字的「核查结论」。\n"
             "要求：\n"
-            "1. **事实强制对齐**：检查下方“数据摘要”中的条数。如果条数 > 0，结论必须明确指出发现了违规嫌疑。严禁在有数据的情况下使用“未发现违规”等敷衍辞令。\n"
-            "2. **专业引用**：必须引用下方的“审计方法论”中的核心判定标准，展示核查的专业性。\n"
-            "3. **透明度**：如果发现条数为 0，必须说明核查已穿透底层数据并验证了业务完整性。\n"
-            "4. **整改建议**：给出具有可操作性的后续建议。\n\n"
-            f"审计任务：{user_question[:300]}\n\n"
-            f"审计方法论：{methodology[:500]}\n\n"
-            f"执行轨迹：{'; '.join(execution_trace[-3:]) if execution_trace else '已完成核查'}\n\n"
+            "1. **事实强制对齐**：检查下方“数据摘要”中的条数。如果条数 > 0，结论必须明确指出发现了违规嫌疑，严禁敷衍。\n"
+            "2. **逻辑白盒化**：你必须在结论中简要解释你的「技术核查逻辑」（例如：是如何通过 PSN_NO 分组的，判定违规的金额阈值是多少）。\n"
+            "3. **多维证据链**：如果是复杂任务（如性别冲突），必须明确提到对科室、诊断和费用的交叉核查结果。\n"
+            "4. **专业引用**：必须引用下方的“审计方法论”中的判定标准，展示核查的专业性。\n"
+            "5. **完整性**：请确保输出完整的段落，严禁在句子中间截断。\n\n"
+            f"审计任务：{user_question[:400]}\n\n"
+            f"审计方法论：{methodology[:600]}\n\n"
+            f"执行轨迹：{'; '.join(execution_trace[-5:]) if execution_trace else '已完成全路径核查'}\n\n"
             f"数据摘要：共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}"
         )
 
@@ -161,6 +162,7 @@ class AuditReportRenderer:
         llm_conclusion: str,
         raw_data: Optional[List[Dict[str, Any]]] = None,
         sql_query: Optional[str] = None,
+        sql_history: Optional[List[str]] = None, # [V178.9] 全量证据链
         table_info: Optional[str] = None,
         total_amount: float = 0.0,
         finding_count: int = 0,
@@ -213,7 +215,7 @@ class AuditReportRenderer:
 
         sections = [
             self._chapter1_task(user_question, policy_basis),
-            self._chapter2_scope(sql_query, table_info, execution_trace, methodology),
+            self._chapter2_scope(sql_query, table_info, execution_trace, methodology, sql_history),
             self._chapter3_findings(raw_data, total_amount, finding_count),
             self._chapter4_conclusion(llm_conclusion),
             self._chapter5_risk(risk_level, total_amount, finding_count),
@@ -261,6 +263,7 @@ class AuditReportRenderer:
         table_info: Optional[str],
         trace: List[str],
         methodology: Optional[str] = None,
+        sql_history: Optional[List[str]] = None, # [V178.9]
     ) -> str:
         lines = ["## 二、核查口径与执行过程", ""]
         if table_info:
@@ -273,7 +276,20 @@ class AuditReportRenderer:
                 methodology.strip(),
             ]
             
-        if sql:
+        if sql_history:
+            lines += ["", "**全量技术溯源 (SQL History)**：", ""]
+            for i, s_query in enumerate(sql_history, 1):
+                lines += [
+                    f"<details>",
+                    f"<summary>🔍 步骤 {i}：执行 SQL 详情</summary>",
+                    "",
+                    "```sql",
+                    s_query.strip(),
+                    "```",
+                    "",
+                    "</details>",
+                ]
+        elif sql:
             lines += [
                 "",
                 "<details>",
@@ -287,8 +303,17 @@ class AuditReportRenderer:
                 "",
             ]
         if trace:
-            lines += ["", "**执行轨迹**："]
-            for i, step in enumerate(trace[-5:], 1):  # 最近 5 步
+            lines += ["", "**核心执行轨迹**："]
+            # [V178.9] 智能轨迹过滤：优先展示关键节点 (PLAN, SQL, VALIDATE)
+            critical_keywords = ["PLAN", "SQL", "VALIDATE", "BOOSTER", "GATE"]
+            critical_trace = [t for t in trace if any(kw in t.upper() for kw in critical_keywords)]
+            
+            # 如果关键轨迹太多，取前 3 和后 3；如果太少，用普通轨迹补齐
+            display_trace = critical_trace if len(critical_trace) <= 10 else (critical_trace[:5] + ["..."] + critical_trace[-5:])
+            if not display_trace:
+                display_trace = trace[-5:]
+                
+            for i, step in enumerate(display_trace, 1):
                 lines.append(f"{i}. {step}")
         lines.append("")
         return "\n".join(lines)

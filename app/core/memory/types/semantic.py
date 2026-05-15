@@ -10,6 +10,7 @@ import json
 from loguru import logger
 from app.core.memory.base import MemoryItem
 from app.core.memory.storage.vector import VectorStorage
+from app.neo4j_manager import field_kg
 
 class MetadataMappingLayer:
     """[V110.0] 企业级“语义—物理”映射层：解决业务术语混淆及字段幻觉"""
@@ -70,12 +71,36 @@ class SemanticMemory:
             search_query = f"{query} {hyde_context}"
             logger.info(f"🔍 [SemanticMemory] 混合查询载荷 (前50字): {search_query[:50]}...")
         
-        # 增加召回上限至 12，以应对跨 2-3 张表的复杂审计任务
-        results = await self.storage.search(search_query, limit=limit)
+        # 1. 向量召回 (基础上限 10)
+        results = await self.storage.search(search_query, limit=10)
         
-        # [V178.8] 动态过滤：仅保留相关度较高的项，防止无关字段引入噪音
-        # 注意：此处可根据距离进行精细化过滤
-        return results
+        # 2. [V178.9] 图谱增强：补齐确定性语义断层
+        # 针对医保高频词（妇科、性别、团伙等）进行实体扩张
+        keywords = ["性别", "妇科", "产科", "团伙", "共用", "重复"]
+        expanded_canonicals = []
+        for kw in keywords:
+            if kw in query:
+                # 从图谱注册表中拉取关联字段
+                for entry in field_kg._registry:
+                    desc = entry.get("desc", "").lower()
+                    if kw in desc:
+                        expanded_canonicals.append(entry["canonical"])
+        
+        # 3. 合并与去重 (总上限控制在 15 以内)
+        existing_canonicals = {r.metadata.get("canonical") for r in results if r.metadata.get("canonical")}
+        unique_extras = [ec for ec in expanded_canonicals if ec not in existing_canonicals]
+        
+        # 补齐逻辑：如果图谱发现了缺失的核心字段，构造虚拟 MemoryItem 注入
+        for extra in unique_extras[:5]: # 最多补 5 个
+            # 查找原始条目以获取描述
+            full_entry = next((e for e in field_kg._registry if e["canonical"] == extra), None)
+            if full_entry:
+                results.append(MemoryItem(
+                    content=f"字段: {extra} | 描述: {full_entry.get('desc')}",
+                    metadata={"canonical": extra, "source": "knowledge_graph", "importance": 1.0}
+                ))
+
+        return results[:15]
 
     async def learn(self, content: str, topic: str = "general", importance: float = 0.8, metadata: Dict[str, Any] = None):
         """将新知识固化到向量存储，支持携带结构化元数据"""
