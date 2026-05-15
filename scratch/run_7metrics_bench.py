@@ -514,11 +514,23 @@ async def main():
 
     print_summary(results)
 
+    results_dir = "data/bench_history"
+    os.makedirs(results_dir, exist_ok=True)
+    
     ts   = datetime.now().strftime("%Y%m%d_%H%M")
-    path = f"data/bench_7dim_verbose_{ts}.json"
+    path = f"{results_dir}/bench_7dim_{ts}.json"
+    
+    # 同时保留一个最新的软链接或副本方便仪表盘读取
+    latest_path = "data/bench_7dim_latest.json"
+    
     with open(path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2, default=str)
-    print(f"  [File] Report saved: {path}")
+    
+    with open(latest_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2, default=str)
+        
+    print(f"  [File] Historical record saved: {path}")
+    print(f"  [File] Dashboard data updated: {latest_path}")
 
 if __name__ == "__main__":
     asyncio.run(main())
