@@ -49,6 +49,10 @@ class RouteType(str, Enum):
     KNOWN_ALGO = "KNOWN_ALGO"    # 已知异常算法 → 直接调用 anomaly_detector
     UNKNOWN = "UNKNOWN"          # 未知类型 → 需要 LLM 推理
 
+class ModelTier(str, Enum):
+    LIGHT = "LIGHT"  # 快速、低成本模型 (e.g. 7B, 8B, Lite)
+    HEAVY = "HEAVY"  # 高智能、高成本模型 (e.g. V3, GPT-4, Gemini-Pro)
+
 
 @dataclass
 class RouteResult:
@@ -58,6 +62,7 @@ class RouteResult:
     confidence: float           # 置信度 [0.0, 1.0]
     matched_keywords: List[str] = field(default_factory=list)
     extra_filters: Dict[str, str] = field(default_factory=dict)
+    model_tier: ModelTier = ModelTier.HEAVY # [V167.0] 默认使用强力模型
     reason: str = ""
 
 
@@ -242,13 +247,33 @@ class FastAuditRouter:
         if result:
             return result
 
-        # 优先级 3：未知类型，需要 LLM 推理
+        # 优先级 3：未知类型，根据复杂度进行模型分级 (V167.0)
+        tier = self._estimate_complexity(text)
         return RouteResult(
             route_type=RouteType.UNKNOWN,
             target_id="",
             confidence=0.0,
-            reason="未匹配到任何已知规则，需要 LLM 推理",
+            model_tier=tier,
+            reason=f"未匹配到任何已知规则，评估复杂度级别为: {tier}",
         )
+
+    def _estimate_complexity(self, text: str) -> ModelTier:
+        """
+        [V167.0] 复杂度评估器：识别高维分析需求。
+        """
+        # 简单查询特征词
+        light_patterns = ["解释", "定义", "是谁", "查一下", "多少钱"]
+        # 复杂分析特征词
+        heavy_patterns = ["趋势", "分布", "关联", "对比", "同环比", "异动", "交叉", "特征", "聚集", "偏离"]
+        
+        if any(p in text for p in heavy_patterns) or len(text) > 60:
+            return ModelTier.HEAVY
+        
+        # 如果包含大量“解释”类词汇且长度较短，设为 LIGHT
+        if any(p in text for p in light_patterns):
+            return ModelTier.LIGHT
+            
+        return ModelTier.HEAVY # 默认安全起见使用 HEAVY
 
     def get_all_rules(self) -> List[Dict]:
         """返回当前所有路由规则配置（用于调试和展示）"""

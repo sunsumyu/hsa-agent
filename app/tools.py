@@ -10,15 +10,20 @@ import os
 import re
 import json
 import asyncio
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Union, Optional, Annotated
 from loguru import logger
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
 from app.db_conn import get_clickhouse_client, SqlExecError
 from app.audit_rules import rule_engine
 from app.anomaly_algorithms import anomaly_detector
 from app.security import SQLGuardian
 from app.perf_monitor import perf_monitor
+from app.core.skill_protocol import SkillResponse
+from app.core.config import settings
+from app.core.utils import smart_parse_tool_params
 
 # ──────────────────────────────────────────────────────────
 # 辅助函数
@@ -30,8 +35,9 @@ def _sanitize_results(records: List[Dict], tolerance: int = 1000) -> List[Dict]:
     - 支持梯级熔断：L1(放行), L2(告警), L3(强力拦截)
     - 结合 FieldKG 进行动态脱敏
     """
-    HARD_MELT_LIMIT = 200000 # 绝对物理上限，防止笛卡尔积彻底撑爆内存
+    HARD_MELT_LIMIT = 200000 # 绝对物理上限
     cleaned = []
+    tolerance = settings.sql_row_tolerance
     
     for row in records:
         for key, val in row.items():
@@ -67,43 +73,50 @@ def _sanitize_results(records: List[Dict], tolerance: int = 1000) -> List[Dict]:
     return cleaned
 
 @perf_monitor.time_it("AUDIT_ENGINE")
-async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return_raw: bool = False, tolerance: int = 1000) -> Any:
-    """
-    [V131.0] 核心执行逻辑：支持 SQL 自愈中间件 + 单一源日志分流。
-    """
-    async def _run_sql(safe_sql: str):
-        client = get_clickhouse_client()
-        return await asyncio.to_thread(client.query, safe_sql)
+async def _execute_audit_sql_logic(
+    sql: str, 
+    db_type: str = "clickhouse", 
+    return_raw: bool = False, 
+    tolerance: int = 1000,
+    tenant_id: Optional[str] = None
+) -> Any:
+    """内部物理执行逻辑 [V172.1] 增加 tenant_id 隔离"""
+    if db_type == "clickhouse":
+        try:
+            # 1. 物理拦截与行政区划隔离注入
+            safe_sql = SQLGuardian.validate_sql(sql, tenant_id=tenant_id)
+            
+            # [V176.0] 物理防御：防止 safe_sql 为空导致 upper() 崩溃
+            safe_sql_upper = (safe_sql or "").upper()
+            
+            async def _run_sql(s_sql: str):
+                client = get_clickhouse_client()
+                return await asyncio.to_thread(client.query, s_sql)
 
-    def _heal_group_by_215(sql_text: str, err_str: str) -> str:
-        """
-        [V132.1] 强化版 Code 215 自愈器：支持全限定列名提取与鲁棒性正则。
-        """
-        # 改进正则：支持提取 default.table.col 这种全限定名中的最后一节
-        match = re.search(r"Column\s+'(?:[^']+\.)*([^']+)'\s+is\s+not\s+under\s+aggregate", err_str, re.IGNORECASE)
-        if not match:
-            return sql_text
+            # [V162.0] 行政层级感知隔离 (Administrative Hierarchy Isolation)
+            from app.core.context import tenant_context
+            t_id = tenant_context.get()
+            
+            if t_id and "FROM" in safe_sql_upper:
+                # 定义过滤子句
+                filter_clause = ""
+                if t_id.startswith("DIST_"):
+                    # 县区级：精确匹配 admdvs
+                    filter_clause = f"admdvs = '{t_id.split('_')[1]}'"
+                elif t_id.startswith("CITY_"):
+                    # 地市级：前缀匹配 (例如 3101%)
+                    city_prefix = t_id.split('_')[1][:4]
+                    filter_clause = f"admdvs LIKE '{city_prefix}%'"
+                
+                if filter_clause and "admdvs" not in safe_sql_upper:
+                    logger.info(f"🛡️ [MultiTenant] 正在应用行政隔离 ({t_id}): {filter_clause}")
+                    if "WHERE" in safe_sql_upper:
+                        safe_sql = safe_sql.replace("WHERE", f"WHERE {filter_clause} AND", 1)
+                    else:
+                        match = re.search(r"(\s+GROUP\s+BY|\s+ORDER\s+BY|\s+LIMIT|;|$)", safe_sql, re.IGNORECASE)
+                        pos = match.start()
+                        safe_sql = safe_sql[:pos] + f" WHERE {filter_clause}" + safe_sql[pos:]
 
-        bad_col = match.group(1)
-        logger.warning(f"🔧 [SQL_HEALER] 识别到未分组字段: `{bad_col}`，执行 AST 级修复...")
-
-        # 改进正则：更精准地定位 GROUP BY 结尾，处理可能存在的分号
-        # 逻辑：在 GROUP BY 块的最后一个字段后追加 , bad_col
-        new_sql = re.sub(
-            r'(GROUP\s+BY\s+)(.*?)(\s*(?:HAVING|ORDER\s+BY|LIMIT|;|$))',
-            lambda m: f"{m.group(1)}{m.group(2).strip()}, {bad_col}{m.group(3)}",
-            sql_text, count=1, flags=re.IGNORECASE | re.DOTALL
-        )
-        if new_sql == sql_text:
-            return sql_text  # 没有 GROUP BY，无法修复
-
-        logger.info(f"✅ [SQL_HEALER] SQL 已自愈，重试中…")
-        return new_sql
-
-    try:
-        safe_sql = SQLGuardian.validate_sql(sql)
-
-        if db_type.lower() == "clickhouse":
             try:
                 result = await _run_sql(safe_sql)
             except SqlExecError as first_err:
@@ -139,34 +152,76 @@ async def _execute_audit_sql_logic(sql: str, db_type: str = "clickhouse", return
             if return_raw:
                 return _sanitize_results(result, tolerance=tolerance)
             
-            # [V132.0] 企业级响应重构：始终返回结构化载荷，确保 Booster 数据解析不熔断
-            return {
-                "status": "SUCCESS",
-                "message": f"查询成功，返回 {len(result)} 条记录。",
-                "records_sample": _sanitize_results(result, tolerance=5), # 默认返回 5 条样值供审计证据链
-                "sql_logic": safe_sql
-            }
+            # [V157.0] USP 协议封装：始终返回结构化载荷，增强 AuditMessage 识别能力
+            response = SkillResponse(
+                status="SUCCESS",
+                data=_sanitize_results(result, tolerance=5), # 默认返回 5 条样值供审计证据链
+                logic_summary=f"已成功穿透底层数据库，检索到相关审计证据。",
+                affected_rows=len(result),
+                trace_hint=f"Query executed successfully via Clickhouse.",
+                security_verified=True
+            )
+            
+            # 为了兼容旧版解析器，返回 dict 但包含 USP 字段
+            return response.model_dump()
 
-        return {"status": "ERROR", "error_message": "MySQL 暂不支持在此路径执行。", "sql_logic": sql}
-
-    except Exception as e:
-        err_str = str(e)
-        from app.security import SecurityViolationError
-        if isinstance(e, SecurityViolationError):
-            logger.debug(f"[SQL_GOVERNANCE] 执行拦截: {err_str}")
+        except Exception as e:
+            err_str = str(e)
+            from app.security import SecurityViolationError
+            if isinstance(e, SecurityViolationError):
+                logger.debug(f"[SQL_GOVERNANCE] 执行拦截: {err_str}")
+                return {"status": "ERROR", "error_message": err_str, "sql_logic": sql}
+            # 其他未预期异常（如 SQLGuardian 或其他错误），单一记录
+            logger.error(f"[SQL_EXEC_ERROR] {err_str}")
             return {"status": "ERROR", "error_message": err_str, "sql_logic": sql}
-        # 其他未预期异常（如 SQLGuardian 或其他错误），单一记录
-        logger.error(f"[SQL_EXEC_ERROR] {err_str}")
-        return {"status": "ERROR", "error_message": err_str, "sql_logic": sql}
+
+    return {"status": "ERROR", "error_message": "所请求的数据库类型暂不支持。", "sql_logic": sql}
+
+def _heal_group_by_215(sql_text: str, err_str: str) -> str:
+    """
+    [V132.1] 强化版 Code 215 自愈器：支持全限定列名提取与鲁棒性正则。
+    """
+    # 改进正则：支持提取 default.table.col 这种全限定名中的最后一节
+    match = re.search(r"Column\s+'(?:[^']+\.)*([^']+)'\s+is\s+not\s+under\s+aggregate", err_str, re.IGNORECASE)
+    if not match:
+        return sql_text
+
+    bad_col = match.group(1)
+    logger.warning(f"🔧 [SQL_HEALER] 识别到未分组字段: `{bad_col}`，执行 AST 级修复...")
+
+    # 改进正则：更精准地定位 GROUP BY 结尾，处理可能存在的分号
+    # 逻辑：在 GROUP BY 块的最后一个字段后追加 , bad_col
+    new_sql = re.sub(
+        r'(GROUP\s+BY\s+)(.*?)(\s*(?:HAVING|ORDER\s+BY|LIMIT|;|$))',
+        lambda m: f"{m.group(1)}{m.group(2).strip()}, {bad_col}{m.group(3)}",
+        sql_text, count=1, flags=re.IGNORECASE | re.DOTALL
+    )
+    if new_sql == sql_text:
+        return sql_text  # 没有 GROUP BY，无法修复
+
+    logger.info(f"✅ [SQL_HEALER] SQL 已自愈，重试中…")
+    return new_sql
 
 # ──────────────────────────────────────────────────────────
 # 暴露给 Agent 的工具集 (Decorated Tools)
 # ──────────────────────────────────────────────────────────
 
 @tool
-async def execute_audit_sql(sql: str, db_type: str = "clickhouse") -> Any:
-    """执行医疗相关 SQL 查询。"""
-    return await _execute_audit_sql_logic(sql, db_type)
+async def execute_audit_sql(
+    sql: Union[str, Dict], 
+    state: Annotated[dict, InjectedState], # [V172.1] 自动注入状态
+    db_type: str = "clickhouse"
+) -> Any:
+    """执行医疗相关 SQL 查询。自动执行行政区划隔离。"""
+    # 提取租户信息
+    tenant_id = state.get("metadata", {}).get("tenant_id") or state.get("metadata", {}).get("admin_division")
+    
+    # [V163.1] 鲁棒性参数解析
+    params = smart_parse_tool_params(sql)
+    actual_sql = params.get("sql", sql if isinstance(sql, str) else "")
+    actual_db = params.get("db_type", db_type)
+    
+    return await _execute_audit_sql_logic(actual_sql, actual_db, tenant_id=tenant_id)
 
 @tool
 def list_tables() -> str:
@@ -306,16 +361,17 @@ def search_expert_knowledge(query: str) -> str:
 
 @tool
 @perf_monitor.time_it("RULE_ENGINE_EXEC")
-async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:
+async def audit_medical_rule(rule_id: str) -> str:
+    """[V176.0] 加固版规则引擎
+    执行预定义的物理违规规则匹配。自动映射语义到物理算子，并异步执行。
     """
-    [V59.4] 执行预定义的物理违规规则匹配。
-    自动映射语义到物理算子，并异步执行。
-    """
+    if not rule_id: return "Error: rule_id is required."
+    rule_key = str(rule_id).upper()
+    
     logger.info(f"🔨 [TOOL] 执行物理违规规则引擎: {rule_id}")
     
     # 语义路由映射
     target_rule = ""
-    rule_key = rule_id.upper()
     if "GENDER" in rule_key or "性别" in rule_key:        target_rule = "GENDER_CONFLICT"
     elif "DRUG" in rule_key or "购药" in rule_key:          target_rule = "HIGH_FREQ_DRUG_PURCHASE"
     elif "DECOMPOSITION" in rule_key or "分解" in rule_key:  target_rule = "DECOMPOSITION_HOSPITALIZATION"
@@ -327,7 +383,7 @@ async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:
     
     sql = rule_engine.get_rule_sql(target_rule)
     if not sql:
-        return {"report": f"未找到匹配的审计算子: {rule_id}", "evidence_count": 0, "raw_evidence": []}
+        return json.dumps({"report": f"未找到匹配的审计算子: {rule_id}", "evidence_count": 0, "raw_evidence": []})
 
     try:
         # 核心异步执行 (V72.0 注入业务容差)
@@ -335,34 +391,36 @@ async def audit_medical_rule(rule_id: str) -> Dict[str, Any]:
         raw_data = await _execute_audit_sql_logic(sql, return_raw=True, tolerance=tolerance)
         
         if isinstance(raw_data, str) and "失败" in raw_data:
-             return {"report": f"物理引擎执行受阻: {raw_data}", "evidence_count": 0, "raw_evidence": []}
+             return json.dumps({"report": f"物理引擎执行受阻: {raw_data}", "evidence_count": 0, "raw_evidence": []})
              
         count = len(raw_data)
         report_text = rule_engine.format_violation_report(target_rule, raw_data)
         
-        return {
+        return json.dumps({
             "report": report_text,
             "evidence_count": count,
             "raw_evidence": raw_data,
             "trace_hint": f"[规则引擎] 触发算子 {target_rule}，物理库命中 {count} 条违规证据"
-        }
+        })
     except Exception as e:
         logger.error(f"规则引擎执行异常: {e}")
-        return {
+        return json.dumps({
             "report": "物理探测异常", 
             "evidence_count": 0, 
             "error": str(e), 
             "raw_evidence": [], 
             "trace_hint": f"[规则引擎] {rule_id} 执行异常"
-        }
+        })
 
 @tool
 @perf_monitor.time_it("ANOMALY_ALGO_EXEC")
-async def run_anomaly_detection(algorithm_id: str) -> Dict[str, Any]:
+async def run_anomaly_detection(algorithm_id: str, threshold: float = 0.95) -> str:
+    """[V176.0] 加固版异常检测
+    运行统计学异常检测算法。自动映射语义到物理算子，并异步执行。
     """
-    [V59.4] 运行统计学异常检测算法。
-    自动映射语义到物理算子，并异步执行。
-    """
+    if not algorithm_id: return "Error: algorithm_id is required."
+    algo_key = str(algorithm_id).upper()
+    
     logger.info(f"📊 [TOOL] 执行物理异常检测算子: {algorithm_id}")
     
     # 语义路由映射

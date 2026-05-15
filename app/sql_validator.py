@@ -50,7 +50,8 @@ class SQLLogicValidator:
     @staticmethod
     def agentic_linter(sql: str) -> Tuple[bool, str]:
         """[V150.0] 框架级 SQL 治理引擎：由外部配置驱动，支持跨项目复用"""
-        sql_upper = sql.upper()
+        # [V178.1] 物理加固：防止输入为 None 时崩溃
+        sql_upper = str(sql or "").upper()
         config = SQLLogicValidator._load_governance_config()
         rules = config.get("interception_rules", [])
 

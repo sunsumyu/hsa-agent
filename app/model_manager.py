@@ -218,6 +218,8 @@ class ModelManager:
         self.providers: Dict[str, ModelConfig] = self._load_config()
         self._local_embedder = None
         self._async_client = None
+        # [V151.0] 启动自动探测引擎
+        self._discover_and_register_local_services()
 
     @property
     def async_client(self):
@@ -283,6 +285,54 @@ class ModelManager:
             logger.error(f"加载模型注册表失败: {e}")
             return {}
 
+    def _resolve_credentials(self, cfg: Any) -> tuple[Optional[str], Optional[str]]:
+        """[V151.0] 智能凭证解析：支持特定环境变量与通用环境变量的层级打捞"""
+        # 1. 优先尝试特定环境变量
+        api_key = os.getenv(cfg.api_key_env)
+        base_url = os.getenv(cfg.base_url_env) if hasattr(cfg, 'base_url_env') and cfg.base_url_env else None
+        
+        # 2. 如果缺失，尝试通用环境变量 LLM_API_KEY / LLM_BASE_URL
+        if not api_key:
+            api_key = os.getenv("LLM_API_KEY")
+            if api_key: logger.info(f"💡 [SmartDiscovery] 节点 {cfg.model_name} 已通过通用密钥 LLM_API_KEY 激活")
+            
+        if not base_url and os.getenv("LLM_BASE_URL"):
+            base_url = os.getenv("LLM_BASE_URL")
+            logger.info(f"💡 [SmartDiscovery] 节点 {cfg.model_name} 已通过通用地址 LLM_BASE_URL 激活")
+            
+        return api_key, base_url
+
+    def _discover_and_register_local_services(self):
+        """[V151.0] 零配置本地服务探测：自动发现 Ollama/vLLM"""
+        local_checks = [
+            ("ollama", "http://localhost:11434/v1", "OLLAMA_API_KEY"),
+            ("vllm", "http://localhost:8000/v1", "VLLM_API_KEY"),
+        ]
+        
+        for name, url, key_env in local_checks:
+            try:
+                # 简单同步检查端口是否开放 (超时 0.5s)
+                import socket
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                with socket.create_connection((parsed.hostname, parsed.port), timeout=0.5):
+                    if name not in self.providers:
+                        logger.success(f"🚀 [AutoDetect] 发现本地 {name} 服务在 {url} 运行，已自动并网。")
+                        self.providers[name] = ModelConfig(
+                            provider="openai",
+                            model_name=os.getenv("LLM_MODEL_ID", "llama3"),
+                            priority=5,
+                            tools_support=True,
+                            api_key_env=key_env,
+                            base_url_env=f"LOCAL_{name.upper()}_URL",
+                            daily_quota=999999
+                        )
+                        # 注入环境变量以便后续 _create_llm 正常工作
+                        os.environ[f"LOCAL_{name.upper()}_URL"] = url
+                        if not os.getenv(key_env): os.environ[key_env] = "sk-local-not-needed"
+            except:
+                pass
+
     def get_model_list(self):
         all_models = []
         for k, cfg in self.providers.items():
@@ -303,8 +353,7 @@ class ModelManager:
 
     def _create_llm(self, name: str, cfg: Any, bypass_limit: bool = False):
         provider = cfg.provider
-        api_key = os.getenv(cfg.api_key_env)
-        base_url = os.getenv(cfg.base_url_env) if hasattr(cfg, 'base_url_env') and cfg.base_url_env else None
+        api_key, base_url = self._resolve_credentials(cfg)
         model_name = cfg.model_name
         temperature = getattr(cfg, 'temperature', 0.3)
 

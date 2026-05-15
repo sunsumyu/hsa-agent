@@ -452,14 +452,13 @@ def print_summary(results: list):
         
         tot_pre += r["predicted"]
         tot_act += r["actual"]
-        if r["agent_ok"]:
-            for d in dims:
-                dim_sum[d] += sc.get(d, 0)
+        for d in dims:
+            dim_sum[d] += sc.get(d, 0)
 
     console.print(table)
 
     # 汇总统计
-    n = max(n_ok, 1)
+    n = max(len(results), 1)
     console.print(f"\n[bold]Agent Success: [green]{n_ok}[/] / {len(results)}[/]")
     
     # 维度平均分图表
@@ -494,6 +493,11 @@ async def main():
 
     # [V74.1] 物理持久化：不再启动时清空黑名单，确保坏掉的模型（如 V3）被持久锁定。
     logger.info("🛡️ [算力治理] 启动时保留历史黑名单状态，防止报废模型复活。")
+
+    # [V174.0] 企业级多 Case 稳定性补强：启动时强制重置黑名单
+    from app.usage_tracker import usage_tracker
+    usage_tracker.reset_blacklists()
+    logger.info("✅ [算力治理] 已强制重置模型黑名单，确保 Benchmark 链路满血启动。")
 
     # [V75.0] 企业级观测激活：确保 Benchmark 过程被全量追踪
     init_observability()

@@ -21,6 +21,8 @@ class UsageTracker:
         self.blacklist_expiry: Dict[str, float] = self.stats.blacklist_expiry # {model_id: expiry_timestamp}
         # [V4.9.15] 架构稳定性加固：记录各节点的健康分 (0.0 - 1.0)
         self.stability_scores: Dict[str, float] = self.stats.stability_scores # {model_id: score}
+        # [V155.0] 性能画像：记录最近 10 次请求的耗时
+        self.latency_window: Dict[str, List[float]] = {} # {model_id: [ms, ms, ...]}
 
     def _ensure_dir(self):
         os.makedirs(os.path.dirname(self.stats_path), exist_ok=True)
@@ -115,7 +117,7 @@ class UsageTracker:
         en_count = len(text_str) - zh_count
         return int(zh_count * 1.5 + en_count * 0.4)
 
-    def record_usage(self, model_id: str, input_tokens: int, output_tokens: int, prompt: str = "", response_text: str = ""):
+    def record_usage(self, model_id: str, input_tokens: int, output_tokens: int, prompt: str = "", response_text: str = "", latency_ms: float = 0):
         # [V6.1.0] 物理主权恢复：如果获取不到 Token 数，执行强力内容估算
         if input_tokens == 0 and prompt:
             input_tokens = self._estimate_tokens(prompt)
@@ -144,6 +146,12 @@ class UsageTracker:
         
         self.rpm_window[model_id][current_min] = self.rpm_window[model_id].get(current_min, 0) + 1
         self.tpm_window[model_id][current_min] = self.tpm_window[model_id].get(current_min, 0) + total
+        
+        # 3. 更新耗时画像 (V155.0)
+        if latency_ms > 0:
+            if model_id not in self.latency_window: self.latency_window[model_id] = []
+            self.latency_window[model_id].append(latency_ms)
+            if len(self.latency_window[model_id]) > 10: self.latency_window[model_id].pop(0)
         
         self._prune_windows()
 
@@ -271,6 +279,12 @@ class UsageTracker:
 
     def get_stability_score(self, model_id: str) -> float:
         return self.stability_scores.get(model_id, 1.0)
+
+    def get_avg_latency(self, model_id: str) -> float:
+        """[V155.0] 获取平均耗时"""
+        window = self.latency_window.get(model_id, [])
+        if not window: return 0
+        return sum(window) / len(window)
 
     def record_failure(self, model_id: str, error_code: str):
         """记录故障并扣除健康分"""

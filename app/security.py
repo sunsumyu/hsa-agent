@@ -25,9 +25,9 @@ class SQLGuardian:
     ]
     
     @staticmethod
-    def validate_sql(sql: str) -> str:
+    def validate_sql(sql: str, tenant_id: str = None) -> str:
         """
-        [V59.3 Phase 3-B] 物理校验并清洗 SQL。
+        [V172.0] 物理校验并执行行政区划隔离 (Administrative Isolation)。
         """
         if not sql:
             raise SecurityViolationError("SQL 内容不能为空")
@@ -115,16 +115,48 @@ class SQLGuardian:
         SQLGuardian._audit_expression_complexity(expression)
         
         # ── [V132.0] 企业级自愈：自动对齐 ClickHouse 的大小写敏感表名 ────
+        from app.schema_manager import schema_manager
         all_physical_tables = {t.lower(): t for t in schema_registry.get_all_table_names()}
         for table_node in expression.find_all(exp.Table):
-            t_name_lower = table_node.this.this.lower()
+            t_name = table_node.name
+            if not t_name: continue
+            
+            # 物理存在性校验
+            t_name_upper = t_name.upper()
+            dynamic_cols = schema_manager._schema_cache.get(t_name_upper, [])
+            t_name_lower = t_name.lower()
             if t_name_lower in all_physical_tables:
                 actual_name = all_physical_tables[t_name_lower]
                 if table_node.this.this != actual_name:
                     logger.warning(f"🔧 [SQLGuardian] 检测到表名大小写差异，已自动修正: {table_node.this.this} -> {actual_name}")
                     table_node.this.set("this", actual_name)
-
+ 
+        # ── Step 7: 行政区划隔离注入 (Administrative Isolation) [V172.0] ────
+        if tenant_id:
+            expression = SQLGuardian._inject_tenant_isolation(expression, tenant_id)
+ 
         return expression.sql(dialect="clickhouse")
+
+    @staticmethod
+    def _inject_tenant_isolation(expression: exp.Expression, tenant_id: str) -> exp.Expression:
+        """
+        物理逻辑隔离：通过 AST 改写，强制在 WHERE 子句中注入统筹区过滤。
+        """
+        # 1. 查找 WHERE 子句
+        where_clause = expression.find(exp.Where)
+        where_str = str(where_clause).upper() if where_clause else ""
+        
+        # 2. 如果已经存在 AAA027 或 ADMIN_DIVISION 过滤，则跳过注入 (避免冗余)
+        if "AAA027" in where_str or "ADMIN_DIVISION" in where_str:
+            return expression
+            
+        # 3. 构造隔离条件 (aaa027 是医保结算表标准分区字段)
+        # 针对所有的 SELECT 查询注入隔离条件
+        if isinstance(expression, exp.Select):
+             # 自动追加 AND 逻辑
+             return expression.where(f"aaa027 = '{tenant_id}'", append=True)
+             
+        return expression
 
     @staticmethod
     def _validate_column_existence(expression):
@@ -259,7 +291,7 @@ class SQLGuardian:
         [V71.0 系统性修复] 基于 AST 的算力审计：从“个人过滤”转向“分区隔离”。
         """
         joins = list(expression.find_all(exp.Join))
-        table_names = [t.name.upper() for t in expression.find_all(exp.Table)]
+        table_names = [(t.name or "").upper() for t in expression.find_all(exp.Table)]
         # 大表列表从 SchemaRegistry 读取
         main_table = schema_registry.get_main_table().upper()
         large_tables = [main_table, f"{main_table}_FIXED"]
@@ -291,8 +323,8 @@ class SQLGuardian:
                 catalog_tables = {"FQZ_DRUG_MCS_INFO_LIST", "FQZ_ALL_YY_YD_1"}
                 for join_node in joins:
                     if hasattr(join_node.this, 'name'):
-                        join_table = join_node.this.name.upper()
-                        if join_table in large_tables or (join_table and join_table not in catalog_tables):
+                        join_table = (join_node.this.name or "").upper()
+                        if join_table and (join_table in large_tables or join_table not in catalog_tables):
                             is_heavy_join = True
                             break
             

@@ -8,8 +8,12 @@ class SQLExecutionInput(BaseModel):
     sql: str = Field(description="The ClickHouse SQL query to execute. Must be a valid read-only SELECT statement.")
 
 class SQLSafeExecutionSkill(BaseTool):
-    name: str = "build_and_validate_sql"
-    description: str = "Safely execute a generated SQL query on the database. It includes built-in validation, syntax checking, and safe physical execution. Do NOT use evaluator/critic nodes to fix SQL errors; rely on the error messages returned by this tool."
+    name: str = "execute_audit_sql"
+    description: str = (
+        "医保审计物理探针：在 ClickHouse 数据库上执行只读 SELECT 查询。 "
+        "【使用场景】：当你已经通过 `lookup_medical_schema` 确定了物理表名和字段名，并构建好逻辑后，调用此工具获取真实审计证据。 "
+        "【约束】：严禁猜测字段名！如果执行报错（如字段不存在），必须返回调用 `lookup_medical_schema` 重新核实，禁止在错误基础上盲目尝试。"
+    )
     args_schema: Type[BaseModel] = SQLExecutionInput
 
     async def _arun(self, sql: str) -> Union[str, Dict[str, Any]]:

@@ -387,6 +387,8 @@ def trim_and_sanitize(
     combined = sanitize_for_thinking_mode(combined, ai_label_prefix=ai_label_prefix)
     combined = trim_overflow(combined, max_total=max_total, keep_head=keep_head, keep_tail=keep_tail)
     combined = ensure_tool_pairing(combined)
+    # [V166.0] 阶段 7：内容脱敏与 SQL 净化
+    combined = sanitize_audit_content(combined)
 
     return combined
 
@@ -409,3 +411,45 @@ def count_message_tokens_estimate(messages: List[Any]) -> int:
         en_count = len(text) - zh_count
         total += int(zh_count * 1.5 + en_count * 0.4)
     return total
+
+
+def _apply_pii_masking(text: str) -> str:
+    """内部工具：执行正则打码 (V169.1)"""
+    import re as _r
+    # 掩码身份证 (保留前6后4)
+    text = _r.sub(r'\b\d{15}(\d{2}[0-9xX])?\b', lambda m: m.group()[:6] + "********" + m.group()[-4:], text)
+    # 掩码电话 (保留前3后4)
+    text = _r.sub(r'\b1[3-9]\d{9}\b', lambda m: m.group()[:3] + "****" + m.group()[-4:], text)
+    # 掩码姓名 (针对“姓名：张三”模式)
+    text = _r.sub(r'(?<=患者|姓名)[：: ]*([\u4e00-\u9fa5]{2,3})', lambda m: m.group(1)[0] + "*" * (len(m.group(1)) - 1), text)
+    return text
+    return text
+
+
+def sanitize_audit_content(messages: List[Any]) -> List[Any]:
+    """
+    [V166.0] 企业级隐私脱敏与 SQL 冗余清除插件。
+    """
+    import re as _r
+    for m in messages:
+        content = getattr(m, "content", "")
+        if content and isinstance(content, str):
+            # 1. 移除冗余 SQL 代码块
+            content = _r.sub(r'```sql\s*(.*?)\s*```', '[SQL EXEC_TRACE_REMOVED]', content, flags=_r.DOTALL)
+            # 2. 执行 PII 脱敏
+            content = _apply_pii_masking(content)
+            m.content = content.strip()
+    return messages
+
+
+def mask_audit_data(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    [V169.1] 针对医保结算数据列表的动态脱敏接口。
+    针对 psn_name, tel, cert_no 等字段执行深度打码。
+    """
+    pii_fields = {"psn_name", "psn_cert_no", "tel", "addr", "certno", "brdy", "contact_tel"}
+    for item in data:
+        for field in pii_fields:
+            if field in item and item[field]:
+                item[field] = _apply_pii_masking(str(item[field]))
+    return data

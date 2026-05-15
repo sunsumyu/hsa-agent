@@ -140,6 +140,13 @@ class _SpanContext:
             metadata=self._metadata,
         )
         self._tracer._events.append(event)
+        # [V171.0] 实时影子推送：如果设置了回调，立即触发
+        if self._tracer.on_event_cb:
+            try:
+                # 支持异步或同步回调
+                self._tracer.on_event_cb(event)
+            except Exception:
+                pass # 追踪失败不应阻塞业务主流程
 
 
 class StructuredTracer:
@@ -150,9 +157,10 @@ class StructuredTracer:
     支持耗时、Token 消耗、成功/失败状态的精确追踪。
     """
 
-    def __init__(self, session_id: str = ""):
+    def __init__(self, session_id: str = "", on_event_cb: Optional[Any] = None):
         self._events: List[TraceEvent] = []
         self.session_id = session_id
+        self.on_event_cb = on_event_cb # [V171.0] 影子链路回调接口
 
     # ──────────────────────────────────────────────────────
     # 核心接口

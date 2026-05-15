@@ -9,7 +9,11 @@ class MedicalSchemaInput(BaseModel):
 
 class MedicalSchemaSkill(BaseTool):
     name: str = "lookup_medical_schema"
-    description: str = "Search for physical database schema fields based on business keywords. Returns the FULL field list of relevant tables to avoid hallucinating field names."
+    description: str = (
+        "医保业务字典与物理 Schema 映射中心。当你需要将业务需求（如“重复住院”、“个人账户支付”）转化成数据库字段时，**必须**调用此工具。 "
+        "它不仅返回物理表结构（DDL），还包含字段的业务定义、敏感字段提示以及“避坑指南”。 "
+        "在构建任何审计逻辑或编写 SQL 之前，优先通过此工具核实物理真相，严禁凭直觉猜测字段名。"
+    )
     args_schema: Type[BaseModel] = MedicalSchemaInput
 
     def _run(self, keywords: str) -> str:

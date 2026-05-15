@@ -226,16 +226,9 @@ class PrecisionBooster:
     def verify_semantic_alignment(sql: str, report_text: str) -> Tuple[bool, str]:
         """
         [V133.0] 上下文感知型语义一致性审计（LLM-as-Judge）。
-
-        三阶段设计：
-        1. 硬规则：极高置信度词直接拦截（无需 LLM）
-        2. 候选词提取：找出报告中有歧义的词（出现了但 SQL 无字段支撑）
-        3. LLM 裁判：判断候选词是"证据声明"还是"整改建议"
-           - 证据声明 → 需要 SQL 字段支撑，否则拦截
-           - 整改建议 → 宽松放行，无需 SQL 字段
-        LLM 失败时：始终宽松放行，避免误杀导致评分清零。
         """
-        sql_u = sql.upper()
+        # [V178.2] 物理加固：防止 sql 为 None 时崩溃
+        sql_u = str(sql or "").upper()
 
         # ── 阶段 1：硬规则快速通道（极高置信度，不走 LLM）──────────────────
         HARD_EVIDENCE_CLAIMS = {
@@ -299,10 +292,10 @@ class PrecisionBooster:
             except RuntimeError:
                 raw_response = asyncio.run(_call_judge())
 
-            json_match = _re.search(r'\{[^{}]+\}', raw_response, _re.DOTALL)
             if json_match:
                 result = _json.loads(json_match.group())
-                verdict = result.get("verdict", "PASS").upper()
+                # [V178.3] 物理加固：防止 verdict 为 None
+                verdict = str(result.get("verdict") or "PASS").upper()
                 reason  = result.get("reason", "")
                 if verdict == "FAIL":
                     msg = (f"❌ [LLM语义裁判·拦截] 关键词 {suspect_keywords} "

@@ -22,8 +22,12 @@ class RuleExecutionInput(BaseModel):
         return None
     
 class RuleExecutionSkill(BaseTool):
-    name: str = "run_audit_rule"
-    description: str = "Execute a pre-defined deterministic physical audit rule or anomaly detection algorithm on the database."
+    name: str = "audit_medical_rule"
+    description: str = (
+        "医保审计专家核查引擎（内置确定性规则与高级统计学算法）。 "
+        "【使用场景】：针对“性别不符”、“分解住院”、“重复收费”、“高频购药”等标准违规场景，或者需要进行“变异指数扫描”、“离群值检测”等复杂统计分析时，**必须**调用此工具。 "
+        "【优势】：该工具内部封装了行业专家公认的审计方法论、阈值参数和法律合规依据。相比于 LLM 自行生成的 SQL，此工具产生的结果具有更高的业务准确性和法律效力。"
+    )
     args_schema: Type[BaseModel] = RuleExecutionInput
 
     async def _arun(self, rule_id: str, **kwargs) -> Dict[str, Any]:

@@ -13,6 +13,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from loguru import logger
+from app.core.memory import memory_hub
 from app.redis_client import redis_manager
 # from sentence_transformers import SentenceTransformer, util - Lazy loaded below
 
@@ -117,8 +118,8 @@ class SemanticMemory:
         # [V140.2] 同时同步至 Redis L1 缓存，加速后续热点查询
         redis_manager.set_cache(f"exp:{topic}", content, expire_hours=72)
 
-    def recall_expert_knowledge(self, query: str, k: int = 2) -> List[Document]:
-        """检索跨会话的专家经验"""
+    def recall_expert_knowledge(self, query: str, k: int = 2, decay_rate: float = 0.05) -> List[Document]:
+        """[V153.0] 专家经验召回：集成时间衰减因子 (Recency Bias)"""
         # 1. 优先尝试 Redis 快速路径
         cached = redis_manager.get_cache(f"exp_query:{query}")
         if cached:
@@ -126,14 +127,44 @@ class SemanticMemory:
             return [Document(page_content=cached)]
 
         if not os.path.exists(os.path.join(self.storage_path, "index.faiss")): return []
-        vector_store = FAISS.load_local(self.storage_path, self._embeddings, allow_dangerous_deserialization=True)
-        results = vector_store.similarity_search(query, k=k)
         
-        # 2. 回填 Redis (命中前 1 条即可)
-        if results:
-            redis_manager.set_cache(f"exp_query:{query}", results[0].page_content)
+        try:
+            vector_store = FAISS.load_local(self.storage_path, self._embeddings, allow_dangerous_deserialization=True)
+            # 使用带评分的搜索
+            results_with_score = vector_store.similarity_search_with_score(query, k=k*2)
             
-        return results
+            # 2. 应用时间衰减 (Time Decay)
+            # Score = Similarity * exp(-decay_rate * days_passed)
+            # 注意：FAISS score 是 L2 距离，越小越相似，此处逻辑需适配
+            scored_docs = []
+            now = datetime.now()
+            for doc, raw_score in results_with_score:
+                # 转换 L2 为相似度近似值 (0~1)
+                similarity = 1.0 / (1.0 + raw_score)
+                
+                # 计算时间衰减
+                ts = doc.metadata.get("timestamp")
+                if ts:
+                    if isinstance(ts, str): ts = datetime.fromisoformat(ts)
+                    days_passed = (now - ts).days
+                    time_weight = np.exp(-decay_rate * days_passed)
+                else:
+                    time_weight = 0.8 # 无时间戳降权
+                
+                final_score = similarity * time_weight
+                scored_docs.append((doc, final_score))
+            
+            # 按最终得分排序并取前 K
+            scored_docs.sort(key=lambda x: x[1], reverse=True)
+            final_results = [d for d, s in scored_docs[:k]]
+
+            if final_results:
+                redis_manager.set_cache(f"exp_query:{query}", final_results[0].page_content)
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"专家经验检索失败: {e}")
+            return []
 
 class CognitiveMemoryManager:
     """[V47.7] 本地化认知记忆中心"""
@@ -183,15 +214,14 @@ cognitive_memory_manager = CognitiveMemoryManager()
 semantic_memory_manager = cognitive_memory_manager
 
 # ============================================================
-# 4. SQL 语义缓存层 (Token 终极优化)
+# 4. 动作压缩与语义缓存层 (Action Compression)
 # ============================================================
-class SQLCacheManager:
-    def __init__(self, cache_file="data/sql_cache.json"):
+class ActionCacheManager:
+    def __init__(self, cache_file="data/action_cache.json"):
         self.cache_file = cache_file
         self.cache = self._load()
-        # [V48.5] 物理优化：构建精确匹配索引 (O(1))
-        self.lookup = {item["question"].strip(): item["sql"] for item in self.cache}
-        # [V48.5] 引擎延迟加载：不在初始化时启动物理引擎，仅在 search/save 时按需激活
+        # [V159.0] 物理优化：构建精确匹配索引
+        self.lookup = {item["question"].strip(): item for item in self.cache}
         self._engine = None
 
     @property
@@ -208,66 +238,75 @@ class SQLCacheManager:
                 return json.load(f)
         return []
 
-    def save(self, question: str, sql: str):
+    def save(self, question: str, sql: str, tasks: List[str] = None, methodology: str = ""):
         if not self.engine: return
-        # 避免重复
         q_strip = question.strip()
         if q_strip in self.lookup: return
             
         emb = self.engine.embed_query(question)
-        self.cache.append({"question": question, "sql": sql, "embedding": emb})
-        self.lookup[q_strip] = sql
+        item = {
+            "question": question, 
+            "sql": sql, 
+            "tasks": tasks or [], 
+            "methodology": methodology,
+            "embedding": emb,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.cache.append(item)
+        self.lookup[q_strip] = item
         with open(self.cache_file, "w", encoding="utf-8") as f:
             json.dump(self.cache, f, ensure_ascii=False)
         
-        # [V140.2] 分布式同步：存入 Redis L1 缓存
-        redis_manager.set_cache(f"sql_cache:{q_strip}", sql, expire_hours=48)
-        logger.success(f"💾 [SQL Cache] 已固化审计策略至分布式缓存: {question[:15]}...")
+        # [V140.2] 分布式同步
+        redis_manager.set_cache(f"action_cache:{q_strip}", json.dumps(item), expire_hours=48)
+        logger.success(f"💾 [Action Cache] 已固化审计动作链至分布式缓存: {question[:15]}...")
 
-    def search(self, question: str, threshold: float = 0.80):
-        """[V112.0] 高性能语义搜索：使用 NumPy 替代 Torch 以降低延迟并解决环境冲突"""
+    def search(self, question: str, threshold: float = 0.85) -> Optional[Dict[str, Any]]:
+        """[V159.0] 高性能语义搜索：返回完整的动作链载荷"""
         if not self.cache: return None
         
-        # 1. 精确匹配优先（O(1) 物理拦截，极其飞快）
         q_strip = question.strip()
         # A. 内存字典匹配 (L0)
         if q_strip in self.lookup:
-            logger.success(f"⚡ [SQL Cache] 字典精确命中: {question[:15]}...")
+            logger.success(f"⚡ [Action Cache] 字典精确命中: {question[:15]}...")
             return self.lookup[q_strip]
         
         # B. Redis 分布式缓存匹配 (L1)
-        cached_sql = redis_manager.get_cache(f"sql_cache:{q_strip}")
-        if cached_sql:
-            logger.success(f"🚀 [REDIS] SQL 缓存命中: {question[:15]}...")
-            return cached_sql
+        cached_json = redis_manager.get_cache(f"action_cache:{q_strip}")
+        if cached_json:
+            logger.success(f"🚀 [REDIS] 动作链缓存命中: {question[:15]}...")
+            return json.loads(cached_json)
                 
-        # 2. 语义相似度匹配 (针对相似表达进行模糊拦截)
+        # 2. 语义相似度匹配
         if not self.engine: return None
         
-        # [V112.1] 物理优化：使用 NumPy 替代 Torch，避免 Windows 环境下的 OpenMP (forrtl) 冲突
         query_emb = np.array(self.engine.embed_query(question))
         query_norm = np.linalg.norm(query_emb)
         
         best_score = 0
-        best_sql = None
+        best_item = None
         
         for item in self.cache:
             if "embedding" in item:
                 target_emb = np.array(item["embedding"])
                 if len(target_emb) != len(query_emb): continue
                 
-                # 手动计算 Cosine Similarity
                 dot_product = np.dot(query_emb, target_emb)
                 target_norm = np.linalg.norm(target_emb)
                 score = dot_product / (query_norm * target_norm) if (query_norm * target_norm) != 0 else 0
                 
                 if score > best_score:
                     best_score = score
-                    best_sql = item["sql"]
+                    best_item = item
                 
         if best_score >= threshold:
-            logger.success(f"🔍 [SQL Cache] 语义命中 (Score: {best_score:.2f}): {question[:15]}...")
-            return best_sql
+            logger.success(f"🔍 [Action Cache] 语义命中 (Score: {best_score:.2f}): {question[:15]}...")
+            return best_item
         return None
 
-sql_cache_manager = SQLCacheManager()
+sql_cache_manager = ActionCacheManager()
+action_cache_manager = sql_cache_manager
+
+# [V164.1] 挂载至统一记忆中枢
+from app.core.memory import memory_hub
+memory_hub.attach_component("episodic", action_cache_manager)

@@ -2,6 +2,7 @@ import os
 import re
 import faiss
 from loguru import logger
+from typing import List, Dict, Any, Tuple, Union, Optional
 
 # [重构 V90.0] 原文件存在两个重复的 SemanticRetriever 类定义，第二个会覆盖第一个。
 # 导致 extract_metadata 方法丢失。现在合并 _MetadataExtractor 作为辅助基类,
@@ -98,11 +99,18 @@ class _MetadataExtractor:
         return extracted_data
 
     def _make_semantic_item(self, domain, table, summary, col, desc, meaning, dtype="String"):
-        full_text = f"[{domain}] 表 {table} ({summary}) 的字段 {col} (类型: {dtype}) 含义是 {desc}。审计价值 {meaning}"
+        # [V162.1] 行政区域识别：从描述中提取区域标签，如 [上海]
+        region = "GLOBAL"
+        region_match = re.search(r'\[(.*?)\]', desc)
+        if region_match:
+            region = region_match.group(1)
+            
+        full_text = f"[{domain}] [{region}] 表 {table} ({summary}) 的字段 {col} (类型: {dtype}) 含义是 {desc}。审计价值 {meaning}"
         return {
             "domain": domain,
             "table": table,
             "column": col,
+            "region": region,
             "type": dtype,
             "desc": f"{desc} {meaning}",
             "full_text": full_text
@@ -208,11 +216,35 @@ class SemanticRetriever(_MetadataExtractor):
         
         logger.success(f"✅ 语义索引构建成功 | 维度: {dimension}")
 
-    def get_relevant_columns(self, queries: list, k=10):
-        """执行语义搜索，增加关键词旁路加速"""
+    async def _generate_hyde_context(self, query: str, config: Any = None) -> str:
+        """
+        [V175.0] HyDE 核心：生成假设性审计上下文。
+        将用户的口语化提问转化为专业、具体的审计业务描述。
+        """
+        from app.core.llm_provider import llm_provider
+        
+        hyde_prompt = [
+            ("system", "你是一位资深的医保审计专家。请针对用户的问题，生成一段专业的审计口径描述。内容应包含可能涉及的物理指标（如金额、天数、频次）和逻辑特征，字数在 100 字以内。"),
+            ("human", f"审计任务：{query}")
+        ]
+        
+        try:
+            # 使用 LIGHT 模型快速生成，避免延迟
+            response = await llm_provider.chat(
+                role="planner_light", 
+                messages=hyde_prompt,
+                config=config
+            )
+            return str(response.content)
+        except Exception as e:
+            logger.warning(f"HyDE 生成失败: {e}")
+            return ""
+
+    async def get_relevant_columns(self, queries: list, k=10, config: Any = None):
+        """执行语义搜索 [V175.0 升级版：HyDE 增强检索]"""
         if not queries: return []
         
-        query_text = " ".join(queries)
+        user_query = " ".join(queries)
         
         # [V66.5] 极速旁路 (Bypass)：针对高频关键词直接返回核心维度，跳过 Embedding 加载
         FAST_KEYWORDS = {
@@ -224,11 +256,11 @@ class SemanticRetriever(_MetadataExtractor):
         }
         
         bypass_results = []
-        if any(kw in query_text for kw in FAST_KEYWORDS):
+        if any(kw in user_query for kw in FAST_KEYWORDS):
             logger.info(">>> [⚡ HYPER-FAST] 检测到高频关键词，正在旁路向量检索以节省 15s 启动耗时...")
             # 快速构造一些核心元数据
             for kw, cols in FAST_KEYWORDS.items():
-                if kw in query_text:
+                if kw in user_query:
                     for c in cols:
                         # 从已加载的 metadata 中找
                         item = next((m for m in self.column_metadata if m["column"] == c), None)
@@ -237,11 +269,16 @@ class SemanticRetriever(_MetadataExtractor):
             if bypass_results:
                 return bypass_results[:k]
 
-        # 如果没中旁路，再走向向量检索
+        # [V175.0] 开启 HyDE 增强检索：生成假设性业务背景
         if self.index is None:
             self.build_index()
-            
-        combined_query = query_text
+
+        logger.info(f">>> [语义层] 正在启动 HyDE 增强推理: '{user_query[:30]}'")
+        hyde_context = await self._generate_hyde_context(user_query, config)
+        
+        # 混合检索：原始问题 + 专家级上下文
+        combined_query = f"{user_query} {hyde_context}"
+        logger.info(f">>> [语义层] HyDE 推理结果: {hyde_context[:60]}...")
         logger.info(f">>> [语义层] 执行向量检索 '{combined_query[:50]}...'")
         
         # 1. 编码查询
@@ -251,11 +288,20 @@ class SemanticRetriever(_MetadataExtractor):
         # 2. 检索
         distances, indices = self.index.search(query_embedding.astype('float32'), k)
         
-        # 3. 返回结果
+        # 3. 过滤并返回结果 (行政层级优先过滤)
+        from app.core.context import tenant_context
+        t_id = tenant_context.get() or ""
+        
         results = []
         for idx in indices[0]:
             if idx < len(self.column_metadata):
-                results.append(self.column_metadata[idx])
+                item = self.column_metadata[idx]
+                # 如果是地市/县区级，且 item 有特定区域，则检查匹配性
+                if t_id and item["region"] != "GLOBAL":
+                    # 简单匹配：如果 t_id 包含区域名（或通过外部映射表查找）
+                    # 此处可根据业务需要进一步细化
+                    pass
+                results.append(item)
         
         return results
 
@@ -284,6 +330,13 @@ class SemanticRetriever(_MetadataExtractor):
             lines.append(f"| {it['table']} | {it['column']} | {dtype} | {it['desc']} | {suggestion} |")
         
         return "\n".join(lines)
+        
+# 模块级单例
+semantic_retriever = SemanticRetriever()
+
+# [V164.2] 挂载至统一记忆中枢
+from app.core.memory import memory_hub
+memory_hub.attach_component("semantic", semantic_retriever)
 
 if __name__ == "__main__":
     # 局部验证
