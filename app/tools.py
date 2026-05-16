@@ -24,6 +24,7 @@ from app.perf_monitor import perf_monitor
 from app.core.skill_protocol import SkillResponse
 from app.core.config import settings
 from app.core.utils import smart_parse_tool_params
+from app.core.memory import memory_hub
 
 # ──────────────────────────────────────────────────────────
 # 辅助函数
@@ -626,3 +627,48 @@ async def federated_graph_sideloader(cypher: str, return_key: str = "") -> Dict[
     except Exception as e:
         logger.error(f"❌ [SIDELOADER ERROR] 联邦侧载失败: {e}")
         return {"status": "ERROR", "error_message": str(e)}
+
+@tool
+async def manage_memory(
+    action: str, 
+    content: str = "", 
+    query: str = "", 
+    key: str = "",
+    memory_type: str = "working",
+    importance: float = 0.5,
+    **kwargs
+) -> str:
+    """
+    [V180.0] 智能记忆管理工具。支持以下操作：
+    - add: 添加记忆 (需要 content, memory_type, importance, [key])
+    - search: 搜索历史记忆 (需要 query, memory_type)
+    - summary: 获取当前记忆中枢状态摘要
+    - forget: 执行遗忘清理 (策略可选: importance_based, time_based)
+    - consolidate: 强制将工作记忆整合至长期库 (需要 key)
+    """
+    logger.info(f"🧠 [TOOL] 执行记忆管理操作: {action}")
+    
+    try:
+        if action == "add":
+            if key: kwargs["key"] = key
+            return await memory_hub.add_memory(content, memory_type, importance, **kwargs)
+        elif action == "search":
+            results = await memory_hub.query(query, limit=kwargs.get("limit", 5))
+            if not results: return f"🔍 未找到与 '{query}' 相关的记忆。"
+            return "\n".join([f"- [{r.memory_type}] {str(r.content)[:200]}" for r in results])
+        elif action == "summary":
+            return memory_hub.get_summary()
+        elif action == "forget":
+            count = await memory_hub.forget_memories(
+                strategy=kwargs.get("strategy", "importance_based"),
+                threshold=kwargs.get("threshold", 0.2)
+            )
+            return f"🧹 已遗忘 {count} 条低价值记忆。"
+        elif action == "consolidate":
+            if not key: return "❌ consolidate 操作需要指定 key 参数。"
+            await memory_hub.consolidate(key, importance_threshold=importance)
+            return f"✅ 记忆项 {key} 已成功固化。"
+        else:
+            return f"❌ 不支持的操作: {action}"
+    except Exception as e:
+        return f"❌ 记忆操作失败: {str(e)}"

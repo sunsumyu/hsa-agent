@@ -29,7 +29,14 @@ class EnrichedChatOpenAI(ChatOpenAI):
         except Exception as e:
             # [V75.0] 统一物理 ID 追踪：使用 endpoint_id 而不是模糊的 model_name
             m_id = getattr(self, 'endpoint_id', getattr(self, 'model_name', 'unknown'))
+            # [V178.9] 自动探测平台标签
+            platform_tag = "未知平台"
+            endpoint_cfg = endpoint_pool_manager.get_endpoint_config(m_id)
+            if endpoint_cfg:
+                platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "阿里百炼"
+            
             err_msg = str(e)
+            logger.error(f"⛔ [{platform_tag}] 物理节点 {m_id} 异常: {err_msg}")
             
             fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
             is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
@@ -50,7 +57,7 @@ class EnrichedChatOpenAI(ChatOpenAI):
                     await asyncio.sleep(wait_time)
                     return await self._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
             
-            logger.error(f"⛔ [FATAL_QUOTA] 物理节点 {m_id} 彻底封死，触发切流: {err_msg}")
+            # [V178.9] 执行自动切流
             endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 
@@ -60,8 +67,14 @@ class EnrichedChatOpenAI(ChatOpenAI):
             self._enrich_result(result, messages)
             return result
         except Exception as e:
-            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            m_id = getattr(self, 'endpoint_id', getattr(self, 'model_name', 'unknown'))
             err_msg = str(e)
+            
+            # [V178.9] 平台标签探测
+            platform_tag = "未知平台"
+            endpoint_cfg = endpoint_pool_manager.get_endpoint_config(m_id)
+            if endpoint_cfg:
+                platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "阿里百炼"
             
             fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
             is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
@@ -82,7 +95,7 @@ class EnrichedChatOpenAI(ChatOpenAI):
                     time.sleep(wait_time)
                     return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
-            logger.error(f"⛔ [FATAL_QUOTA_SYNC] 节点 {m_id} 额度枯竭，触发切流: {err_msg}")
+            logger.error(f"⛔ [{platform_tag}] 节点 {m_id} 额度枯竭，触发切流: {err_msg}")
             endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 

@@ -72,7 +72,10 @@ def init_observability():
         os.environ["PHOENIX_HOST"] = "127.0.0.1"
         phoenix_dir = os.path.join(os.getcwd(), "data", "phoenix")
         os.makedirs(phoenix_dir, exist_ok=True)
+        # [V186.0] 终极硬化：显式指定数据库连接串，彻底绕过所有外部脏数据干扰
+        db_path = os.path.join(phoenix_dir, "phoenix.db")
         os.environ["PHOENIX_DATA_DIR"] = phoenix_dir
+        os.environ["PHOENIX_DB_URL"] = f"sqlite:///{db_path}"
 
         import phoenix as px
         import io
@@ -114,7 +117,9 @@ def init_observability():
         logger.info(">>> [Observability] OTel 异步加固插桩已就绪")
         
     except Exception as e:
-        logger.error(f"[Observability] OTel 初始化异常: {e}")
+        # [V186.5] 工业级降级：如果 Phoenix (观测系统) 损坏，不应阻塞审计主链路
+        logger.warning(f"⚠️ [Observability] Phoenix 采集器初始化失败（{e}），系统已自动切换至“脱机观测模式”。Trace 数据将不会发送至本地 Dashboard，但不影响审计任务。")
+        _phoenix_session = None
 
     # 2. Langfuse 物理初始化 (V131.6 加固型：增加云端连通性预检)
     try:

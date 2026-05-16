@@ -141,15 +141,27 @@ class AuditReportRenderer:
         return [_coerce(r) for r in raw_data_list[:50]] if isinstance(raw_data_list, list) else []
 
     def prepare_conclusion_prompt(self, user_question: str, methodology: str, execution_trace: List[str], hard_count: int, hard_sum: float) -> str:
-        """构造事实强制对齐且逻辑白盒化的 LLM Prompt [V178.9]"""
+        """构造事实强制对齐且逻辑白盒化的 LLM Prompt [V180.0]"""
+        
+        # 针对零发现场景的防御性引导
+        if hard_count == 0:
+            defense_instruction = (
+                "5. **防御性推理 (Defensive Reasoning)**：当前核查结果为 0 条。你**禁止**只说“未发现异常”。\n"
+                "   你必须以“负向证明”的口吻解释：为了试图发现违规，你扫描了哪些关键字段，应用了哪些具体的过滤条件（如 ICD 编码范围、金额阈值、时间跨度），"
+                "并确认在这些严苛条件下确实无匹配记录。这能向审查员证明你的核查是全覆盖且深度的。\n"
+            )
+        else:
+            defense_instruction = "5. **事实强制对齐**：当前发现 {hard_count} 条记录，结论必须明确指出违规嫌疑，严禁敷衍。\n"
+
         return (
             "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~400 字的「核查结论」。\n"
             "要求：\n"
-            "1. **事实强制对齐**：检查下方“数据摘要”中的条数。如果条数 > 0，结论必须明确指出发现了违规嫌疑，严禁敷衍。\n"
-            "2. **逻辑白盒化**：你必须在结论中简要解释你的「技术核查逻辑」（例如：是如何通过 PSN_NO 分组的，判定违规的金额阈值是多少）。\n"
-            "3. **多维证据链**：如果是复杂任务（如性别冲突），必须明确提到对科室、诊断和费用的交叉核查结果。\n"
-            "4. **专业引用**：必须引用下方的“审计方法论”中的判定标准，展示核查的专业性。\n"
-            "5. **完整性**：请确保输出完整的段落，严禁在句子中间截断。\n\n"
+            "1. **逻辑白盒化**：你必须在结论中清晰解释你的「技术核查逻辑」（例如：是如何通过 PSN_NO 分组的，判定违规的金额阈值是多少）。\n"
+            "2. **多维证据链**：如果是复杂任务（如性别冲突），必须明确提到对科室、诊断和费用的交叉核查结果。\n"
+            "3. **专业引用**：必须引用下方的“审计方法论”中的判定标准（如具体的 ICD-10 编码或政策条文）。\n"
+            "4. **完整性**：请确保输出完整的段落，严禁在句子中间截断。\n"
+            + defense_instruction +
+            "\n"
             f"审计任务：{user_question[:400]}\n\n"
             f"审计方法论：{methodology[:600]}\n\n"
             f"执行轨迹：{'; '.join(execution_trace[-5:]) if execution_trace else '已完成全路径核查'}\n\n"

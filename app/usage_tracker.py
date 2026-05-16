@@ -117,7 +117,31 @@ class UsageTracker:
         en_count = len(text_str) - zh_count
         return int(zh_count * 1.5 + en_count * 0.4)
 
+    def get_burnout_prediction(self, model_id: str) -> int:
+        """[V180.0] 预测算力枯竭：计算当前配额还能支持几轮完整审计测试"""
+        config = self.model_configs.get(model_id)
+        if not config or not config.daily_quota:
+            return 999 # 无限或未知
+            
+        current_usage = self.stats.daily_usage.get(model_id, 0)
+        remaining_tokens = max(0, config.daily_quota - current_usage)
+        
+        # 定义一轮标准审计任务的平均消耗 (Planner + Coder + Reporter)
+        # 经验值：1000 (Prompt) + 2000 (SQL) + 1000 (Report) = 4000
+        TOKENS_PER_ROUND = 4500 
+        
+        rounds_left = remaining_tokens // TOKENS_PER_ROUND
+        return int(rounds_left)
+
+    def calibrate_usage(self, model_id: str, cloud_usage: int):
+        """[V180.0] 云端校准：使用云端真实用量覆盖本地估算值"""
+        old_usage = self.stats.daily_usage.get(model_id, 0)
+        self.stats.daily_usage[model_id] = cloud_usage
+        logger.info(f"📊 [Calibration] 模型 {model_id} 已校准: {old_usage} -> {cloud_usage}")
+        self._save_stats()
+
     def record_usage(self, model_id: str, input_tokens: int, output_tokens: int, prompt: str = "", response_text: str = "", latency_ms: float = 0):
+        """[V4.9.0] 核心审计指标记录 - 架构级观测锚点"""
         # [V6.1.0] 物理主权恢复：如果获取不到 Token 数，执行强力内容估算
         if input_tokens == 0 and prompt:
             input_tokens = self._estimate_tokens(prompt)

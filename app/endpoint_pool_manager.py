@@ -2,6 +2,7 @@ import os
 import json
 import time
 import random
+import sqlite3
 from typing import Dict, List, Optional, Tuple, Any
 from loguru import logger
 from pydantic import BaseModel
@@ -31,19 +32,49 @@ class EndpointPoolManager:
         self._load_all_configs()
 
     def _load_all_configs(self):
-        """加载池化配置并初始化状态"""
+        """加载池化配置并执行增量数据库同步 [V178.9]"""
         try:
-            # 1. 加载池配置
+            import hashlib
+            from datetime import datetime
+            from app.core.memory.manager import memory_hub
+            
+            # 1. 加载并同步池配置
             if os.path.exists(self.pool_config_path):
                 with open(self.pool_config_path, 'r', encoding='utf-8-sig') as f:
-                    data = json.load(f)
+                    raw_content = f.read()
+                    data = json.loads(raw_content)
+                    
+                    # 增量哈希校验
+                    current_hash = hashlib.md5(raw_content.encode()).hexdigest()
+                    db = memory_hub.relational_storage
+                    
+                    need_sync = True
+                    with sqlite3.connect(db.db_path) as conn:
+                        res = conn.execute("SELECT last_hash FROM config_meta WHERE config_name='endpoint_pools'").fetchone()
+                        if res and res[0] == current_hash:
+                            need_sync = False
+                    
                     for p_id, p_cfg in data.get("pools", {}).items():
                         pool = PoolConfig(**p_cfg)
                         self.pools[p_id] = pool
-                        # 初始化接入点状态
                         for ep in pool.endpoints:
                             if ep.id not in self.states:
                                 self.states[ep.id] = EndpointState(ep)
+                            
+                            # 执行增量数据库同步
+                            if need_sync:
+                                with sqlite3.connect(db.db_path) as conn:
+                                    conn.execute("""
+                                        INSERT OR REPLACE INTO endpoint_configs 
+                                        (id, pool_id, platform, model_name, weight, status, last_sync)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                                    """, (ep.id, p_id, ep.platform, ep.model_name, ep.weight, "ACTIVE", datetime.now().isoformat()))
+                    
+                    if need_sync:
+                        with sqlite3.connect(db.db_path) as conn:
+                            conn.execute("INSERT OR REPLACE INTO config_meta VALUES (?, ?, ?)", 
+                                       ("endpoint_pools", current_hash, datetime.now().isoformat()))
+                        logger.info("📡 [Sync] 配置已发生变更，已完成数据库增量同步。")
             
             # 2. 加载角色配置
             if os.path.exists(self.role_config_path):
@@ -110,6 +141,11 @@ class EndpointPoolManager:
             upto += score
         
         return candidates[0][0]
+    
+    def get_endpoint_config(self, ep_id: str) -> Optional[EndpointConfig]:
+        """[V178.9] 根据 ID 获取接入点静态配置"""
+        state = self.states.get(ep_id)
+        return state.config if state else None
 
     def record_failure(self, ep_id: str, reason: str):
         """[V66.0] 记录故障并进入冷却：支持 2 小时长封禁逻辑"""

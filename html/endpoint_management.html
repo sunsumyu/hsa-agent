@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>HSA-Agent | 算力池与 Token 治理</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #020617;
+            --accent: #38bdf8;
+            --glass: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+            --volc: #ff4d4f; /* 火山红 */
+            --bailian: #52c41a; /* 百炼绿 */
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            padding: 40px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+        .btn-back {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        .node-card {
+            background: var(--glass);
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .platform-tag {
+            position: absolute;
+            top: 0;
+            right: 0;
+            padding: 4px 12px;
+            font-size: 0.7rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+        .tag-volcengine { background: var(--volc); color: white; }
+        .tag-bailian { background: var(--bailian); color: white; }
+        
+        .node-id { font-size: 1.2rem; font-weight: 800; margin-bottom: 5px; }
+        .model-name { color: #94a3b8; font-family: monospace; font-size: 0.85rem; margin-bottom: 15px; }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+        .status-pill {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        .status-active { background: rgba(82, 196, 26, 0.2); color: #52c41a; }
+        
+        .progress-container {
+            height: 6px;
+            background: #1e293b;
+            border-radius: 3px;
+            margin-top: 15px;
+        }
+        .progress-bar {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1 style="margin: 0;">算力基础设施监控</h1>
+            <p style="color: #94a3b8; margin: 5px 0 0 0;">实时追踪物理节点健康度与 Token 消耗曲线</p>
+        </div>
+        <a href="index.html" class="btn-back">← 返回指挥门户</a>
+    </div>
+
+    <div class="grid" id="nodeGrid">
+        <!-- 动态加载节点 -->
+    </div>
+
+    <script>
+        async function loadData() {
+            try {
+                const response = await fetch('../data/portal_data.json');
+                const data = await response.json();
+                renderNodes(data.endpoints);
+            } catch (e) {
+                console.error("加载数据失败:", e);
+            }
+        }
+
+        function renderNodes(nodes) {
+            const grid = document.getElementById('nodeGrid');
+            grid.innerHTML = nodes.map(node => `
+                <div class="node-card">
+                    <div class="platform-tag tag-${node.platform}">${node.platform === 'volcengine' ? '火山引擎' : '阿里百炼'}</div>
+                    <div class="node-id">${node.id}</div>
+                    <div class="model-name">${node.model_name}</div>
+                    
+                    <div class="stat-row">
+                        <span>所属池</span>
+                        <span style="color: #38bdf8">${node.pool_id}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>当前状态</span>
+                        <span class="status-pill status-active">${node.status}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>调度权重</span>
+                        <span>${node.weight}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>最后同步</span>
+                        <span style="font-size: 0.7rem; color: #64748b">${node.last_sync}</span>
+                    </div>
+                    
+                    <div style="margin-top: 15px; background: rgba(56, 189, 248, 0.05); padding: 10px; border-radius: 8px; border: 1px dashed rgba(56, 189, 248, 0.2);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.8rem; color: #94a3b8;">预测可承载</span>
+                            <span style="font-size: 1.1rem; font-weight: 800; color: ${node.rounds_left < 20 ? '#f43f5e' : '#10b981'}">
+                                ${node.rounds_left} 轮测试
+                            </span>
+                        </div>
+                        <div style="font-size: 0.65rem; color: #64748b; margin-top: 4px;">
+                            基于标准审计任务平均 4.5k Token 消耗估算
+                        </div>
+                    </div>
+                    
+                    <div class="progress-container">
+                        <div class="progress-bar" style="width: 45%"></div>
+                    </div>
+                    <div style="font-size: 0.7rem; color: #64748b; margin-top: 5px; text-align: right;">
+                        今日消耗估算: 45% (Quota: 2M)
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        loadData();
+        setInterval(loadData, 5000);
+    </script>
+</body>
+</html>

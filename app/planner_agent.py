@@ -92,19 +92,28 @@ class AuditPlannerAgent:
             # [V178.9] 准备上下文：混合检索 (Semantic + Episodic)
             ontology = neo4j_manager.get_ontology()
             
+            # [V180.0] 意图强化：扩展医学关键词，防止语义丢失
+            from app.neo4j_manager import expand_medical_intent
+            expanded_terms = expand_medical_intent(user_input)
+            if expanded_terms:
+                logger.info(f"🧬 [IntentEnrich] 扩展医学意图: {expanded_terms}")
+                user_input_enriched = f"{user_input} (核查范围应包含但不限于: {', '.join(expanded_terms)})"
+            else:
+                user_input_enriched = user_input
+
             # 1. 语义召回 (Schema/行业知识)
-            relevant_items = await memory_hub.query(user_input)
+            relevant_items = await memory_hub.query(user_input_enriched)
             schema_hint = memory_hub.semantic.format_for_prompt(relevant_items)
-            avoidance_guide = memory_hub.semantic.get_avoidance_guides(user_input)
+            avoidance_guide = memory_hub.semantic.get_avoidance_guides(user_input_enriched)
             if avoidance_guide: schema_hint = f"{schema_hint}\n\n{avoidance_guide}"
 
             # 2. 情景召回 (历史成功案例)
-            episodes = await memory_hub.episodic.recall_experience(user_input, limit=2)
+            episodes = await memory_hub.episodic.recall_experience(user_input_enriched, limit=2)
             experience_hint = memory_hub.episodic.format_experience_for_prompt(episodes)
 
             # 3. 构造 Messages
             messages = PLANNER_PROMPT.format_messages(
-                original_question=user_input[:500],
+                original_question=user_input_enriched[:600],
                 messages=state["messages"], 
                 experiences=experience_hint, 
                 ontology=ontology,

@@ -60,7 +60,7 @@ class SemanticMemory:
             logger.warning(f"HyDE 生成失败: {e}")
             return ""
 
-    async def recall(self, query: str, limit: int = 12, use_hyde: bool = True, config: Any = None) -> List[MemoryItem]:
+    async def recall(self, query: str, limit: int = 12, use_hyde: bool = True, config: Any = None, tenant_id: str = "default") -> List[MemoryItem]:
         """
         语义召回核心：HyDE 混合检索 + 动态弹性阈值。
         """
@@ -72,7 +72,7 @@ class SemanticMemory:
             logger.info(f"🔍 [SemanticMemory] 混合查询载荷 (前50字): {search_query[:50]}...")
         
         # 1. 向量召回 (基础上限 10)
-        results = await self.storage.search(search_query, limit=10)
+        results = await self.storage.search(search_query, limit=10, tenant_id=tenant_id)
         
         # 2. [V178.9] 图谱增强：补齐确定性语义断层
         # 针对医保高频词（妇科、性别、团伙等）进行实体扩张
