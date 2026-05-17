@@ -54,6 +54,24 @@ class AuditCoderAgent:
         tasks_list = state.get("tasks", [])
         mem_context = cognitive_memory_manager.recall_context(state.get("session_id", "default"), "\n".join(tasks_list))
         
+        # 提取外部持久化审计便签簿中的里程碑线索，并入上下文
+        import os as _os_coder
+        note_content = ""
+        note_file = "data/audit_notes.md"
+        if _os_coder.path.exists(note_file):
+            try:
+                with open(note_file, "r", encoding="utf-8") as f:
+                    note_content = f.read().strip()
+                if note_content:
+                    logger.info("📓 [CoderAgent] 成功将外部便签线索并入上下文")
+            except Exception as e:
+                logger.warning(f"读取外部便签失败: {e}")
+                
+        # 融合向量经验和外部结构化便签线索！
+        experiences_combined = mem_context or ""
+        if note_content:
+            experiences_combined += f"\n\n【外部已固化审计线索/便签簿 (Structured Audit Notes)】：\n{note_content}"
+        
         user_messages = [m for m in state.get("messages", []) if getattr(m, "type", "") == "human"]
         user_q = " ".join(str(m.content) for m in user_messages)[:200]
         schema_hint = schema_injector.inject(user_question=f"{user_q} {' '.join(tasks_list)}")
@@ -65,7 +83,7 @@ class AuditCoderAgent:
             schema_info=schema_hint,
             methodology=state.get("methodology", ""),
             tasks="\n".join(tasks_list), 
-            experiences=mem_context
+            experiences=experiences_combined
         )
 
         # 3. 执行 LLM 思考逻辑 (生成 SQL)

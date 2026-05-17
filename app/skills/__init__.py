@@ -17,12 +17,14 @@ from app.tools import (
     check_audit_governance, federated_graph_sideloader,
     run_anomaly_detection, calculator
 )
+from app.tools import write_audit_note, read_all_audit_notes, clear_audit_notes
 
 core_tools = [
     get_table_schema, list_tables,
     search_expert_knowledge, 
     check_audit_governance, federated_graph_sideloader,
-    run_anomaly_detection, calculator
+    run_anomaly_detection, calculator,
+    write_audit_note, read_all_audit_notes, clear_audit_notes
 ]
 
 for t in core_tools:

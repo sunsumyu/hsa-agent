@@ -60,15 +60,31 @@ class LLMProvider:
             config=config
         )
 
-        # 2. 注入经验库上下文 (Experience Augmentation)
-        # 仅针对 Planner 或 Coder 角色自动注入
-        if role in ["planner_heavy", "coder"] and state:
+        # 2. 运行工业级 GSSC 上下文治理流水线 (Context Engineering)
+        # 仅针对需要大量外部事实经验与结构表结构的核心审计角色
+        if role in ["planner_heavy", "coder", "reporter"] and state:
             user_input = self._extract_last_user_message(messages)
             if user_input:
-                experiences = cognitive_memory_manager.recall_context(session_id, user_input)
-                if experiences:
-                    logger.info(f"🧠 [LLMProvider] 为角色 {role} 注入了历史审计经验")
-                    messages.insert(0, SystemMessage(content=f"【历史审计经验参考】：\n{experiences}"))
+                from app.endpoint_pool_manager import endpoint_pool_manager
+                from app.schemas import RoleConfigV2
+                from app.core.context_builder import ContextBuilder
+                
+                # 获取或初始化角色预算配置
+                role_cfg = endpoint_pool_manager.roles.get(role)
+                if not role_cfg:
+                    role_cfg = RoleConfigV2(pool="tier-1-chat", max_input_tokens=4000, max_output_tokens=2000)
+                
+                # 构建元数据
+                target_tables = state.get("target_tables", [])
+                metadata = {"target_tables": target_tables}
+                
+                # 动态生成黄金上下文事实层消息流 (并完成 Gather -> Select -> Structure -> Compress)
+                builder = ContextBuilder(role_cfg)
+                messages = await builder.build_optimal_context(
+                    user_query=user_input,
+                    history=messages,
+                    metadata=metadata
+                )
 
         # 3. 绑定工具
         if tools:
