@@ -10,7 +10,7 @@ import logging
 from typing import List, Dict, Any, Tuple
 from loguru import logger
 
-# [V47.6] 引入 spaCy 混合识别：参考 hello-agents 的小模型方案
+# [V47.6] 引入 spaCy 混合识别：本地小模型实体提取方案
 _NLP = None
 def get_nlp():
     global _NLP

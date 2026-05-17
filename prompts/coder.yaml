@@ -66,6 +66,12 @@ system_template: |
 
   ## 7. 审计级 SQL 逻辑 (Audit-Grade Logic)
   - **禁别名令 (NO ALIASES POLICY)**：⚠️ 严禁使用 `AS` 关键字为字段或聚合函数定义别名。
+  - **时序防守深度与防规避算法 (Anti-Evasion Time-Series Logic)**：
+      - **攻克“跨期骑缝”与“滑动时间窗口”**：对于要求按自然月/自然年聚合的指标（如跨店频次/消费），禁止仅进行静态 `GROUP BY`。要求使用 `OVER (PARTITION BY ... ORDER BY ... RANGE BETWEEN ... PRECEDING AND CURRENT ROW)` 滑动窗口统计任意连续时间周期内的指标。
+      - **攻克“高频拆单”**：对于同店/近邻店极短时间疯狂扫卡套现行为，必须在 SQL 中实现序列对比。使用窗口函数 `lagInFrame(setl_time)` 计算相邻两次购药结算的时间戳差值：`setl_time - lagInFrame(setl_time) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY setl_time)`，过滤查找间隔小于特定秒数（如 300 秒/5分钟）的异常。
+  - **图谱时序高维对撞优先原则**：
+      - 处理跨机构/超高频跨店就医时，复杂的自连接 SQL 性能极差。此时，**优先使用 Cypher 检索图谱中的时序就诊关系 `[:NEXT_VISIT]`**（它已经实体化了就医先后顺序与时间差）。
+      - Cypher 反拆单套现参考：`MATCH (p:Patient)-[:VISITED]->(h1:Hospital)-[rel:NEXT_VISIT]->(h2:Hospital) WHERE rel.time_diff_minutes < 30 AND h1.fixmedins_code <> h2.fixmedins_code RETURN p.psn_no, h1.name, h2.name, rel.time_diff_minutes`。
   - **两阶段基线探测 (Two-Phase Baseline Pattern)**：在处理“额度异常”任务时，必须分步操作：
       - **Phase 1**: 先执行聚合查询计算基线（如 `avg(medfee_sumamt)` 或 `quantile(0.95)`）。
       - **Phase 2**: 将 Phase 1 得到的真实数值注入到后续 SQL 的 `WHERE` 或 `HAVING` 子句中（如 `HAVING sum(...) > 1523.5`）。

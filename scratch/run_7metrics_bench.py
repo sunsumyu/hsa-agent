@@ -140,35 +140,140 @@ PREDICTED = {
 #     },
 # ]
 
+# TEST_CASES = [
+#     {
+#         "id": "QA-NEW-01", "tag": "Decomp Hospital",   "diff": "*** ",
+#         "prompt": "对2024年全市住院患者进行核查，是否存在在同一家医院出院后15天内再次入院的“分解住院”可疑行为？",
+#         "pred_tokens": 12000,
+#     },
+#     {
+#         "id": "QA-NEW-02", "tag": "Cross Store Spend",  "diff": "*** ",
+#         "prompt": "核查2024年度是否存在同一患者跨5家及以上定点药店进行购药，且基金支付总额超过5000元的异常消费行为？",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-NEW-03", "tag": "High Freq Drug",     "diff": "**  ",
+#         "prompt": "针对定点药店购药场景，核查2024年是否存在单人累计在同一药店购药频次达到10次及以上的“高频购药”异常明细？",
+#         "pred_tokens": 10500,
+#     },
+#     {
+#         "id": "QA-NEW-04", "tag": "Ghost Bed Hospital", "diff": "****",
+#         "prompt": "核查2024年度是否存在住院天数异常长（如超过14天）但医疗总费用极低的可疑“挂床住院”或虚假住院案例？",
+#         "pred_tokens": 13500,
+#     },
+#     {
+#         "id": "QA-NEW-05", "tag": "Overlapping Hosp",   "diff": "****",
+#         "prompt": "核查2024年是否存在同一参保人，在完全相同的时间段内在两家不同的定点医疗机构【同时挂账住院】的违规行为？",
+#         "pred_tokens": 14000,
+#     },
+# ]
+
 # ── Test Cases ────────────────────────────────────────────────────────
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-01", "tag": "Contradictory Account Deductions", "diff": "**  ",
+#         "prompt": "是否存在患者在单次住院期间，个人账户扣款出现了多次自相矛盾的记录？",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-CUST-02", "tag": "Outpatient Dialysis Abuse", "diff": "*** ",
+#         "prompt": "帮我核查是否存在城乡居民在民营综合医院进行违规报销门诊透析的情形。",
+#         "pred_tokens": 12000,
+#     },
+#     {
+#         "id": "QA-CUST-03", "tag": "Contradictory Hospitalization Days", "diff": "**  ",
+#         "prompt": "是否存在患者在单次住院期间，住院总天数出现了多次自相矛盾的记录？",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-CUST-04", "tag": "Stent Compensation Exceeded", "diff": "****",
+#         "prompt": "核实一下去年机关事业退休人员在冠状动脉支架项目上的定额补偿是否超标。",
+#         "pred_tokens": 13000,
+#     },
+#     {
+#         "id": "QA-CUST-05", "tag": "Outpatient Dialysis Abuse 2", "diff": "*** ",
+#         "prompt": "帮我核查是否存在城乡居民在民营综合医院进行违规报销门诊透析的情形。",
+#         "pred_tokens": 12000,
+#     },
+# ]
+
+
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-01", 
+#         "tag": "Contradictory Account Deductions", 
+#         "diff": "**  ",
+#         "prompt": "核对一下结算明细，有没有同一次住院的单据里，个人账户实际扣款金额跟总费用流水对不上的矛盾记录？",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-CUST-02", 
+#         "tag": "Outpatient Dialysis Abuse", 
+#         "diff": "*** ",
+#         "prompt": "跑一下民营综合医院的数据，重点排查有没有城乡居民违规刷门诊血液透析报销的单子。",
+#         "pred_tokens": 12000,
+#     },
+#     {
+#         "id": "QA-CUST-03", 
+#         "tag": "Contradictory Hospitalization Days", 
+#         "diff": "**  ",
+#         "prompt": "查一下底表，有没有哪次住院根据入院和出院日期算出来的天数，跟医院实际上传的结算天数严重不符的情况？",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-CUST-04", 
+#         "tag": "Stent Compensation Exceeded", 
+#         "diff": "****",
+#         "prompt": "调取一下去年的数据，核实机关事业退休人员做冠脉支架手术时，医保基金的定额补偿有没有突破最高支付限额。",
+#         "pred_tokens": 13000,
+#     },
+#     {
+#         "id": "QA-CUST-05", 
+#         "tag": "Outpatient Dialysis Abuse 2", 
+#         "diff": "*** ",
+#         "prompt": "把民营医院门诊特慢病结算拉出来看看，尤其是城乡居民医保门诊透析这块，排查下有没有超频次或者挂靠报销的嫌疑。",
+#         "pred_tokens": 12000,
+#     },
+# ]
+
+
 TEST_CASES = [
     {
-        "id": "QA-NEW-01", "tag": "Decomp Hospital",   "diff": "*** ",
-        "prompt": "对2024年全市住院患者进行核查，是否存在在同一家医院出院后15天内再次入院的“分解住院”可疑行为？",
+        "id": "QA-CUST-01", 
+        "tag": "Deceased Patient Billing", 
+        "diff": "*** ",
+        "prompt": "查一下死亡人员的数据交叉比对，看看有没有人在民政那边已经宣告死亡注销户口了，但医保系统里还在源源不断地产生刷卡或者住院费用的。",
         "pred_tokens": 12000,
     },
     {
-        "id": "QA-NEW-02", "tag": "Cross Store Spend",  "diff": "*** ",
-        "prompt": "核查2024年度是否存在同一患者跨5家及以上定点药店进行购药，且基金支付总额超过5000元的异常消费行为？",
+        "id": "QA-CUST-02", 
+        "tag": "Gender Diagnosis Conflict", 
+        "diff": "**  ",
+        "prompt": "把全市参保人的结算单扫一遍，专门挑那些登记是男性，但是诊断或者收费明细里却开出了子宫彩超或者保胎药这种明显违反常识的记录。",
         "pred_tokens": 11000,
     },
     {
-        "id": "QA-NEW-03", "tag": "High Freq Drug",     "diff": "**  ",
-        "prompt": "针对定点药店购药场景，核查2024年是否存在单人累计在同一药店购药频次达到10次及以上的“高频购药”异常明细？",
-        "pred_tokens": 10500,
-    },
-    {
-        "id": "QA-NEW-04", "tag": "Ghost Bed Hospital", "diff": "****",
-        "prompt": "核查2024年度是否存在住院天数异常长（如超过14天）但医疗总费用极低的可疑“挂床住院”或虚假住院案例？",
-        "pred_tokens": 13500,
-    },
-    {
-        "id": "QA-NEW-05", "tag": "Overlapping Hosp",   "diff": "****",
-        "prompt": "核查2024年是否存在同一参保人，在完全相同的时间段内在两家不同的定点医疗机构【同时挂账住院】的违规行为？",
+        "id": "QA-CUST-03", 
+        "tag": "Decomposed Hospitalization", 
+        "diff": "****",
+        "prompt": "排查一下二级医院的住院情况，有没有同一个病号因为同一个毛病，出院还没过半个月又被重新办入院手续的？这种分解住院骗统筹基金的要重点揪出来。",
         "pred_tokens": 14000,
     },
+    {
+        "id": "QA-CUST-04", 
+        "tag": "Chronic Disease Over-prescription", 
+        "diff": "*** ",
+        "prompt": "把门诊慢特病的药店结算数据拉出来，重点看高血压和糖尿病，有没有单次开药量直接超过90天最大用药上限的？这种很大可能是药贩子在倒药。",
+        "pred_tokens": 12000,
+    },
+    {
+        "id": "QA-CUST-05", 
+        "tag": "Abnormal Outpatient Billing", 
+        "diff": "**  ",
+        "prompt": "筛一下乡镇卫生院和社区诊所的数据，像普通感冒发烧这种小病，单次门诊报销如果直接奔着七八百甚至上千去了，肯定有串换项目或者搭车开药的问题，把超标明细全列出来。",
+        "pred_tokens": 11000,
+    },
 ]
-
 
 # ── Judge Prompt ──────────────────────────────────────────────────────
 JUDGE_PROMPT = """You are a senior healthcare insurance audit judge.

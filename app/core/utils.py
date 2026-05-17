@@ -3,7 +3,7 @@ app/core/utils.py
 =================
 [V163.0] 鲁棒性解析器 (Robust Parser)
 
-借鉴自 HelloAgents 教学案例，为工业级 Agent 提供容错能力。
+为工业级 Agent 提供高鲁棒性的参数解析与容错自愈能力。
 """
 
 import re
@@ -36,7 +36,7 @@ def smart_parse_tool_params(raw_input: Any) -> Dict[str, Any]:
     except Exception:
         pass
     
-    # 2. 尝试 Key-Value 格式解析 (借鉴 MySimpleAgent)
+    # 2. 尝试 Key-Value 格式解析
     # 格式: sql=SELECT... , db_type=clickhouse
     # 注意：这里使用更简单的分割逻辑，防止复杂的 SQL 语句破坏正则
     if "=" in text and ("," in text or len(text) < 500):

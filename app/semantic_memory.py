@@ -18,7 +18,7 @@ from app.redis_client import redis_manager
 # from sentence_transformers import SentenceTransformer, util - Lazy loaded below
 
 # ============================================================
-# 1. 核心架构：本地小模型嵌入引擎 (参考 hello-agents)
+# 1. 核心架构：本地小模型嵌入引擎
 # ============================================================
 
 class LocalEmbeddingEngine(Embeddings):

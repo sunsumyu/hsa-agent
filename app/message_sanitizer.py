@@ -29,7 +29,7 @@ app/message_sanitizer.py
 from __future__ import annotations
 
 import re as _re
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Dict
 
 
 def sanitize_for_thinking_mode(
