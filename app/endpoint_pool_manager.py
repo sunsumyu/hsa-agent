@@ -76,6 +76,9 @@ class EndpointPoolManager:
                                        ("endpoint_pools", current_hash, datetime.now().isoformat()))
                         logger.info("📡 [Sync] 配置已发生变更，已完成数据库增量同步。")
             
+            # [V200.0] 动态同步云端推理接入点配置
+            self.sync_volcengine_endpoints()
+            
             # 2. 加载角色配置
             if os.path.exists(self.role_config_path):
                 with open(self.role_config_path, 'r', encoding='utf-8-sig') as f:
@@ -158,7 +161,8 @@ class EndpointPoolManager:
             cooldown = 7200 if is_quota_error else 60
             
             state.cooldown_until = time.time() + cooldown
-            logger.warning(f"⛔ [节点熔断] {ep_id} 进入 {'长效' if cooldown > 60 else '短效'} 观察期 ({cooldown}s): {reason}")
+            disp_name = self.get_endpoint_display_name(ep_id)
+            logger.warning(f"⛔ [节点熔断] {disp_name} 进入 {'长效' if cooldown > 60 else '短效'} 观察期 ({cooldown}s): {str(reason)[:100]}...")
             usage_tracker.record_failure(ep_id, reason)
 
     def record_success(self, ep_id: str):
@@ -166,9 +170,85 @@ class EndpointPoolManager:
         if ep_id in self.states:
             state = self.states[ep_id]
             if state.is_cooling:
-                logger.info(f"✅ [节点复活] {ep_id} 提前解除封禁")
+                disp_name = self.get_endpoint_display_name(ep_id)
+                logger.info(f"✅ [节点复活] {disp_name} 提前解除封禁")
             state.is_cooling = False
             usage_tracker.record_success(ep_id)
+
+    def get_endpoint_display_name(self, ep_id: str) -> str:
+        """获取接入点的人类可读显示名（优先云端拉取的名称）"""
+        state = self.states.get(ep_id)
+        if state and state.config.display_name:
+            return state.config.display_name
+        return ep_id
+
+    def sync_volcengine_endpoints(self):
+        """[V200.0] 利用 IAM 秘钥，动态同步火山引擎的真实接入点名称与模型底座"""
+        ak = os.getenv("VOLC_ACCESS_KEY")
+        sk = os.getenv("VOLC_SECRET_KEY")
+        if not ak or not sk:
+            logger.info("ℹ️ [云端同步] 未配置 VOLC_ACCESS_KEY/VOLC_SECRET_KEY，跳过动态接入点同步")
+            return
+
+        try:
+            import volcenginesdkcore
+            import volcenginesdkark
+            
+            logger.info("🔄 [云端同步] 正在从火山引擎动态同步推理接入点...")
+            configuration = volcenginesdkcore.Configuration()
+            configuration.ak = ak
+            configuration.sk = sk
+            configuration.region = "cn-beijing"
+            
+            api_instance = volcenginesdkark.ARKApi(volcenginesdkcore.ApiClient(configuration))
+            req = volcenginesdkark.ListEndpointsRequest()
+            resp = api_instance.list_endpoints(req)
+            
+            if not resp.items:
+                logger.info("ℹ️ [云端同步] 火山引擎未查询到任何推理接入点")
+                return
+                
+            remote_endpoints = {}
+            for item in resp.items:
+                foundation_model = "unknown"
+                if hasattr(item, 'model_reference') and item.model_reference:
+                    ref = item.model_reference
+                    if hasattr(ref, 'foundation_model') and ref.foundation_model:
+                        fm = ref.foundation_model
+                        if isinstance(fm, dict):
+                            foundation_model = fm.get('name', 'unknown')
+                        elif hasattr(fm, 'name'):
+                            foundation_model = fm.name
+                
+                name = item.name
+                try:
+                    if isinstance(name, str):
+                        # 尝试将 latin1 编码的乱码还原为 UTF-8
+                        name = name.encode('latin1').decode('utf-8')
+                except Exception:
+                    pass
+                
+                remote_endpoints[item.id] = {
+                    "name": name,
+                    "foundation_model": foundation_model
+                }
+                
+            logger.info(f"✅ [云端同步] 成功同步 {len(remote_endpoints)} 个火山推理接入点: {list(remote_endpoints.keys())}")
+            
+            # 动态更新本地路由池与模型映射
+            for pool in self.pools.values():
+                for ep in pool.endpoints:
+                    if ep.platform == "volcengine" and ep.model_name in remote_endpoints:
+                        info = remote_endpoints[ep.model_name]
+                        logger.info(f"🔄 [动态对齐] 本地配置 ID: {ep.id} -> 动态拉取名称: {info['name']} | 底座: {info['foundation_model']}")
+                        
+                        # 动态更新 Endpoint 属性
+                        ep.display_name = info['name']
+                        if info['foundation_model'] != 'unknown':
+                            ep.family = info['foundation_model']
+                            
+        except Exception as e:
+            logger.warning(f"⚠️ [云端同步] 动态同步火山接入点失败: {e}")
 
 # 单例导出
 endpoint_pool_manager = EndpointPoolManager()

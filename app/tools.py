@@ -463,20 +463,31 @@ async def run_anomaly_detection(algorithm_id: str, threshold: float = 0.95) -> s
             "trace_hint": f"[异常算法] {algorithm_id} 执行异常"
         }
 
-# --- 知识检索增强 (RAG) 占位 ---
-_embeddings = None
-def get_embeddings():
-    global _embeddings
-    if _embeddings is None:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-        class SimpleEmbeddings:
-            def embed_documents(self, texts):
-                return model.encode(texts).tolist()
-            def embed_query(self, text):
-                return model.encode([text])[0].tolist()
-        _embeddings = SimpleEmbeddings()
-    return _embeddings
+# ──────────────────────────────────────────────────────────
+# 知识检索增强 (RAG) V4.6 落地
+# ──────────────────────────────────────────────────────────
+
+@tool
+async def ingest_knowledge_document(file_path: str, importance: float = 0.9) -> str:
+    """
+    [V4.6] 将外部文档（PDF/Excel/Markdown）物理索引至审计知识库。
+    Agent 在发现新的政策文件或审计指南时应调用此工具。
+    """
+    from app.core.rag.tool import rag_tool
+    res = await rag_tool.add_document(file_path, importance=importance)
+    return json.dumps(res, ensure_ascii=False)
+
+@tool
+async def query_knowledge_base(query: str, limit: int = 5, expert_mode: bool = False) -> str:
+    """
+    [V4.6] 检索医保审计政策、法律法规与专家指南。
+    - 普通模式: 快速语义匹配。
+    - 专家模式 (expert_mode=True): 启用 MQE 查询扩展与 HyDE 假设文档技术，适用于疑难审计点、政策边界模糊等场景，能大幅提升召回精度。
+    """
+    from app.core.rag.tool import rag_tool
+    if expert_mode:
+        return await rag_tool.search_knowledge_expanded(query, limit=limit, enable_mqe=True, enable_hyde=True)
+    return await rag_tool.search_knowledge(query, limit=limit)
 
 # ──────────────────────────────────────────────────────────
 # Neo4j 团伙欺诈分析工具 (Graph Analysis)
@@ -487,7 +498,9 @@ def get_embeddings():
 async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
     """
     [V59.6] 执行 Neo4j Cypher 查询，用于发现隐蔽的医疗欺诈团伙。
-    例如：查找共用同一电话的患者群体，或通过同一医生洗单的异常网络。
+    【⚠️ 物理隔离警告】：此工具仅能对 Neo4j 图数据库执行 Cypher 查询。图数据库中只包含 Patient, Hospital, Phone 等图节点，
+    绝对不包含 fqz_gz_jzsj_all_ql 等关系型物理数据表！严禁在 Cypher 查询中引用任何 fqz_ 开头的表，也严禁将此查询嵌套在 SQL 中！
+    如需结合业务明细查询，请优先使用 federated_graph_sideloader 工具进行跨库侧载。
     """
     from app.neo4j_manager import neo4j_manager
     logger.info(f"🕸️ [GRAPH] 执行 Cypher 查询: {cypher}")
@@ -569,10 +582,10 @@ async def federated_graph_sideloader(cypher: str, return_key: str = "") -> Dict[
     """
     [企业级联邦侧载工具] 
     执行 Cypher 图谱检索，并将发现的核心实体 ID 自动侧载到 ClickHouse 内存临时表。
-    适用于：团伙欺诈、共用号码等跨库多步推理场景。
-    参数:
-    - cypher: Neo4j 查询语句。
-    - return_key: 需要提取的实体 ID 字段名（如果不填则默认提取第一列）。
+    【⚠️ 跨库分阶段强制规范】：Neo4j (Cypher) 与 ClickHouse (SQL) 是物理隔离的，绝对无法在单个 SQL 语句中直接嵌套执行 Cypher 语法！
+    你必须分两步执行：
+    1. 首先调用此工具（传入纯 Cypher 语句，严禁包含 fqz_ 开头的关系表），它会返回一个 ClickHouse 临时表名（例如 fqz_temp_sl_xxxx）。
+    2. 在后续步骤中，编写标准 SQL 语句，使用 `INNER JOIN fqz_temp_sl_xxxx ON 主表.关键ID = fqz_temp_sl_xxxx.id` 关联查询结算明细。
     """
     from app.neo4j_manager import neo4j_manager
     import time

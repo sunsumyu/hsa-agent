@@ -30,6 +30,8 @@ clickhouse-connect>=0.7,<0.9
 clickhouse-driver>=0.2,<0.3
 neo4j>=6.0,<7.0
 aiosqlite>=0.20,<1.0
+asyncpg>=0.29,<1.0  # [V4.5] Postgres 分布式连接池
+pymilvus>=2.4,<3.0  # [V4.5] Milvus 分布式向量存储
 
 # --- SQL / AST ---
 sqlglot>=25.0

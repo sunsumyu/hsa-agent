@@ -36,7 +36,8 @@ class EnrichedChatOpenAI(ChatOpenAI):
                 platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "阿里百炼"
             
             err_msg = str(e)
-            logger.error(f"⛔ [{platform_tag}] 物理节点 {m_id} 异常: {err_msg}")
+            disp_name = endpoint_pool_manager.get_endpoint_display_name(m_id)
+            logger.error(f"⛔ [{platform_tag}] 物理节点 {disp_name} 异常: {str(err_msg)[:100]}...")
             
             fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
             is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)
@@ -91,11 +92,13 @@ class EnrichedChatOpenAI(ChatOpenAI):
                 if retry_count < 2:
                     self._rate_limit_retry_sync = retry_count + 1
                     wait_time = (retry_count + 1) * 2
-                    logger.warning(f"⏳ [RateLimit-Retry-Sync] 节点 {m_id} 触发限速，等待 {wait_time}s 后重试...")
+                    disp_name = endpoint_pool_manager.get_endpoint_display_name(m_id)
+                    logger.warning(f"⏳ [RateLimit-Retry-Sync] 节点 {disp_name} 触发限速，等待 {wait_time}s 后重试...")
                     time.sleep(wait_time)
                     return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
-            logger.error(f"⛔ [{platform_tag}] 节点 {m_id} 额度枯竭，触发切流: {err_msg}")
+            disp_name = endpoint_pool_manager.get_endpoint_display_name(m_id)
+            logger.error(f"⛔ [{platform_tag}] 节点 {disp_name} 额度枯竭，触发切流: {str(err_msg)[:100]}...")
             endpoint_pool_manager.record_failure(m_id, err_msg)
             raise e
 

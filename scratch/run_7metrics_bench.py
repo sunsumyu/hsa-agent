@@ -32,7 +32,9 @@ console = Console(theme=Theme({
 
 sys.path.append(os.getcwd())
 os.environ["PYTHONIOENCODING"] = "utf-8"
-os.environ["HF_HUB_OFFLINE"]  = "1"
+
+# [V58.3] 环境配置由 app.core.config 统一接管，此处不再硬编码
+from app.core.config import settings
 
 if sys.platform == "win32":
     # 强制 Windows 终端输出 UTF-8，防止 UnicodeEncodeError (GBK)

@@ -19,6 +19,7 @@ class MemoryItem(BaseModel):
     content: Any                    # 记忆核心内容
     memory_type: str                # episodic (情景), semantic (语义), working (工作)
     importance: float = 1.0         # 权重 (0.0 - 1.0)
+    score: float = 0.0              # 检索时的匹配得分 (动态注入)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.now)
     ttl: Optional[int] = None       # 生存时间 (秒)

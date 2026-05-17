@@ -9,6 +9,14 @@ app/core/config.py
 import os
 from typing import Optional, List
 from pydantic import Field
+
+# [V4.5.4] 物理环境全局配置中心
+# ---------------------------------------------------------
+# [V4.5.6] 物理固化完成：恢复离线模式，确保零延迟运行
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+# ---------------------------------------------------------
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from loguru import logger
 
@@ -20,6 +28,7 @@ class GlobalSettings(BaseSettings):
     app_name: str = "HSA-Agent-Industrial"
     debug: bool = Field(default=False)
     log_level: str = Field(default="INFO")
+    memory_mode: str = Field(default="LOCAL")  # [V4.5] 记忆模式：LOCAL | ENTERPRISE
     
     # --- LLM 默认行为配置 ---
     # 这些是当具体模型配置缺失时的全局兜底值

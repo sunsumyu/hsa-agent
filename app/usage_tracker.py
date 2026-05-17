@@ -281,7 +281,7 @@ class UsageTracker:
                 eod = datetime(now.year, now.month, now.day) + timedelta(days=1) - timedelta(seconds=1)
                 self.blacklist_expiry[model_id] = eod.timestamp()
                 self.stability_scores[model_id] = 0.0
-                logger.error(f"!!! [物理熔断] 节点 {model_id} 已当日强制下线并封禁直到24点: {reason} !!!")
+                logger.error(f"!!! [物理熔断] 节点 {model_id} 已当日强制下线并封禁直到24点 (原因: {str(reason)[:100]}...) !!!")
             else:
                 # 临时冷却：2 分钟后尝试找回
                 new_expiry = time.time() + 120
@@ -320,10 +320,11 @@ class UsageTracker:
                 target_id = m_id
                 break
 
-        # [V5.6.0] 铁腕治理：扩展错误判定范围，将“未找到模型(404)”视为当日永久失效
+        # [V5.6.0] 铁腕治理：扩展错误判定范围，将“未找到模型(404)”和“额度暂停/超出限制”视为当日永久失效
         is_permanent_fail = any(k in error_code.lower() for k in [
             "403", "404", "quota", "exhausted", "free tier", "freetier", 
-            "not_found", "not found", "does not exist", "invalid_model", "model_not_found"
+            "not_found", "not found", "does not exist", "invalid_model", "model_not_found",
+            "setlimitexceeded", "limitexceeded", "inference limit", "safe experience mode"
         ])
         
         if is_permanent_fail:
@@ -355,6 +356,7 @@ class UsageTracker:
         for cfg in self.model_configs.values():
             cfg.is_active = True
             cfg.last_error = None
+        self._save_stats()
 
     def get_usage_report(self) -> str:
         """[V37.4] 生成今日用量统计报告。"""

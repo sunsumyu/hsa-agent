@@ -107,9 +107,10 @@
     <div class="sidebar">
         <div class="nav-item active" onclick="location.href='index.html'">🏠 概览首页</div>
         <div class="nav-item" onclick="location.href='endpoint_management.html'">📊 算力监控</div>
-        <div class="nav-item">💰 成本治理</div>
-        <div class="nav-item">🕒 审计历史</div>
-        <div class="nav-item">⚙️ 系统设置</div>
+        <div class="nav-item" onclick="location.href='token_governance.html'">💰 成本治理</div>
+        <div class="nav-item" onclick="location.href='audit_history.html'">🕒 审计历史</div>
+        <div class="nav-item" onclick="location.href='memory_health.html'">🧠 记忆中枢</div>
+        <div class="nav-item" onclick="location.href='prompts_manager.html'">✍️ 提示词管理</div>
         
         <div style="margin-top: auto; font-size: 0.8rem; color: #475569;">
             Enterprise Version 2026.Q2
@@ -142,11 +143,11 @@
                 <p style="color: #94a3b8;">回溯历次重构前后的性能曲线，见证架构演进过程。</p>
             </div>
 
-            <div class="portal-card" onclick="alert('审计经验库：当前已固化 12 个核心案例情景')">
-                <span class="card-tag">Memory V3</span>
+            <div class="portal-card" onclick="location.href='memory_health.html'">
+                <span class="card-tag" style="background:#818cf8;">Memory V4.6</span>
                 <div class="icon-box">🧠</div>
-                <h3>审计经验库</h3>
-                <p style="color: #94a3b8;">查看 Episodic Memory 层存储的成功审计路径与 SQL 模板。</p>
+                <h3>记忆中枢监控</h3>
+                <p style="color: #94a3b8;">实时查看 L0-L3 四层记忆架构、Redis 状态及 PII 脱敏统计。</p>
             </div>
         </div>
 
@@ -175,15 +176,42 @@
             </div>
         </div>
 
-        <div style="margin-top: 30px; padding: 20px; background: #020617; border-radius: 12px; border: 1px dashed #334155;">
-            <h4 style="margin: 0; color: var(--accent);">🎯 记忆中枢实时状态</h4>
-            <p style="color: #94a3b8; font-size: 0.9rem; margin-top: 5px;">
-                当前架构：<b>Hierarchical-V3</b> | 
-                L2 情景案例：12 | 
-                L3 知识节点：178 | 
-                语义对齐拦截率：99.4%
-            </p>
+        <div style="margin-top: 30px; padding: 20px; background: #020617; border-radius: 12px; border: 1px solid #1e293b;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="margin: 0; color: var(--accent);">🎯 记忆中枢实时状态</h4>
+                <span id="hb-ts" style="color:#475569; font-size:0.75rem;">加载中...</span>
+            </div>
+            <div id="hb-content" style="color: #94a3b8; font-size: 0.9rem;">
+                <span style="color:#334155;">正在连接后端服务...</span>
+            </div>
         </div>
+
+        <script>
+        async function fetchHealthBeacon() {
+            try {
+                const res = await fetch('http://127.0.0.1:18882/api/memory/stats');
+                const json = await res.json();
+                if (!json.ok) throw new Error();
+                const d = json.data;
+                const l0 = d.layers.l0_working.active;
+                const perceptual = d.layers.l3_perceptual.status;
+                const redis = d.infrastructure.redis;
+                const mode = d.memory_mode;
+                const tenants = d.infrastructure.tenant_shards;
+                document.getElementById('hb-content').innerHTML =
+                    `架构：<b>${mode}</b> &nbsp;|&nbsp; L0 工作记忆：<b>${l0} 项</b> &nbsp;|&nbsp; ` +
+                    `Redis：<b style="color:${redis==='ONLINE'?'#34d399':'#f87171'}">${redis}</b> &nbsp;|&nbsp; ` +
+                    `租户分片：<b>${tenants}</b> &nbsp;|&nbsp; ` +
+                    `感知层：<b style="color:${perceptual.includes('DEGRADED')?'#fbbf24':'#34d399'}">${perceptual.includes('DEGRADED')?'降级':'ONLINE'}</b>`;
+                document.getElementById('hb-ts').textContent = '更新于 ' + new Date(d.timestamp).toLocaleTimeString('zh-CN');
+            } catch {
+                document.getElementById('hb-content').innerHTML = '<span style="color:#475569;">后端服务未启动，信标数据不可用</span>';
+                document.getElementById('hb-ts').textContent = '';
+            }
+        }
+        fetchHealthBeacon();
+        setInterval(fetchHealthBeacon, 15000);
+        <\/script>
     </div>
 </body>
 </html>

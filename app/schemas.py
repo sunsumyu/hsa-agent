@@ -68,6 +68,7 @@ class EndpointConfig(ProviderAttributes):
     # Endpoint 级专属字段
     id: str
     weight: int = 50
+    display_name: Optional[str] = None
     # rpm/tpm 采用基类默认值 (60 / 100000) — 池化场景限制更宽松
 
 class PoolConfig(BaseModel):

@@ -357,6 +357,16 @@ class Neo4jManager:
             raise RuntimeError("Neo4j 服务未连接，无法执行图查询。请检查 .env 中的 NEO4J_URI（建议使用 bolt://）和 Neo4j 服务状态。")
         return self.driver
 
+    def execute_cypher(self, cypher: str, params: Dict[str, Any] = None):
+        """[V4.0] 物理执行 Cypher 语句，支持事务包装"""
+        if not self.driver: self.get_driver()
+        try:
+            with self.driver.session() as session:
+                return session.run(cypher, params or {})
+        except Exception as e:
+            logger.error(f"Cypher 执行失败: {e} | Query: {cypher}")
+            raise e
+
     def get_ontology(self) -> str:
         """获取图数据库的本体结构（标签和关系类型）"""
         if not self.driver:

@@ -151,12 +151,12 @@ class AuditReportRenderer:
                 "并确认在这些严苛条件下确实无匹配记录。这能向审查员证明你的核查是全覆盖且深度的。\n"
             )
         else:
-            defense_instruction = "5. **事实强制对齐**：当前发现 {hard_count} 条记录，结论必须明确指出违规嫌疑，严禁敷衍。\n"
+            defense_instruction = f"5. **事实强制对齐**：当前发现 {hard_count} 条记录，结论必须明确指出违规嫌疑，严禁敷衍。\n"
 
         return (
             "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~400 字的「核查结论」。\n"
             "要求：\n"
-            "1. **逻辑白盒化**：你必须在结论中清晰解释你的「技术核查逻辑」（例如：是如何通过 PSN_NO 分组的，判定违规的金额阈值是多少）。\n"
+            "1. **逻辑白盒化与阈值透明化**：你必须在结论中清晰展示你的判定标准和所采用的「具体阈值」（例如：如果提问涉及“大额”，请说明判定大额的具体金额，如 10,000 元以上；如果是重复收费，说明单日限额；如果是共用联系方式，说明量化判定标准）。\n"
             "2. **多维证据链**：如果是复杂任务（如性别冲突），必须明确提到对科室、诊断和费用的交叉核查结果。\n"
             "3. **专业引用**：必须引用下方的“审计方法论”中的判定标准（如具体的 ICD-10 编码或政策条文）。\n"
             "4. **完整性**：请确保输出完整的段落，严禁在句子中间截断。\n"
@@ -208,11 +208,20 @@ class AuditReportRenderer:
         from app.message_sanitizer import mask_audit_data
         raw_data = mask_audit_data(raw_data)
 
+        # [V190.0] 动态提取合规依据
+        if methodology and not policy_basis:
+            import re
+            match = re.search(r"合规依据[：:]([^。，\n]+)", methodology)
+            if match:
+                policy_basis = match.group(1).strip()
+
         # [V88.0] 逻辑修正：即便 raw_data 为空（可能是解析失败），也要优先保留调用方传入的硬性统计值
         if not raw_data:
             total_amount = total_amount if total_amount > 0 else 0.0
             finding_count = finding_count if finding_count > 0 else 0
-            if total_amount == 0:
+            # [V191.0] 修复：不要无条件覆盖 LLM 精心生成的防御性结论！
+            # 只有当 llm_conclusion 为空或没有生成时，才使用这一句兜底。
+            if total_amount == 0 and (not llm_conclusion or len(llm_conclusion.strip()) < 10):
                 llm_conclusion = "经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
         else:
             # 自动从数据中计算金额
@@ -292,26 +301,21 @@ class AuditReportRenderer:
             lines += ["", "**全量技术溯源 (SQL History)**：", ""]
             for i, s_query in enumerate(sql_history, 1):
                 lines += [
-                    f"<details>",
-                    f"<summary>🔍 步骤 {i}：执行 SQL 详情</summary>",
+                    f"### 🔍 步骤 {i}：执行 SQL 详情",
                     "",
                     "```sql",
                     s_query.strip(),
                     "```",
                     "",
-                    "</details>",
                 ]
         elif sql:
             lines += [
                 "",
-                "<details>",
-                "<summary>🔍 点击展开技术溯源 (SQL)</summary>",
+                "### 🔍 技术溯源 (SQL)",
                 "",
                 "```sql",
                 sql.strip(),
                 "```",
-                "",
-                "</details>",
                 "",
             ]
         if trace:

@@ -79,29 +79,42 @@ class LLMProvider:
 
         # 5. 执行调用
         start_time = time.time()
-        try:
-            response = await llm.ainvoke(messages, config=obs_config)
-            latency_ms = (time.time() - start_time) * 1000
-            
-            # 6. 计费与用量追踪
-            self._record_usage(role, response, actual_model_id, messages, latency_ms=latency_ms)
-            
-            # 7. 注入审计元数据 (Audit Metadata Injection)
-            if hasattr(response, "additional_kwargs"):
-                response.additional_kwargs.update({
-                    "audit_latency_ms": latency_ms,
-                    "audit_model_id": actual_model_id,
-                    "audit_role": role,
-                    "audit_timestamp": time.time()
-                })
-            
-            # 8. 更新认知记忆
-            cognitive_memory_manager.add_message(session_id, response)
-            
-            return response
-        except Exception as e:
-            logger.error(f"❌ [LLMProvider] 调用失败 ({role} | {actual_model_id}): {e}")
-            raise e
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
+            try:
+                response = await llm.ainvoke(messages, config=obs_config)
+                latency_ms = (time.time() - start_time) * 1000
+                
+                # 6. 计费与用量追踪
+                self._record_usage(role, response, actual_model_id, messages, latency_ms=latency_ms)
+                
+                # 7. 注入审计元数据 (Audit Metadata Injection)
+                if hasattr(response, "additional_kwargs"):
+                    response.additional_kwargs.update({
+                        "audit_latency_ms": latency_ms,
+                        "audit_model_id": actual_model_id,
+                        "audit_role": role,
+                        "audit_timestamp": time.time()
+                    })
+                
+                # 8. 更新认知记忆
+                cognitive_memory_manager.add_message(session_id, response)
+                
+                return response
+                
+            except Exception as e:
+                logger.error(f"❌ [LLMProvider] 调用失败 ({role} | {actual_model_id}): {e}")
+                if attempt < max_attempts - 1:
+                    logger.warning(f"🔄 [LLMProvider] 正在尝试重新寻址并重试 (Attempt {attempt + 1}/{max_attempts})...")
+                    # 因为坏节点已经在底层被 record_failure 熔断，这里再拿一次必将返回备用节点（例如百炼）
+                    llm, actual_model_id = await model_manager.get_llm_by_role(role, retry_count=retry_count, config=config)
+                    if tools:
+                        llm = llm.bind_tools(tools)
+                    continue
+                else:
+                    logger.error("💥 [LLMProvider] 算力池彻底枯竭或网络瘫痪，放弃重试。")
+                    raise e
 
     def _resolve_tier_id(self, tier: str) -> str:
         """将逻辑层级映射为物理模型 ID (从配置中心读取)"""

@@ -75,4 +75,27 @@ class RedisClient:
         except Exception as e:
             logger.error(f"❌ [REDIS_HEALTH] 写入异常: {e}")
 
+    from contextlib import contextmanager
+    @contextmanager
+    def dist_lock(self, lock_key: str, timeout: int = 10):
+        """[V4.5] 企业级分布式锁实现"""
+        if not self.is_connected:
+            yield None
+            return
+            
+        acquired = False
+        try:
+            # 尝试获取锁 (NX=True 表示不存在才设置, EX=timeout 设置过期防止死锁)
+            acquired = self.client.set(f"hsa:lock:{lock_key}", "LOCKED", nx=True, ex=timeout)
+            if acquired:
+                logger.debug(f"🔓 [REDIS] 成功获取分布式锁: {lock_key}")
+                yield True
+            else:
+                logger.warning(f"🔒 [REDIS] 获取锁失败 (冲突): {lock_key}")
+                yield False
+        finally:
+            if acquired:
+                self.client.delete(f"hsa:lock:{lock_key}")
+                logger.debug(f"🔐 [REDIS] 已释放分布式锁: {lock_key}")
+
 redis_manager = RedisClient()

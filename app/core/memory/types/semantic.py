@@ -116,6 +116,45 @@ class SemanticMemory:
         )
         await self.storage.add([item])
 
+    async def learn_document(self, text: str, doc_name: str, importance: float = 0.9):
+        """
+        [V4.6] 企业级文档索引接口
+        利用标题感知分块算法，将长文档转化为具备上下文层级的语义切片。
+        """
+        from app.core.memory.rag_utils import split_paragraphs_with_headings, chunk_paragraphs, preprocess_markdown_for_embedding
+        
+        logger.info(f"📚 [SemanticMemory] 正在对文档进行结构化分块: {doc_name}")
+        
+        # 1. 执行标题感知分割
+        paragraphs = split_paragraphs_with_headings(text)
+        
+        # 2. 执行智能 Token 分块 (500 tokens/chunk)
+        chunks = chunk_paragraphs(paragraphs, chunk_tokens=500, overlap_tokens=50)
+        
+        # 3. 批量封装为 MemoryItem
+        items = []
+        for c in chunks:
+            # 预处理内容以提升嵌入质量
+            raw_content = c["content"]
+            processed_content = preprocess_markdown_for_embedding(raw_content)
+            
+            items.append(MemoryItem(
+                content=processed_content, # 存储清理后的内容
+                memory_type="semantic",
+                importance=importance,
+                metadata={
+                    "source": doc_name,
+                    "heading_path": c["heading_path"],
+                    "tokens": c["tokens"],
+                    "raw_len": len(raw_content),
+                    "ingestion_type": "rag_structured"
+                }
+            ))
+        
+        # 4. 物理入库
+        await self.storage.add(items)
+        logger.success(f"✅ [SemanticMemory] 文档索引完成 | {doc_name} | 切片数: {len(items)}")
+
     def format_for_prompt(self, items: List[MemoryItem]) -> str:
         """
         [V177.5] 将检索结果格式化为 LLM 提示词

@@ -21,11 +21,32 @@ class GraphStorage(BaseStorage):
 
     async def add(self, items: List[MemoryItem]):
         """
-        图谱写入：通常涉及 Cypher 实体创建逻辑。
-        目前版本主要用于查询，写入逻辑可后续根据业务扩展。
+        [V4.0] 图谱主动写入：将记忆内容中的实体与关系固化至 Neo4j。
         """
-        logger.warning("⚠️ [GraphStorage] 当前版本暂不支持异步批量写入，请使用 Neo4jManager 直接导入数据。")
-        pass
+        if not self.manager.is_connected: return
+        
+        for item in items:
+            # 提取元数据中的实体信息 (由 MemoryHub 注入)
+            entities = item.metadata.get("extracted_entities", [])
+            for ent in entities:
+                label = ent.get("label", "GenericEntity")
+                name = ent.get("name", "Unknown")
+                
+                # 简单 MERGE 逻辑：保证节点唯一性并建立与记忆项的联系
+                cypher = f"MERGE (e:{label} {{name: $name}}) " \
+                         f"MERGE (m:MemoryItem {{id: $mid}}) " \
+                         f"MERGE (m)-[:MENTIONS]->(e) " \
+                         f"SET m.content = $content, m.timestamp = $ts"
+                
+                params = {
+                    "name": name,
+                    "mid": item.metadata.get("id", str(hash(str(item.content)))),
+                    "content": str(item.content)[:200],
+                    "ts": item.timestamp.isoformat()
+                }
+                try:
+                    self.manager.execute_cypher(cypher, params)
+                except: pass # 忽略写入失败，保证主流程不中断
 
     async def search(self, query: str, limit: int = 5) -> List[MemoryItem]:
         """
@@ -37,8 +58,7 @@ class GraphStorage(BaseStorage):
             
         # 这里的 query 可以是 Cypher 或 关键字（通过 manager 路由）
         try:
-            # 模拟从图谱提取关联 Schema 的逻辑
-            # 在实际业务中，这里会根据 query 查找 Node/Relationship
+            # 物理路径：通过 Neo4j 本体提取语义关联 Schema
             ontology = self.manager.get_ontology()
             item = MemoryItem(
                 content=ontology,

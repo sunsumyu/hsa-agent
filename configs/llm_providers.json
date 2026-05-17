@@ -1,5 +1,5 @@
 {
-  "doubao-pro-32k": {
+  "doubao-smart-router": {
     "provider": "volcengine",
     "model_name": "ep-20260414173115-j9m9b",
     "priority": 1,

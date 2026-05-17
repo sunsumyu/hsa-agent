@@ -2,101 +2,293 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>HSA-Agent Token 成本治理中心</title>
+    <title>HSA-Agent · Token 成本治理中心 V4.6</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #020617;
-            --card-bg: #0f172a;
-            --accent: #10b981;
-            --text: #f8fafc;
+            --bg: #020617; --surface: #0f172a; --border: #1e293b;
+            --accent: #10b981; --blue: #38bdf8; --purple: #818cf8;
+            --yellow: #fbbf24; --red: #f87171; --text: #f8fafc; --muted: #64748b;
         }
-        body { background: var(--bg); color: var(--text); font-family: 'Outfit', sans-serif; padding: 30px; }
-        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; }
-        .card { background: var(--card-bg); padding: 25px; border-radius: 12px; border: 1px solid #1e293b; }
-        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 15px; }
-        .model-table { width: 100%; margin-top: 20px; border-collapse: collapse; }
-        .model-table th, .model-table td { padding: 12px; text-align: left; border-bottom: 1px solid #1e293b; }
-        .health-bar { height: 8px; border-radius: 4px; background: #334155; overflow: hidden; }
-        .health-fill { height: 100%; background: var(--accent); }
-        .back-btn { text-decoration: none; color: #94a3b8; font-size: 0.9rem; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: var(--bg); color: var(--text); font-family: 'Outfit', sans-serif; padding: 36px; }
+
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+        .header h1 { font-size: 1.9rem; font-weight: 800; }
+        .header h1 span { background: linear-gradient(135deg, #10b981, #38bdf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .back-link { color: var(--muted); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 20px; transition: 0.2s; }
+        .back-link:hover { color: var(--accent); }
+        .refresh-btn { background: #1e293b; border: 1px solid #334155; color: var(--accent); padding: 10px 22px; border-radius: 8px; cursor: pointer; font-family: 'Outfit', sans-serif; font-size: 0.9rem; transition: 0.2s; }
+        .refresh-btn:hover { background: var(--accent); color: #020617; border-color: var(--accent); }
+
+        /* KPI Row */
+        .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 28px; }
+        .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; }
+        .kpi-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+        .kpi-value { font-size: 2rem; font-weight: 800; }
+        .kpi-sub { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+
+        /* Chart + Budget Row */
+        .chart-row { display: grid; grid-template-columns: 1fr 340px; gap: 20px; margin-bottom: 28px; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 26px; }
+        .card h3 { margin-bottom: 20px; font-size: 1rem; }
+
+        /* Budget Bar */
+        .budget-big { font-size: 2.8rem; font-weight: 800; color: var(--accent); }
+        .budget-sub { color: var(--muted); font-size: 0.85rem; margin: 8px 0 20px; }
+        .hbar { height: 10px; border-radius: 5px; background: #1e293b; overflow: hidden; }
+        .hbar-fill { height: 100%; border-radius: 5px; background: linear-gradient(90deg, #10b981, #38bdf8); transition: width 0.6s ease; }
+
+        /* Node Table */
+        .node-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .node-table th { text-align: left; padding: 12px 16px; color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+        .node-table td { padding: 14px 16px; border-bottom: 1px solid #0f172a; }
+        .node-table tr:hover td { background: rgba(255,255,255,0.02); }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-dot.active { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+        .status-dot.standby { background: var(--muted); }
+        .status-dot.blacklisted { background: var(--red); }
+        .minibar { height: 6px; border-radius: 3px; background: #1e293b; overflow: hidden; width: 80px; }
+        .minibar-fill { height: 100%; border-radius: 3px; }
+        .badge-provider { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; background: #1e293b; color: var(--muted); border: 1px solid var(--border); }
+
+        /* Emergency btn */
+        .emergency-row { display: flex; justify-content: flex-end; margin-top: 24px; }
+        .emergency-btn { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--red); padding: 10px 24px; border-radius: 8px; cursor: pointer; font-family: 'Outfit', sans-serif; font-size: 0.9rem; transition: 0.2s; }
+        .emergency-btn:hover { background: rgba(239,68,68,0.25); }
+
+        .ts { text-align: right; color: var(--muted); font-size: 0.78rem; margin-top: 16px; }
+        .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid #334155; border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .no-data { text-align: center; color: var(--muted); padding: 40px; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>💰 Token 成本治理中心</h1>
-        <a href="index.html" class="back-btn">← 返回指挥门户</a>
-    </div>
 
-    <div class="grid">
-        <div class="card" style="grid-column: span 2;">
-            <h3>📊 供应商消耗占比 (Market Share)</h3>
-            <canvas id="usagePie" height="150"></canvas>
+<a href="index.html" class="back-link">← 返回指挥门户</a>
+
+<div class="header">
+    <div>
+        <h1>💰 Token 成本治理 <span>V4.6</span></h1>
+        <div style="color: var(--muted); font-size:0.85rem; margin-top:4px;">实时对接 UsageTracker · 百炼 & 火山引擎双通道</div>
+    </div>
+    <button class="refresh-btn" onclick="loadData()">
+        <span class="spinner" id="spin" style="display:none;"></span>刷新数据
+    </button>
+</div>
+
+<!-- KPI -->
+<div class="kpi-row">
+    <div class="kpi-card">
+        <div class="kpi-label">今日总消耗</div>
+        <div class="kpi-value" id="kpi-tokens" style="color:var(--blue)">—</div>
+        <div class="kpi-sub">Tokens (全节点)</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">今日估算费用</div>
+        <div class="kpi-value" id="kpi-cost" style="color:var(--accent)">—</div>
+        <div class="kpi-sub">USD (本地估算)</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">活跃节点</div>
+        <div class="kpi-value" id="kpi-active" style="color:var(--accent)">—</div>
+        <div class="kpi-sub" id="kpi-blacklisted">0 个黑名单</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-label">节点池规模</div>
+        <div class="kpi-value" id="kpi-total" style="color:var(--purple)">—</div>
+        <div class="kpi-sub">已注册 Endpoint</div>
+    </div>
+</div>
+
+<!-- Chart + Budget -->
+<div class="chart-row">
+    <div class="card">
+        <h3>📊 供应商消耗占比 (今日实时)</h3>
+        <canvas id="usagePie" height="160"></canvas>
+    </div>
+    <div class="card">
+        <h3>💸 今日预算执行</h3>
+        <div class="budget-big" id="budget-cost">—</div>
+        <div class="budget-sub" id="budget-total">预算上限: 计算中...</div>
+        <div class="hbar"><div class="hbar-fill" id="budget-bar" style="width:0%"></div></div>
+        <div style="margin-top:20px; color:var(--muted); font-size:0.82rem;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+                <span>最高消耗节点</span>
+                <span id="top-node" style="color:var(--text)">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+                <span>预计剩余轮次</span>
+                <span id="top-rounds" style="color:var(--accent)">—</span>
+            </div>
         </div>
-        <div class="card">
-            <h3>💸 今日预算执行 (Budget)</h3>
-            <div style="font-size: 2.5rem; font-weight: 800; color: var(--accent);">$0.42</div>
-            <p style="color: #94a3b8;">预算配额: $5.00 / 日</p>
-            <div class="health-bar" style="margin-top: 20px;"><div class="health-fill" style="width: 8.4%;"></div></div>
-        </div>
     </div>
+</div>
 
-    <div class="card" style="margin-top: 30px;">
-        <h3>🛡️ 节点健康状态与负载 (Node Health)</h3>
-        <table class="model-table">
-            <thead>
-                <tr>
-                    <th>节点 ID</th>
-                    <th>供应商</th>
-                    <th>状态</th>
-                    <th>今日请求数</th>
-                    <th>健康分</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>qwen-plus-1220</td>
-                    <td>Aliyun (Tier-1)</td>
-                    <td><span style="color: #22c55e;">● 活跃</span></td>
-                    <td>142</td>
-                    <td><div class="health-bar"><div class="health-fill" style="width: 98%;"></div></div></td>
-                </tr>
-                <tr>
-                    <td>deepseek-v3</td>
-                    <td>DeepSeek (Tier-2)</td>
-                    <td><span style="color: #22c55e;">● 活跃</span></td>
-                    <td>85</td>
-                    <td><div class="health-bar"><div class="health-fill" style="width: 95%;"></div></div></td>
-                </tr>
-                <tr>
-                    <td>gpt-4o-mini</td>
-                    <td>Azure (Tier-1)</td>
-                    <td><span style="color: #f59e0b;">● 熔断重试中</span></td>
-                    <td>12</td>
-                    <td><div class="health-bar"><div class="health-fill" style="width: 40%; background: #f59e0b;"></div></div></td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
+<!-- Node Table -->
+<div class="card">
+    <h3>🛡️ 全节点算力清单 (实时)</h3>
+    <table class="node-table">
+        <thead>
+            <tr>
+                <th>节点 ID</th>
+                <th>供应商</th>
+                <th>状态</th>
+                <th>今日 Tokens</th>
+                <th>今日请求</th>
+                <th>配额使用率</th>
+                <th>今日费用(USD)</th>
+                <th>健康分</th>
+                <th>剩余轮次</th>
+            </tr>
+        </thead>
+        <tbody id="node-tbody">
+            <tr><td colspan="9" class="no-data">正在连接后端服务...</td></tr>
+        </tbody>
+    </table>
+</div>
 
-    <script>
+<div class="emergency-row">
+    <button class="emergency-btn" onclick="resetBlacklists()">⚡ 紧急恢复：清除全部黑名单</button>
+</div>
+<div class="ts" id="ts">最后更新：—</div>
+
+<script>
+const API = 'http://127.0.0.1:18882';
+let pieChart = null;
+
+function statusColor(s) {
+    if (s === 'ACTIVE') return 'var(--accent)';
+    if (s === 'BLACKLISTED') return 'var(--red)';
+    return 'var(--muted)';
+}
+function healthColor(score) {
+    if (score >= 80) return '#10b981';
+    if (score >= 50) return '#fbbf24';
+    return '#f87171';
+}
+function fmtNum(n) {
+    if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+    return n.toString();
+}
+
+async function loadData() {
+    document.getElementById('spin').style.display = 'inline-block';
+    try {
+        const res = await fetch(`${API}/api/usage/stats`);
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+        const d = json.data;
+
+        // KPI
+        document.getElementById('kpi-tokens').textContent = fmtNum(d.total_daily_tokens);
+        document.getElementById('kpi-cost').textContent = '$' + d.total_daily_cost_usd.toFixed(3);
+        document.getElementById('kpi-active').textContent = d.active_nodes;
+        document.getElementById('kpi-blacklisted').textContent = d.blacklisted_nodes + ' 个黑名单';
+        document.getElementById('kpi-total').textContent = d.nodes.length;
+
+        // Budget
+        document.getElementById('budget-cost').textContent = '$' + d.total_daily_cost_usd.toFixed(3);
+        const BUDGET = 5.0;
+        const pct = Math.min(d.total_daily_cost_usd / BUDGET * 100, 100).toFixed(1);
+        document.getElementById('budget-total').textContent = `预算上限: $${BUDGET.toFixed(2)} / 日 (${pct}%)`;
+        document.getElementById('budget-bar').style.width = pct + '%';
+
+        if (d.nodes.length > 0) {
+            const top = d.nodes[0];
+            document.getElementById('top-node').textContent = top.id;
+            document.getElementById('top-rounds').textContent = top.burnout_rounds + ' 轮';
+        }
+
+        // Pie Chart (by provider)
+        const providerMap = {};
+        d.nodes.forEach(n => {
+            if (!providerMap[n.provider]) providerMap[n.provider] = 0;
+            providerMap[n.provider] += n.daily_tokens;
+        });
+        const labels = Object.keys(providerMap).filter(k => providerMap[k] > 0);
+        const values = labels.map(k => providerMap[k]);
+        const colors = ['#0ea5e9','#10b981','#f59e0b','#818cf8','#f87171','#34d399'];
+
+        if (pieChart) pieChart.destroy();
         const ctx = document.getElementById('usagePie').getContext('2d');
-        new Chart(ctx, {
+        pieChart = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: ['Aliyun (Qwen)', 'DeepSeek', 'Azure (GPT)', 'Others'],
+                labels: labels.length ? labels : ['暂无数据'],
                 datasets: [{
-                    data: [65, 25, 5, 5],
-                    backgroundColor: ['#0ea5e9', '#10b981', '#f59e0b', '#6366f1'],
+                    data: values.length ? values : [1],
+                    backgroundColor: labels.length ? colors.slice(0, labels.length) : ['#1e293b'],
                     borderWidth: 0
                 }]
             },
             options: {
-                cutout: '70%',
-                plugins: { legend: { position: 'right', labels: { color: '#f8fafc' } } }
+                cutout: '68%',
+                plugins: {
+                    legend: { position: 'right', labels: { color: '#f8fafc', font: { family: 'Outfit', size: 13 }, padding: 16 } }
+                }
             }
         });
-    </script>
+
+        // Node Table
+        const tbody = document.getElementById('node-tbody');
+        if (d.nodes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="no-data">暂无节点数据，请先运行一次 Benchmark 或审计任务</td></tr>';
+        } else {
+            tbody.innerHTML = d.nodes.map(n => `
+                <tr>
+                    <td style="font-family:monospace; font-size:0.82rem; color:var(--blue)">${n.id}</td>
+                    <td><span class="badge-provider">${n.provider}</span></td>
+                    <td>
+                        <span class="status-dot ${n.status.toLowerCase()}"></span>
+                        <span style="color:${statusColor(n.status)}">${n.status}</span>
+                    </td>
+                    <td>${fmtNum(n.daily_tokens)}</td>
+                    <td>${n.daily_requests}</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div class="minibar"><div class="minibar-fill" style="width:${Math.min(n.quota_pct,100)}%;background:${n.quota_pct>80?'var(--red)':'var(--accent)'}"></div></div>
+                            <span style="font-size:0.78rem;color:var(--muted)">${n.quota_pct}%</span>
+                        </div>
+                    </td>
+                    <td style="color:var(--accent)">$${n.cost_usd.toFixed(4)}</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div class="minibar"><div class="minibar-fill" style="width:${n.stability}%;background:${healthColor(n.stability)}"></div></div>
+                            <span style="font-size:0.78rem;color:${healthColor(n.stability)}">${n.stability}</span>
+                        </div>
+                    </td>
+                    <td style="color:${n.burnout_rounds < 5 ? 'var(--red)' : n.burnout_rounds < 20 ? 'var(--yellow)' : 'var(--accent)'}">${n.burnout_rounds === 999 ? '∞' : n.burnout_rounds}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('ts').textContent = '最后更新：' + new Date(d.timestamp).toLocaleString('zh-CN');
+    } catch(e) {
+        document.getElementById('node-tbody').innerHTML = `<tr><td colspan="9" class="no-data" style="color:var(--muted)">无法连接后端服务 (${API})，请先启动 HSA-Agent 服务。</td></tr>`;
+        document.getElementById('ts').textContent = '连接失败，检查后端服务是否运行';
+    } finally {
+        document.getElementById('spin').style.display = 'none';
+    }
+}
+
+async function resetBlacklists() {
+    if (!confirm('确认清除所有黑名单并恢复全部算力节点？')) return;
+    try {
+        const res = await fetch(`${API}/api/usage/reset-blacklists`, { method: 'POST' });
+        const json = await res.json();
+        alert(json.ok ? '✅ ' + json.message : '❌ 失败: ' + json.error);
+        if (json.ok) loadData();
+    } catch(e) {
+        alert('❌ 连接失败：' + e.message);
+    }
+}
+
+loadData();
+setInterval(loadData, 20000);
+</script>
 </body>
 </html>

@@ -55,10 +55,16 @@ from app.routes.palace import router as palace_router
 from app.routes.misc import router as misc_router
 from app.routes.graph_state import router as graph_state_router
 from app.routes.chat import router as chat_router
+from app.routes.memory import router as memory_router
+from app.routes.usage import router as usage_router
+from app.routes.prompts import router as prompts_router # [V192.0] 提示词版本管理
 app.include_router(palace_router)
 app.include_router(misc_router)
 app.include_router(graph_state_router)
 app.include_router(chat_router)
+app.include_router(memory_router)
+app.include_router(usage_router)
+app.include_router(prompts_router) # [V192.0]
 
 # 跨域配置: 从环境变量读取允许的来源, 默认仅本地开发
 # 生产环境必须设置 CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"

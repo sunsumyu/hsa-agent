@@ -28,14 +28,9 @@ class LocalEmbeddingEngine(Embeddings):
         self._initialized = True
 
     def _load_model(self):
+        # [V4.5.4] 环境配置已在 config.py 统一管理，此处仅负责加载逻辑
         try:
             from sentence_transformers import SentenceTransformer
-            # 解决 Windows 下 OpenMP 冲突
-            os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-            
-            # 使用镜像源加速
-            os.environ["HF_ENDPOINT"] = os.getenv("HF_ENDPOINT", "https://hf-mirror.com")
-            
             self.model = SentenceTransformer(self.model_name)
             logger.info(f"✅ [MemoryHub] 本地嵌入模型加载成功: {self.model_name}")
         except Exception as e:
