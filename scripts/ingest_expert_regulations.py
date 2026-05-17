@@ -17,7 +17,7 @@ from app.core.memory.rag_utils import approx_token_len
 # 配置
 KB_ROOT = "data/knowledge_base"
 STATE_FILE = "data/ingest_state.json"
-SUPPORTED_EXTS = {'.pdf', '.docx', '.xlsx', '.md', '.txt', '.csv'}
+SUPPORTED_EXTS = {'.pdf', '.docx', '.doc', '.xlsx', '.md', '.txt', '.csv', '.html', '.htm'}
 
 def get_file_hash(path: str) -> str:
     """计算文件 MD5 指纹"""

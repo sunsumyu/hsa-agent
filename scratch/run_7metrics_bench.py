@@ -117,28 +117,58 @@ PREDICTED = {
 }
 
 # ── Test Cases ────────────────────────────────────────────────────────
+# TEST_CASES = [
+#     {
+#         "id": "QA-01", "tag": "Repeat Billing",      "diff": "*   ",
+#         "prompt": "核查 2024 年是否存在同一天、同一患者、在同一医院多次收取的结算费用？",
+#         "pred_tokens": 9000,
+#     },
+#     {
+#         "id": "QA-03", "tag": "Gender Conflict",     "diff": "**  ",
+#         "prompt": "对全市结算数据进行性别冲突检查：找出男性患者产生妇科或产科费用的异常明细。",
+#         "pred_tokens": 10500,
+#     },
+#     {
+#         "id": "QA-06", "tag": "Dual Hospitalization","diff": "*** ",
+#         "prompt": "核查是否存在同一患者在同一天内，在两家不同医院【同时住院】的情况？",
+#         "pred_tokens": 13000,
+#     },
+#     {
+#         "id": "QA-11", "tag": "Fraud Network",        "diff": "****",
+#         "prompt": "核查中心医院是否存在与职工共用联系方式（尾号8888）且报销额度异常偏高的患者群？",
+#         "pred_tokens": 15000,
+#     },
+# ]
+
+# ── Test Cases ────────────────────────────────────────────────────────
 TEST_CASES = [
     {
-        "id": "QA-01", "tag": "Repeat Billing",      "diff": "*   ",
-        "prompt": "核查 2024 年是否存在同一天、同一患者、在同一医院多次收取的结算费用？",
-        "pred_tokens": 9000,
+        "id": "QA-NEW-01", "tag": "Decomp Hospital",   "diff": "*** ",
+        "prompt": "对2024年全市住院患者进行核查，是否存在在同一家医院出院后15天内再次入院的“分解住院”可疑行为？",
+        "pred_tokens": 12000,
     },
     {
-        "id": "QA-03", "tag": "Gender Conflict",     "diff": "**  ",
-        "prompt": "对全市结算数据进行性别冲突检查：找出男性患者产生妇科或产科费用的异常明细。",
+        "id": "QA-NEW-02", "tag": "Cross Store Spend",  "diff": "*** ",
+        "prompt": "核查2024年度是否存在同一患者跨5家及以上定点药店进行购药，且基金支付总额超过5000元的异常消费行为？",
+        "pred_tokens": 11000,
+    },
+    {
+        "id": "QA-NEW-03", "tag": "High Freq Drug",     "diff": "**  ",
+        "prompt": "针对定点药店购药场景，核查2024年是否存在单人累计在同一药店购药频次达到10次及以上的“高频购药”异常明细？",
         "pred_tokens": 10500,
     },
     {
-        "id": "QA-06", "tag": "Dual Hospitalization","diff": "*** ",
-        "prompt": "核查是否存在同一患者在同一天内，在两家不同医院【同时住院】的情况？",
-        "pred_tokens": 13000,
+        "id": "QA-NEW-04", "tag": "Ghost Bed Hospital", "diff": "****",
+        "prompt": "核查2024年度是否存在住院天数异常长（如超过14天）但医疗总费用极低的可疑“挂床住院”或虚假住院案例？",
+        "pred_tokens": 13500,
     },
     {
-        "id": "QA-11", "tag": "Fraud Network",        "diff": "****",
-        "prompt": "核查中心医院是否存在与职工共用联系方式（尾号8888）且报销额度异常偏高的患者群？",
-        "pred_tokens": 15000,
+        "id": "QA-NEW-05", "tag": "Overlapping Hosp",   "diff": "****",
+        "prompt": "核查2024年是否存在同一参保人，在完全相同的时间段内在两家不同的定点医疗机构【同时挂账住院】的违规行为？",
+        "pred_tokens": 14000,
     },
 ]
+
 
 # ── Judge Prompt ──────────────────────────────────────────────────────
 JUDGE_PROMPT = """You are a senior healthcare insurance audit judge.

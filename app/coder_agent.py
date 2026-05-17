@@ -52,29 +52,14 @@ class AuditCoderAgent:
 
         # 2. 上下文准备
         tasks_list = state.get("tasks", [])
-        mem_context = cognitive_memory_manager.recall_context(state.get("session_id", "default"), "\n".join(tasks_list))
         
-        # 提取外部持久化审计便签簿中的里程碑线索，并入上下文
-        import os as _os_coder
-        note_content = ""
-        note_file = "data/audit_notes.md"
-        if _os_coder.path.exists(note_file):
-            try:
-                with open(note_file, "r", encoding="utf-8") as f:
-                    note_content = f.read().strip()
-                if note_content:
-                    logger.info("📓 [CoderAgent] 成功将外部便签线索并入上下文")
-            except Exception as e:
-                logger.warning(f"读取外部便签失败: {e}")
-                
-        # 融合向量经验和外部结构化便签线索！
-        experiences_combined = mem_context or ""
-        if note_content:
-            experiences_combined += f"\n\n【外部已固化审计线索/便签簿 (Structured Audit Notes)】：\n{note_content}"
+        # 已启用统一 GSSC 上下文引擎，真实 Schema 信息、审计经验及便签线索将由 ContextBuilder 在 LLMProvider 自动挂载至消息链尾部！
+        # 传入优雅的定位语，指导模型注意尾部事实载荷
+        schema_hint = "【已启用 GSSC 统一上下文引擎：本角色所需的真实 ClickHouse DDL 物理表结构与主表规范，已安全挂载于当前消息流最尾部。请滚动至最尾部，在 <database_schema_context> 标签中查阅，以确保取得最新最准的 DDL 元数据进行 SQL 编写】"
+        experiences_combined = "【已启用 GSSC 统一上下文引擎：相关的向量专家经验与外部结构化审计便签线索，已安全挂载于当前消息流最尾部。请滚动至最尾部，在 <experiential_context> 与 <structured_audit_notes> 标签中查阅，以获取历史成功路径与已固化的审计证据链】"
         
         user_messages = [m for m in state.get("messages", []) if getattr(m, "type", "") == "human"]
         user_q = " ".join(str(m.content) for m in user_messages)[:200]
-        schema_hint = schema_injector.inject(user_question=f"{user_q} {' '.join(tasks_list)}")
 
         prompt = CODER_PROMPT.format_messages(
             original_question=user_q,
@@ -175,8 +160,10 @@ class AuditCoderAgent:
                     error_msg = res.get("error_message") or "Tool execution failed"
                 
                 # 证据链提取
-                if "records_sample" in res: raw_data_list.append(str(res["records_sample"]))
-                if "raw_evidence" in res: raw_data_list.append(str(res["raw_evidence"]))
+                if "data" in res and res["data"]:
+                    raw_data_list.append(str(res["data"]))
+                elif "records_sample" in res: raw_data_list.append(str(res["records_sample"]))
+                elif "raw_evidence" in res: raw_data_list.append(str(res["raw_evidence"]))
         
         return {
             "tool_msgs": tool_msgs,

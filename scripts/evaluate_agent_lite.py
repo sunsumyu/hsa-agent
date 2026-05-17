@@ -100,7 +100,7 @@ async def run_evaluation_lite(model_id: str = "qwen-turbo", max_cases: int = 10)
         
         try:
             state = {"messages": [HumanMessage(content=input_text)], "model_id": resolved_model_id}
-            response = executor.invoke(state)
+            response = await executor.ainvoke(state)
             messages = response.get("messages", [])
             actual_output = ""
             for msg in reversed(messages):

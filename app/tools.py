@@ -160,7 +160,8 @@ async def _execute_audit_sql_logic(
                 logic_summary=f"已成功穿透底层数据库，检索到相关审计证据。",
                 affected_rows=len(result),
                 trace_hint=f"Query executed successfully via Clickhouse.",
-                security_verified=True
+                security_verified=True,
+                sql_logic=safe_sql # [V178.9] 证据链持久化注入
             )
             
             # 为了兼容旧版解析器，返回 dict 但包含 USP 字段

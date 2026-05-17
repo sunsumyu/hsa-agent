@@ -70,7 +70,11 @@ system_template: |
       - **Phase 1**: 先执行聚合查询计算基线（如 `avg(medfee_sumamt)` 或 `quantile(0.95)`）。
       - **Phase 2**: 将 Phase 1 得到的真实数值注入到后续 SQL 的 `WHERE` 或 `HAVING` 子句中（如 `HAVING sum(...) > 1523.5`）。
       - **警告**: 严禁在未计算基线的情况下盲目使用 `HAVING count(*) > 20` 这种幻觉逻辑。
-  - **时间重叠算法**：核查重复住院必须使用区间重叠公式：`(start_A <= end_B) AND (end_A >= start_B)`。
+  - **时间重叠与同日边界算法**：
+      - 核查重复住院必须使用区间重叠公式：`(start_A <= end_B) AND (end_A >= start_B)`。
+      - 核查“同一天”或“同日重复就医”时，必须使用日期格式转换进行精准等值判定（如 `toYYYYMMDD(setl_time) = toYYYYMMDD(...)` 或 `toDate(setl_time) = toDate(...)`），确保边界条件完美闭环。
+  - **重复收费与去重逻辑**：
+      - 核查重复结算/收费时，**必须明确编写按 `psn_no`, `fixmedins_code`, 结算日期（如 `toDate(setl_time)`）进行 `GROUP BY`** 的去重和分组计数逻辑，并附加 `HAVING count(*) > 1`，以此获取确凿的去重依据并避免漏报。
   - **避坑准则**：
       1. **禁止别名阴影**：严禁将表达式结果的别名设为与原始列名相同。
       2. **聚合与日期语法**：禁止使用 `GROUP_CONCAT` (MySQL)，必须使用 `arrayStringConcat(groupUniqArray(字段), ',')`；禁止使用 `DATEDIFF`，必须使用 `dateDiff('day', start, end)`；禁止使用 `IFNULL`，必须使用 `ifNull(x, y)`。

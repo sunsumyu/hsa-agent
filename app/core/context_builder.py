@@ -97,7 +97,7 @@ class ContextBuilder:
         # 4. Compress (兜底压缩保护)
         # 如果最终生成的整个消息链 Token 依然超过最大预算，触发分区感知式压缩
         if self.config.enable_compression:
-            structured_messages = self._compress_messages_budget(structured_messages)
+            structured_messages = await self._compress_messages_budget(structured_messages)
 
         logger.info(f"✅ [ContextBuilder] GSSC 治理成功！共精选出 {len(selected_packets)} 个黄金上下文信息包。")
         return structured_messages
@@ -293,35 +293,57 @@ class ContextBuilder:
         
         return final_messages
 
-    def _compress_messages_budget(self, messages: List[BaseMessage]) -> List[BaseMessage]:
-        # 对整个消息流执行结构化兜底截断压缩，防止意外爆额度
+    async def _compress_messages_budget(self, messages: List[BaseMessage]) -> List[BaseMessage]:
+        # 对整个消息流执行结构化兜底截断压缩，并应用 Model-Driven Compaction (摘要重置) 机制
         total_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in messages)
         if total_tokens <= self.config.max_tokens:
             return messages
 
-        logger.warning(f"⚠️ [ContextBuilder] 整合后消息流超限 ({total_tokens} > {self.config.max_tokens})，触发分区结构化压缩！")
+        logger.warning(f"⚠️ [ContextBuilder] 整合后消息流超限 ({total_tokens} > {self.config.max_tokens})，触发 Model-Driven Compaction 摘要重置！")
         
-        compressed = []
+        retained = []
+        truncated = []
         current_sum = 0
+        
+        # 预留一部分 Token 空间给摘要生成 (约 400 tokens)
+        retained_budget = self.config.max_tokens - 400
         
         for m in messages:
             m_t = ContextPacket.estimate_tokens(m.content)
-            if current_sum + m_t <= self.config.max_tokens:
-                compressed.append(m)
+            if current_sum + m_t <= retained_budget:
+                retained.append(m)
                 current_sum += m_t
             else:
-                remain = self.config.max_tokens - current_sum
-                if remain > 100:
-                    char_ratio = len(m.content) / m_t if m_t > 0 else 4
-                    trunc_len = int(remain * char_ratio)
-                    
-                    if m.type == 'system':
-                        compressed.append(SystemMessage(content=m.content[:trunc_len] + "\n[... ⚠️ 事实载荷数据超出限制，已被物理压缩截断 ...]"))
-                    elif m.type == 'human':
-                        compressed.append(HumanMessage(content=m.content[:trunc_len] + "\n[... ⚠️ 消息已压缩 ...]"))
-                    else:
-                        compressed.append(AIMessage(content=m.content[:trunc_len] + "\n[... ⚠️ 消息已压缩 ...]"))
-                break
+                truncated.append(m)
+                
+        if not truncated:
+            return messages
 
-        return compressed
+        # 收集被截断消息的文本内容进行摘要蒸馏
+        truncated_text = "\n".join(f"[{m.type}]: {m.content[:500]}" for m in truncated)
+        
+        summary_content = "[⚠️ 事实载荷超出预算，已被物理截断]"
+        try:
+            from app.core.llm_provider import llm_provider
+            summary_prompt = (
+                f"你是一个资深的医保稽核审计专家。以下部分审计线索和对话历史因为 Token 预算超限即将被物理截断。\n"
+                f"请你用最精简、凝练的语言（不超过 150 字），总结这段被截断历史中的**核心 SQL 语句、查询表名、核心核查规则及中间结论**，以便智能体恢复审计状态：\n\n"
+                f"【被截断的历史事实】：\n{truncated_text}\n\n"
+                f"请直接给出高保真审计摘要，不要有任何客套话："
+            )
+            # 使用快速轻量级模型进行高速摘要生成
+            response = await llm_provider.chat(
+                role="reporter", 
+                messages=[HumanMessage(content=summary_prompt)],
+                model_id="LIGHT"
+            )
+            summary_content = f"📋 [被截断历史事实的高保真 Compaction 摘要]：\n{str(response.content).strip()}"
+            logger.info("⚡ [ContextBuilder] 成功完成 Model-Driven Compaction 历史摘要重置！")
+        except Exception as summary_err:
+            logger.warning(f"⚠️ [ContextBuilder] 摘要蒸馏失败，降级为物理截断: {summary_err}")
+            # 降级截断处理
+            summary_content = f"[⚠️ 数据超出预算，已被物理降级截断] (截断内容包含: {', '.join(m.type for m in truncated[:3])} 等)"
+
+        retained.append(SystemMessage(content=summary_content))
+        return retained
 

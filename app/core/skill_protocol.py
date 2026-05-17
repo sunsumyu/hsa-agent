@@ -23,6 +23,7 @@ class SkillResponse(BaseModel):
     affected_rows: int = 0          # 涉及的数据行数
     security_verified: bool = True  # 是否通过了安全校验
     error_detail: Optional[str] = None # 错误详情
+    sql_logic: Optional[str] = None # [V178.9] 物理执行的 SQL 逻辑证据
 
     def to_chat_summary(self) -> str:
         """生成供 LLM 阅读的简短摘要"""

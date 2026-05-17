@@ -101,15 +101,18 @@ class AuditPlannerAgent:
             else:
                 user_input_enriched = user_input
 
-            # 1. 语义召回 (Schema/行业知识)
-            relevant_items = await memory_hub.query(user_input_enriched)
-            schema_hint = memory_hub.semantic.format_for_prompt(relevant_items)
-            avoidance_guide = memory_hub.semantic.get_avoidance_guides(user_input_enriched)
-            if avoidance_guide: schema_hint = f"{schema_hint}\n\n{avoidance_guide}"
+            # 1. 语义与情景召回 (重构：对于 planner_heavy，召回托管给统一 GSSC 上下文引擎；对于 planner_light，执行极简内存查询以防爆 Token)
+            if role == "planner_heavy":
+                schema_hint = "【已启用 GSSC 统一引擎：相关的 ClickHouse DDL 与物理主表元数据规范，已安全挂载于当前消息流最尾部。请滚动至尾部查阅 <database_schema_context> 标签获取真实物理 Schema 以确保规划的准确性】"
+                experience_hint = "【已启用 GSSC 统一引擎：相关的专家审计经验与已固化的外部便签证据线索，已安全挂载于当前消息流最尾部。请滚动至尾部查阅 <experiential_context> 与 <structured_audit_notes> 获取细节】"
+            else:
+                relevant_items = await memory_hub.query(user_input_enriched)
+                schema_hint = memory_hub.semantic.format_for_prompt(relevant_items)
+                avoidance_guide = memory_hub.semantic.get_avoidance_guides(user_input_enriched)
+                if avoidance_guide: schema_hint = f"{schema_hint}\n\n{avoidance_guide}"
 
-            # 2. 情景召回 (历史成功案例)
-            episodes = await memory_hub.episodic.recall_experience(user_input_enriched, limit=2)
-            experience_hint = memory_hub.episodic.format_experience_for_prompt(episodes)
+                episodes = await memory_hub.episodic.recall_experience(user_input_enriched, limit=2)
+                experience_hint = memory_hub.episodic.format_experience_for_prompt(episodes)
 
             # 3. 构造 Messages
             messages = PLANNER_PROMPT.format_messages(

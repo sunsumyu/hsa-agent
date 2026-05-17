@@ -420,8 +420,8 @@ def _apply_pii_masking(text: str) -> str:
     text = _r.sub(r'\b\d{15}(\d{2}[0-9xX])?\b', lambda m: m.group()[:6] + "********" + m.group()[-4:], text)
     # 掩码电话 (保留前3后4)
     text = _r.sub(r'\b1[3-9]\d{9}\b', lambda m: m.group()[:3] + "****" + m.group()[-4:], text)
-    # 掩码姓名 (针对“姓名：张三”模式)
-    text = _r.sub(r'(?<=患者|姓名)[：: ]*([\u4e00-\u9fa5]{2,3})', lambda m: m.group(1)[0] + "*" * (len(m.group(1)) - 1), text)
+    # 掩码姓名 (针对“姓名：张三”模式，强制要求有冒号或空格分隔符，防止“患者产生妇科”等学术词被误伤打码)
+    text = _r.sub(r'(?<=患者|姓名)[：: ]+([\u4e00-\u9fa5]{2,3})', lambda m: m.group(1)[0] + "*" * (len(m.group(1)) - 1), text)
     return text
     return text
 
