@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 # Ensure local imports work
 sys.path.append(os.getcwd())
 
-from app.agent_graph import get_graph_executor
-from app.model_manager import model_manager
+from app.core.agent_graph import get_graph_executor
+from app.infra.model_manager import model_manager
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 load_dotenv()

@@ -17,9 +17,9 @@ class SQLSafeExecutionSkill(BaseTool):
     args_schema: Type[BaseModel] = SQLExecutionInput
 
     async def _arun(self, sql: str) -> Union[str, Dict[str, Any]]:
-        from app.security import SQLGuardian
-        from app.db_conn import get_clickhouse_client
-        from app.core.schema_registry import schema_registry
+        from app.skills.security import SQLGuardian
+        from app.infra.db_conn import get_clickhouse_client
+        from app.core.registry.schema_registry import schema_registry
         
         def _mask_sensitive_data(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             """脱敏字段列表从 SchemaRegistry 读取, 消灭硬编码"""

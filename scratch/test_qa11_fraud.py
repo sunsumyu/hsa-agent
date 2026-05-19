@@ -6,8 +6,8 @@ from loguru import logger
 # 确保加载 app 模块
 sys.path.append(os.getcwd())
 
-from app.agent_graph import workflow
-from app.model_manager import model_manager
+from app.core.agent_graph import workflow
+from app.infra.model_manager import model_manager
 
 async def run_qa11_test():
     logger.info("🚀 [QA-11 专项测试] 启动：核查共用联系方式欺诈团伙")

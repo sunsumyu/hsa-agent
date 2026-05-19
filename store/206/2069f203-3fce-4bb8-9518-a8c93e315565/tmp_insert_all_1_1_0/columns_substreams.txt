@@ -1,0 +1,102 @@
+columns substreams version: 1
+31 columns:
+2 substreams for column `prv_name`:
+	prv_name.size
+	prv_name
+2 substreams for column `city_name`:
+	city_name.size
+	city_name
+2 substreams for column `admdvs_name`:
+	admdvs_name.size
+	admdvs_name
+2 substreams for column `psn_no`:
+	psn_no.size
+	psn_no
+2 substreams for column `psn_name`:
+	psn_name.size
+	psn_name
+2 substreams for column `certno`:
+	certno.size
+	certno
+3 substreams for column `emp_no`:
+	emp_no.sparse.idx
+	emp_no.size
+	emp_no
+3 substreams for column `emp_name`:
+	emp_name.sparse.idx
+	emp_name.size
+	emp_name
+3 substreams for column `emp_type`:
+	emp_type.sparse.idx
+	emp_type.size
+	emp_type
+2 substreams for column `gend`:
+	gend.size
+	gend
+3 substreams for column `cert_gend`:
+	cert_gend.sparse.idx
+	cert_gend.size
+	cert_gend
+1 substreams for column `age`:
+	age
+2 substreams for column `insutype`:
+	insutype.size
+	insutype
+2 substreams for column `med_type`:
+	med_type.size
+	med_type
+3 substreams for column `psn_type`:
+	psn_type.sparse.idx
+	psn_type.size
+	psn_type
+3 substreams for column `insu_admdvs`:
+	insu_admdvs.sparse.idx
+	insu_admdvs.size
+	insu_admdvs
+3 substreams for column `setl_id`:
+	setl_id.sparse.idx
+	setl_id.size
+	setl_id
+3 substreams for column `begndate`:
+	begndate.sparse.idx
+	begndate.size
+	begndate
+3 substreams for column `enddate`:
+	enddate.sparse.idx
+	enddate.size
+	enddate
+2 substreams for column `setl_time`:
+	setl_time.size
+	setl_time
+3 substreams for column `feelist_psn_no`:
+	feelist_psn_no.sparse.idx
+	feelist_psn_no.size
+	feelist_psn_no
+2 substreams for column `fee_ocur_time`:
+	fee_ocur_time.size
+	fee_ocur_time
+3 substreams for column `mdtrt_id`:
+	mdtrt_id.sparse.idx
+	mdtrt_id.size
+	mdtrt_id
+2 substreams for column `fixmedins_code`:
+	fixmedins_code.size
+	fixmedins_code
+2 substreams for column `fixmedins_name`:
+	fixmedins_name.size
+	fixmedins_name
+2 substreams for column `hilist_code`:
+	hilist_code.size
+	hilist_code
+2 substreams for column `hilist_name`:
+	hilist_name.size
+	hilist_name
+1 substreams for column `cnt`:
+	cnt
+1 substreams for column `pric`:
+	pric
+1 substreams for column `det_item_fee_sumamt`:
+	det_item_fee_sumamt
+2 substreams for column `fx_level`:
+	fx_level.size
+	fx_level

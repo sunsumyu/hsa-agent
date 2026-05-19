@@ -3,8 +3,8 @@ import os
 # 添加当前目录到路径
 sys.path.append(os.getcwd())
 
-from app.usage_tracker import usage_tracker
-from app.model_manager import model_manager
+from app.infra.usage_tracker import usage_tracker
+from app.infra.model_manager import model_manager
 from loguru import logger
 
 def test_pydantic_migration():

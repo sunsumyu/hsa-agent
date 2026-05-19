@@ -1,4 +1,4 @@
-from app.db_conn import get_clickhouse_client
+from app.infra.db_conn import get_clickhouse_client
 
 client = get_clickhouse_client()
 res = client.query("DESCRIBE TABLE fqz_gz_jzsj_all_ql")

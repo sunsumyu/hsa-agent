@@ -1,7 +1,7 @@
 import asyncio
 import os
 from loguru import logger
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 
 async def test_all_providers():
     roles = ["planner", "coder", "reporter"]

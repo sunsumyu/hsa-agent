@@ -8,7 +8,7 @@ from loguru import logger
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 from langchain_core.messages import HumanMessage
 from app.tools import execute_audit_sql
 

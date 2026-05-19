@@ -1,5 +1,5 @@
-from app.model_manager import model_manager
-from app.schemas import ModelConfig
+from app.infra.model_manager import model_manager
+from app.core.schemas import ModelConfig
 import os
 from dotenv import load_dotenv
 

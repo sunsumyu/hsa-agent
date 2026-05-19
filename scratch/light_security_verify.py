@@ -1,6 +1,6 @@
 import os
 # 仅导入 Security 核心，不加载 tools.py 中的重型模型
-from app.security import SQLGuardian, SQLComplexityError
+from app.skills.security import SQLGuardian, SQLComplexityError
 
 def light_verify():
     print("\n" + "="*50)

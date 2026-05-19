@@ -3,7 +3,7 @@ import os
 # 添加当前目录到路径
 sys.path.append(os.getcwd())
 
-from app.security import SQLGuardian, SecurityViolationError
+from app.skills.security import SQLGuardian, SecurityViolationError
 
 def test_syntax_guard():
     print("\n" + "="*60)

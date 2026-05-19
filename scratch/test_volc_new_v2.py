@@ -6,7 +6,7 @@ from loguru import logger
 # 环境初始化
 sys.path.append(os.getcwd())
 
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 from langchain_core.messages import HumanMessage
 
 async def probe_specific_models():

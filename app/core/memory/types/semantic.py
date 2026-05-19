@@ -10,7 +10,7 @@ import json
 from loguru import logger
 from app.core.memory.base import MemoryItem
 from app.core.memory.storage.vector import VectorStorage
-from app.neo4j_manager import field_kg
+from app.infra.neo4j_manager import field_kg
 
 class MetadataMappingLayer:
     """[V110.0] 企业级“语义—物理”映射层：解决业务术语混淆及字段幻觉"""

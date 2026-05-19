@@ -2,8 +2,8 @@ import os
 import json
 import asyncio
 from typing import List
-from app.history import history_manager
-from app.semantic_memory import semantic_memory_manager
+from app.memory.history import history_manager
+from app.memory.semantic_memory import semantic_memory_manager
 from loguru import logger
 
 async def batch_index_session(session_id: str):

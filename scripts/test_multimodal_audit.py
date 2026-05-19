@@ -8,7 +8,7 @@ from loguru import logger
 sys.path.append(os.getcwd())
 # HF_HOME: use .env or system default
 
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 
 async def test_multimodal_penetration():
     executor, _ = get_graph_executor()

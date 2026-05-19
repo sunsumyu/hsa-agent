@@ -1,8 +1,8 @@
 from typing import Type, Optional
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
-from app.schema_injector import schema_injector
-from app.neo4j_manager import field_kg
+from app.skills.schema_injector import schema_injector
+from app.infra.neo4j_manager import field_kg
 
 class MedicalSchemaInput(BaseModel):
     keywords: str = Field(description="The keywords or intent to search for medical database fields (e.g., '重复住院', '总金额').")

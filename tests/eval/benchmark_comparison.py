@@ -9,13 +9,13 @@ from dotenv import load_dotenv
 # 加载环境变量
 load_dotenv(override=True)
 
-from app.agent import get_executor, get_prompt
+from app.agents.agent import get_executor, get_prompt
 from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 from tests.eval.metrics import get_hsa_evidence_chain_metric, HSANumericalPrecisionMetric
 from deepeval.test_case import LLMTestCase
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 
 class BenchmarkRunner:
     def __init__(self):
@@ -38,7 +38,7 @@ class BenchmarkRunner:
         if mode == "MEMORY_PALACE":
             # 完整模式：层级结构提示词 + 完整工具
             tools = [execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge]
-            prompt = get_prompt() # 使用 app.agent 中的复杂全量 Prompt
+            prompt = get_prompt() # 使用 app.agents.agent 中的复杂全量 Prompt
         elif mode == "STANDARD_RAG":
             # 标准 RAG：扁平化提示词 + 完整工具
             tools = [execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge]

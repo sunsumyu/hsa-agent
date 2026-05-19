@@ -8,9 +8,9 @@ app/routes/misc.py
 from fastapi import APIRouter, Request
 from loguru import logger
 
-from app.model_manager import model_manager
-from app.history import history_manager
-from app.usage_tracker import usage_tracker
+from app.infra.model_manager import model_manager
+from app.memory.history import history_manager
+from app.infra.usage_tracker import usage_tracker
 
 router = APIRouter()
 
@@ -49,7 +49,7 @@ async def get_history(request: Request):
 @router.get("/ins-fqz/agent/metrics")
 async def get_metrics():
     """[V4.8.0] 可视化工具链：返回实时 Token 消耗、模型用量和成本统计"""
-    from app.usage_tracker import usage_tracker
+    from app.infra.usage_tracker import usage_tracker
 
     stats = usage_tracker.stats
     daily = stats.daily_usage

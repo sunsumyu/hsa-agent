@@ -9,8 +9,8 @@ from fastapi import APIRouter
 from loguru import logger
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.agent_graph import get_graph_executor
-from app.schemas import ResolveRequest
+from app.core.agent_graph import get_graph_executor
+from app.core.schemas import ResolveRequest
 
 router = APIRouter()
 
@@ -19,7 +19,7 @@ router = APIRouter()
 @router.get("/ins-fqz/palace/graph")
 async def get_palace_graph(session_id: str = None):
     """[V4.9.6] MemPalace 证据拓扑图谱：将最近推演的 Findings 解析为可视化图结构"""
-    from app.entity_extractor import get_latest_graph
+    from app.memory.entity_extractor import get_latest_graph
     graph = get_latest_graph(session_id)
     return graph
 
@@ -46,8 +46,8 @@ async def get_palace_timeline(session_id: str = "default_session"):
 @router.get("/ins-fqz/palace/conflicts")
 async def api_get_conflicts():
     """[V4.9.6] 检测当前记忆系统中的逻辑冲突"""
-    from app.entity_extractor import _latest_findings
-    from app.conflict_detector import detect_conflicts
+    from app.memory.entity_extractor import _latest_findings
+    from app.skills.conflict_detector import detect_conflicts
     return {"conflicts": detect_conflicts(_latest_findings)}
 
 
@@ -55,7 +55,7 @@ async def api_get_conflicts():
 @router.post("/ins-fqz/palace/conflicts/resolve")
 async def api_resolve_conflict(req: ResolveRequest):
     """[V4.9.6] 用户手动解决证据冲突"""
-    from app.conflict_detector import mark_resolved
+    from app.skills.conflict_detector import mark_resolved
     mark_resolved(req.finding_a, req.keep_a)
     mark_resolved(req.finding_b, req.keep_b)
     return {"status": "success", "message": "冲突已解决"}

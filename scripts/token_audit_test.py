@@ -12,8 +12,8 @@ os.environ["LANGFUSE_PUBLIC_KEY"] = ""
 os.environ["LANGFUSE_SECRET_KEY"] = ""
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-from app.agent_graph import get_graph_executor, _record_usage_with_budget
-from app.usage_tracker import usage_tracker
+from app.core.agent_graph import get_graph_executor, _record_usage_with_budget
+from app.infra.usage_tracker import usage_tracker
 
 # ---------------------------------------------------------
 # 1. Token 物理追踪拦截器 (改进版：基于 Role 追踪)
@@ -25,7 +25,7 @@ class TokenRoleTracker:
 
     def patch(self):
         # 拦截 _record_usage_with_budget 以获取 Role 信息
-        import app.agent_graph
+        import app.core.agent_graph
         self._original_record_usage_with_budget = app.agent_graph._record_usage_with_budget
         app.agent_graph._record_usage_with_budget = self._intercepted_record_budget
 

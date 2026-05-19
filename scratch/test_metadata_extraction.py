@@ -4,7 +4,7 @@ import os
 # 设置项目根目录
 sys.path.append(os.getcwd())
 
-from app.semantic_layer import SemanticRetriever
+from app.skills.semantic_layer import SemanticRetriever
 from loguru import logger
 
 def test_extraction():

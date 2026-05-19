@@ -7,7 +7,7 @@ sys.path.append(os.getcwd())
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["LANGFUSE_PUBLIC_KEY"] = "" # 禁用观测以加速单次测试
 
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 
 async def main():
     executor, _ = get_graph_executor()

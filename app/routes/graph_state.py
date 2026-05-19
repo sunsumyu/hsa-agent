@@ -7,7 +7,7 @@ app/routes/graph_state.py
 from fastapi import APIRouter, Request
 from loguru import logger
 
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 
 router = APIRouter()
 

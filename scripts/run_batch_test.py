@@ -1,6 +1,6 @@
 import os
 import time
-from app.audit_rules import rule_engine
+from app.skills.audit_rules import rule_engine
 from app.tools import _execute_audit_sql_logic
 import json
 

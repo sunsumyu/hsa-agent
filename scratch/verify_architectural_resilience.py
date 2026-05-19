@@ -1,6 +1,6 @@
 import asyncio
-from app.agent_graph import resilient_expert_call, AuditState
-from app.usage_tracker import usage_tracker
+from app.core.agent_graph import resilient_expert_call, AuditState
+from app.infra.usage_tracker import usage_tracker
 from langchain_core.messages import HumanMessage
 from loguru import logger
 import sys
@@ -38,7 +38,7 @@ async def simulate_failover_test():
     # 3. Call Expert (Expected Failover)
     safe_print("\nEXEC: Calling data_expert_node (Expecting automated failover)...")
     try:
-        from app.agent_graph import data_expert_node
+        from app.core.agent_graph import data_expert_node
         result = await data_expert_node(state)
         
         safe_print("\n" + "="*50)

@@ -1,6 +1,6 @@
 import asyncio
 import os
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
 

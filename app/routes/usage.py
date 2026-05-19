@@ -18,7 +18,7 @@ async def get_usage_stats():
     返回所有节点的今日 Token 消耗、请求数、健康分及计费估算
     """
     try:
-        from app.usage_tracker import usage_tracker
+        from app.infra.usage_tracker import usage_tracker
         from datetime import datetime
 
         tracker = usage_tracker
@@ -90,7 +90,7 @@ async def get_usage_stats():
 async def reset_blacklists():
     """[V4.6] 紧急恢复：清除所有黑名单，重启算力链路"""
     try:
-        from app.usage_tracker import usage_tracker
+        from app.infra.usage_tracker import usage_tracker
         usage_tracker.reset_blacklists()
         return JSONResponse(content={"ok": True, "message": "全量黑名单已清除，所有节点重新就绪"})
     except Exception as e:

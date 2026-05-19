@@ -22,7 +22,7 @@ from app.core.config import settings
 from app.core.memory.types.semantic import SemanticMemory
 from app.core.memory.types.episodic import EpisodicMemory
 from app.core.memory.types.perceptual import PerceptualMemory
-from app.redis_client import redis_manager
+from app.infra.redis_client import redis_manager
 from app.core.background_worker import bg_worker
 from app.core.context import tenant_context
 
@@ -339,7 +339,7 @@ class MemoryHub:
                 storage = self._get_tenant_storage(t_id)
                 
                 # 物理实体提取 (调用 LLM/NLP)
-                from app.entity_extractor import extract_graph
+                from app.memory.entity_extractor import extract_graph
                 graph_data = extract_graph([content])
                 extracted_entities = []
                 for node in graph_data.get("nodes", []):

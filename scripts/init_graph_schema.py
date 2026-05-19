@@ -1,5 +1,5 @@
 
-from app.neo4j_manager import neo4j_manager
+from app.infra.neo4j_manager import neo4j_manager
 from loguru import logger
 from dotenv import load_dotenv
 

@@ -1,4 +1,4 @@
-from app.semantic_layer import SemanticRetriever
+from app.skills.semantic_layer import SemanticRetriever
 import os
 
 def test_retrieval():

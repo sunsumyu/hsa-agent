@@ -5,8 +5,8 @@ from loguru import logger
 # 确保能加载 app 模块
 sys.path.append(os.getcwd())
 
-from app.semantic_memory import cognitive_memory_manager
-from app.agent_graph import get_graph_executor
+from app.memory.semantic_memory import cognitive_memory_manager
+from app.core.agent_graph import get_graph_executor
 
 def test_memory_loop():
     executor, _ = get_graph_executor()

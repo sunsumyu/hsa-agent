@@ -25,7 +25,7 @@ def verify_neo4j():
     logger.info(f"配置核查: 正在连接云端实例 {uri}, 用户: {user}")
 
     try:
-        from app.neo4j_manager import neo4j_manager
+        from app.infra.neo4j_manager import neo4j_manager
         
         # 强制触发连接
         logger.info("正在尝试建立物理连接 (这可能需要 30-60 秒，如果 AuraDB 正在唤醒)...")

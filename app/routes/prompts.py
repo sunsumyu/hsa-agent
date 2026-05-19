@@ -13,7 +13,7 @@ import yaml
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from app.core.prompt_registry import prompt_registry, PromptEntry
+from app.core.registry.prompt_registry import prompt_registry, PromptEntry
 
 router = APIRouter(prefix="/api/prompts", tags=["Prompt Manager"])
 

@@ -1,7 +1,7 @@
 import asyncio
 import json
-from app.agent_graph import AuditState, AuditReport, AuditFinding
-from app.model_manager import model_manager
+from app.core.agent_graph import AuditState, AuditReport, AuditFinding
+from app.infra.model_manager import model_manager
 from tests.eval.metrics import NumericalPrecisionMetric
 from deepeval.test_case import LLMTestCase
 from app.prompts import ANALYST_PROMPT

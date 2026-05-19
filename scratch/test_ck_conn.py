@@ -7,7 +7,7 @@ sys.path.append(os.getcwd())
 
 load_dotenv()
 
-from app.db_conn import get_clickhouse_client
+from app.infra.db_conn import get_clickhouse_client
 
 def test_connection():
     print(">>> 正在尝试连接 ClickHouse...")

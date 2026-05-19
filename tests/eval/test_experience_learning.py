@@ -2,7 +2,7 @@ import asyncio
 import os
 import json
 from loguru import logger
-from app.experience import POOL_FILE
+from app.memory.experience import POOL_FILE
 
 import pytest
 
@@ -14,7 +14,7 @@ if os.path.exists(POOL_FILE):
 async def test_learning_cycle():
     logger.info("=== [V35.3 闭环学习测试启动] ===")
     
-    from app.agent_graph import get_graph_executor
+    from app.core.agent_graph import get_graph_executor
     app, _ = get_graph_executor()
     
     # 模拟输入：一个容易让模型遗漏列的复杂请求

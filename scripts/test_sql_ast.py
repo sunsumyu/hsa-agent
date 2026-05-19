@@ -5,7 +5,7 @@ from loguru import logger
 # 环境初始化
 sys.path.append(os.getcwd())
 
-from app.sql_validator import sql_validator
+from app.skills.sql_validator import sql_validator
 
 def test_sql_equivalence():
     logger.info("🧪 [AST TEST] 正在执行 SQL 语义等价性对比测试...")

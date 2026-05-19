@@ -9,7 +9,7 @@ import json
 from typing import List, Dict, Any, Optional
 from loguru import logger
 from app.core.memory.base import MemoryItem, BaseStorage
-from app.neo4j_manager import neo4j_manager
+from app.infra.neo4j_manager import neo4j_manager
 
 class GraphStorage(BaseStorage):
     """

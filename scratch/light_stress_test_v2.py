@@ -1,6 +1,6 @@
 import sys
 # 绕过 graph/tools 导入，直接测试 security 核心
-from app.security import SQLGuardian, SQLComplexityError
+from app.skills.security import SQLGuardian, SQLComplexityError
 
 def light_stress_v2():
     print("\n" + "="*60)

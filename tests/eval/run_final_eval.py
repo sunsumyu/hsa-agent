@@ -17,7 +17,7 @@ load_dotenv(override=True)
 # [V35.0] 强制开启 Mock 模式，确保基准测试结果与 Golden Dataset 种子数据对齐
 os.environ["USE_MOCK_DATA"] = "true"
 
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 

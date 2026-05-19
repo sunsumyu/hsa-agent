@@ -6,7 +6,7 @@ from loguru import logger
 # 确保项目路径正确
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.agent import get_executor
+from app.agents.agent import get_executor
 
 async def run_classic_test(question: str, session_id: str):
     logger.info(f"\n🚀 [测试开始] 问题: {question}")

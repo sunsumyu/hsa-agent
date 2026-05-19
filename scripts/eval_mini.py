@@ -4,7 +4,7 @@ import sys
 import io
 import asyncio
 from langchain_core.messages import HumanMessage
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 
 # Setup UTF-8 Output
 if sys.stdout.encoding != 'utf-8':

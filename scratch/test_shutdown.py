@@ -1,4 +1,4 @@
-from app.observability import init_observability
+from app.core.observability import init_observability
 import time
 from loguru import logger
 

@@ -7,15 +7,15 @@ os.environ["PHOENIX_COLLECTOR_GRPC_PORT"] = "4517"
 os.environ["PHOENIX_HOST"] = "127.0.0.1"
 
 from loguru import logger
-import app.logging_config # [V41.6] 物理链路可跳转配置
+import app.core.logging_config # [V41.6] 物理链路可跳转配置
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.model_manager import model_manager
-from app.usage_tracker import usage_tracker
-from app.observability import init_observability
+from app.infra.model_manager import model_manager
+from app.infra.usage_tracker import usage_tracker
+from app.core.observability import init_observability
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
         yield
         
         # [V39.0] 优雅离场：在 FastAPI 关机前物理固化所有观测数据
-        from app.observability import shutdown_observability
+        from app.core.observability import shutdown_observability
         shutdown_observability()
 
 app = FastAPI(title="HSA AI Agent (Python Edition)", lifespan=lifespan)
@@ -69,7 +69,7 @@ app.include_router(prompts_router) # [V192.0]
 # 跨域配置: 从环境变量读取允许的来源, 默认仅本地开发
 # 生产环境必须设置 CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
 # allow_origins=["*"] + allow_credentials=True 是严重安全漏洞 (允许任意域携带 Cookie)
-_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000")
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080")
 _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
 _allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
 
@@ -83,7 +83,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=_allow_credentials,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Session-Id"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-Id", "X-Tenant-Id"],
 )
 logger.info(f"[CORS] allowed_origins={_cors_origins} allow_credentials={_allow_credentials}")
 

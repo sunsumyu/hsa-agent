@@ -40,9 +40,9 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["HF_HUB_OFFLINE"]  = "1"
 
 log_print("[info]Loading Agent Graph and Model Manager... (This may take 30-60s due to local embedding models)[/]")
-from app.agent_graph import workflow
-from app.model_manager import model_manager
-from app.usage_tracker import usage_tracker
+from app.core.agent_graph import workflow
+from app.infra.model_manager import model_manager
+from app.infra.usage_tracker import usage_tracker
 log_print("[success]✓ Models and Graph loaded.[/]")
 
 # Import logic from run_7metrics_bench (cloned for minimal test)

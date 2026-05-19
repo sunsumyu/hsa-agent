@@ -7,9 +7,9 @@ from loguru import logger
 sys.path.append(os.getcwd())
 # HF_HOME: use .env or system default
 
-from app.agent_graph import get_graph_executor
-from app.security import SQLGuardian
-from app.semantic_memory import cognitive_memory_manager
+from app.core.agent_graph import get_graph_executor
+from app.skills.security import SQLGuardian
+from app.memory.semantic_memory import cognitive_memory_manager
 
 class HSAProductionQA:
     """[V50.0] HSA 生产环境 CI/CD 质检闸门"""

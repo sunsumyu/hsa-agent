@@ -1,7 +1,7 @@
 
 from loguru import logger
-from app.db_conn import get_clickhouse_client
-from app.neo4j_manager import neo4j_manager
+from app.infra.db_conn import get_clickhouse_client
+from app.infra.neo4j_manager import neo4j_manager
 from dotenv import load_dotenv
 
 load_dotenv()

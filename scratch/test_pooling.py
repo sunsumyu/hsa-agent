@@ -6,8 +6,8 @@ from loguru import logger
 # 环境初始化
 sys.path.append(os.getcwd())
 
-from app.model_manager import model_manager
-from app.endpoint_pool_manager import endpoint_pool_manager
+from app.infra.model_manager import model_manager
+from app.infra.endpoint_pool_manager import endpoint_pool_manager
 
 async def test_pooling_logic():
     print("\n>>> [池化架构测试] 正在模拟多角色寻址...")

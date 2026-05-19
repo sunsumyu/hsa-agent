@@ -25,7 +25,7 @@ except ImportError:
     console = None
 
 sys.path.append(os.getcwd())
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 
 JUDGE_PROMPT = """You are a senior healthcare insurance audit judge.
 Score the following audit report on 7 dimensions (0-10 each, total 70):

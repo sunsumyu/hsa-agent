@@ -9,9 +9,9 @@ from typing import Dict, List, Any
 sys.path.append(os.getcwd())
 # HF_HOME: use .env or system default
 
-from app.agent_graph import get_graph_executor
-from app.llm_judge import audit_judge
-from app.model_manager import model_manager
+from app.core.agent_graph import get_graph_executor
+from app.reporting.llm_judge import audit_judge
+from app.infra.model_manager import model_manager
 
 class HSAArenaEvaluator:
     """[V53.0] HSA 审计大模型竞技场：Win Rate 胜率对比工具"""

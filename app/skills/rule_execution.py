@@ -3,8 +3,8 @@ from typing import Type, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import BaseTool
 from loguru import logger
-from app.audit_rules import rule_engine
-from app.anomaly_algorithms import anomaly_detector
+from app.skills.audit_rules import rule_engine
+from app.skills.anomaly_algorithms import anomaly_detector
 from app.tools import _execute_audit_sql_logic
 
 class RuleExecutionInput(BaseModel):

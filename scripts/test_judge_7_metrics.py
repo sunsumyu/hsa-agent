@@ -7,7 +7,7 @@ from loguru import logger
 sys.path.append(os.getcwd())
 os.environ["PYTHONIOENCODING"] = "utf-8"
 
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 
 # 专家评审标准 (七大维度全景评测)
 JUDGE_PROMPT = """

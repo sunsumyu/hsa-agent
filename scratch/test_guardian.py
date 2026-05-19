@@ -1,4 +1,4 @@
-from app.security import SQLGuardian
+from app.skills.security import SQLGuardian
 sql = """
     SELECT 
         psn_no, 

@@ -8,7 +8,7 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 from app.tools import search_expert_knowledge, _execute_audit_sql_logic
-from app.audit_rules import rule_engine
+from app.skills.audit_rules import rule_engine
 from loguru import logger
 
 def run_stress_test():

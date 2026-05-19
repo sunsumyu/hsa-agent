@@ -6,7 +6,7 @@ ProtocolInterceptor 与 sanitize 的单元测试。
 """
 
 import pytest
-from app.protocol_filter import ProtocolInterceptor, sanitize
+from app.skills.protocol_filter import ProtocolInterceptor, sanitize
 
 
 # ──────────────────────────────────────────────────────────────

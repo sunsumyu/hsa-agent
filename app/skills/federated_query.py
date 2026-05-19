@@ -4,9 +4,9 @@ from typing import Type, Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from loguru import logger
-from app.db_conn import get_clickhouse_client
-from app.neo4j_manager import neo4j_manager
-from app.perf_monitor import perf_monitor
+from app.infra.db_conn import get_clickhouse_client
+from app.infra.neo4j_manager import neo4j_manager
+from app.api.perf_monitor import perf_monitor
 
 class FederatedAuditInput(BaseModel):
     cypher_query: str = Field(description=(

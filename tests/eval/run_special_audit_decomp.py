@@ -7,11 +7,11 @@ from dotenv import load_dotenv
 # 确保能导入 app 包
 sys.path.append(os.getcwd())
 
-from app.agent_graph import AgentGraph
-from app.usage_tracker import usage_tracker
+from app.core.agent_graph import AgentGraph
+from app.infra.usage_tracker import usage_tracker
 
 load_dotenv()
-import app.agent_graph
+import app.core.agent_graph
 print(f"\n[DEBUG_PATH] Loading agent_graph from: {app.agent_graph.__file__}")
 
 # [V37.7] 专项审计：高频购药异常（生产口径校准版，数据已确认存在）

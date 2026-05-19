@@ -12,18 +12,18 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from langchain_core.messages import HumanMessage
 
-from app.agent_graph import get_graph_executor
-from app.history import history_manager
-from app.usage_tracker import usage_tracker
-from app.observability import get_callbacks
-from app.protocol_filter import ProtocolInterceptor, sanitize
-from app.chat_stream import (
+from app.core.agent_graph import get_graph_executor
+from app.memory.history import history_manager
+from app.infra.usage_tracker import usage_tracker
+from app.core.observability import get_callbacks
+from app.skills.protocol_filter import ProtocolInterceptor, sanitize
+from app.api.chat_stream import (
     parse_chat_request,
     emit_node_status,
     emit_tool_start_events,
     classify_and_render_error,
 )
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 
 router = APIRouter()
 

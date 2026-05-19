@@ -1,7 +1,7 @@
 import json
 import os
-from app.usage_tracker import usage_tracker
-from app.model_manager import model_manager
+from app.infra.usage_tracker import usage_tracker
+from app.infra.model_manager import model_manager
 from loguru import logger
 
 def verify_fallback_logic():

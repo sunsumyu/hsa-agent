@@ -15,10 +15,10 @@ from langchain_core.messages import BaseMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 import time
 
-from app.model_manager import model_manager
-from app.usage_tracker import usage_tracker
-from app.observability import build_obs_config
-from app.semantic_memory import cognitive_memory_manager
+from app.infra.model_manager import model_manager
+from app.infra.usage_tracker import usage_tracker
+from app.core.observability import build_obs_config
+from app.memory.semantic_memory import cognitive_memory_manager
 
 class LLMProvider:
     def __init__(self):
@@ -65,9 +65,9 @@ class LLMProvider:
         if role in ["planner_heavy", "coder", "reporter"] and state:
             user_input = self._extract_last_user_message(messages)
             if user_input:
-                from app.endpoint_pool_manager import endpoint_pool_manager
-                from app.schemas import RoleConfigV2
-                from app.core.context_builder import ContextBuilder
+                from app.infra.endpoint_pool_manager import endpoint_pool_manager
+                from app.core.schemas import RoleConfigV2
+                from app.core.context.context_builder import ContextBuilder
                 
                 # 获取或初始化角色预算配置
                 role_cfg = endpoint_pool_manager.roles.get(role)
@@ -139,13 +139,15 @@ class LLMProvider:
             return settings.get("HEAVY_MODEL", "deepseek-v3")
         return settings.get("LIGHT_MODEL", "deepseek-v2.5") # 默认 Lite 模型
 
-    def _extract_last_user_message(self, messages: List[BaseMessage]) -> str:
+    def _extract_last_user_message(self, messages: List[Union[BaseMessage, tuple]]) -> str:
         for msg in reversed(messages):
-            if msg.type == "human":
+            if hasattr(msg, "type") and msg.type == "human":
                 return str(msg.content)
+            elif isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "human":
+                return str(msg[1])
         return ""
 
-    def _record_usage(self, role: str, response: Any, model_id: str, messages: List[BaseMessage], latency_ms: float = 0):
+    def _record_usage(self, role: str, response: Any, model_id: str, messages: List[Union[BaseMessage, tuple]], latency_ms: float = 0):
         usage = getattr(response, "usage_metadata", {})
         if not usage and hasattr(response, "response_metadata"):
             usage = response.response_metadata.get("token_usage", {})
@@ -153,11 +155,22 @@ class LLMProvider:
         in_t = usage.get("input_tokens", usage.get("prompt_tokens", 0))
         out_t = usage.get("output_tokens", usage.get("completion_tokens", 0))
         
+        # 防御性提取 Prompt 文本
+        prompt_text = ""
+        if messages:
+            last_msg = messages[-1]
+            if hasattr(last_msg, "content"):
+                prompt_text = str(last_msg.content)
+            elif isinstance(last_msg, tuple) and len(last_msg) == 2:
+                prompt_text = str(last_msg[1])
+            else:
+                prompt_text = str(last_msg)
+        
         usage_tracker.record_usage(
             model_id, 
             in_t, 
             out_t, 
-            prompt=str(messages[-1].content) if messages else "", 
+            prompt=prompt_text, 
             response_text=str(getattr(response, "content", "")),
             latency_ms=latency_ms
         )

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from app.agent_graph import get_graph_executor, AuditState, AuditReport
+from app.core.agent_graph import get_graph_executor, AuditState, AuditReport
 from langchain_core.messages import HumanMessage
 from tests.eval.metrics import NumericalPrecisionMetric
 from deepeval.test_case import LLMTestCase

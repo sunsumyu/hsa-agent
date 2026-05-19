@@ -1,4 +1,4 @@
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 import os
 
 def test_lora_registry():

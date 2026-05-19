@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # Ensure app is importable
 sys.path.append(os.getcwd())
 
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 
 load_dotenv()
 

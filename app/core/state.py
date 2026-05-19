@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 def _default_message_reducer(left: List, right: List) -> List:
     """[V90.4] 企业级消息合并：委托给 message_sanitizer 的去重+压缩+净化 pipeline。"""
-    from app.message_sanitizer import trim_and_sanitize
+    from app.memory.message_sanitizer import trim_and_sanitize
     return trim_and_sanitize(left, right, max_total=10, keep_head=2, keep_tail=6)
 
 

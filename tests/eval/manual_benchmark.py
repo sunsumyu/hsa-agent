@@ -2,10 +2,10 @@ import asyncio
 import os
 import time
 from typing import List
-from app.agent import get_executor, get_prompt
+from app.agents.agent import get_executor, get_prompt
 from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
-from app.model_manager import model_manager
+from app.infra.model_manager import model_manager
 from dotenv import load_dotenv
 
 load_dotenv(override=True)

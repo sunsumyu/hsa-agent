@@ -6,7 +6,7 @@ import time
 from loguru import logger
 from tabulate import tabulate
 from langchain_core.messages import HumanMessage
-from app.agent_graph import get_graph_executor
+from app.core.agent_graph import get_graph_executor
 
 # Setup for UTF-8 and Projekt Root
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

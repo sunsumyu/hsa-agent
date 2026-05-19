@@ -1,4 +1,4 @@
-from app.db_conn import get_clickhouse_client
+from app.infra.db_conn import get_clickhouse_client
 from loguru import logger
 
 def fix_clickhouse_schema():

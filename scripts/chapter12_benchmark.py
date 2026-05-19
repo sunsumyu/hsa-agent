@@ -10,8 +10,8 @@ from loguru import logger
 sys.path.append(os.getcwd())
 # HF_HOME: use .env or system default
 
-from app.agent_graph import get_graph_executor
-from app.model_manager import model_manager
+from app.core.agent_graph import get_graph_executor
+from app.infra.model_manager import model_manager
 
 # 1. 工业级裁判 Prompt (符合 Chapter 12 标准)
 JUDGE_PROMPT = """

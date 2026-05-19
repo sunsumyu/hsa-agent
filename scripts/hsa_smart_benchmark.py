@@ -18,8 +18,8 @@ if sys.platform == "win32":
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
 
-from app.agent_graph import get_graph_executor
-from app.model_manager import model_manager
+from app.core.agent_graph import get_graph_executor
+from app.infra.model_manager import model_manager
 from scripts.token_audit_test import TokenRoleTracker
 
 # 1. 专家评审标准 (七大维度全景评测)

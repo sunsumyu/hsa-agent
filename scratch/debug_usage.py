@@ -6,7 +6,7 @@ from loguru import logger
 # 环境初始化
 sys.path.append(os.getcwd())
 
-from app.usage_tracker import usage_tracker
+from app.infra.usage_tracker import usage_tracker
 
 def debug_usage_tracker():
     print("\n>>> [UsageTracker 深度诊断] 检查算力可用性...")

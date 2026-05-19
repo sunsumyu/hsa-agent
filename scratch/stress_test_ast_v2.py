@@ -1,8 +1,8 @@
 import sys
 import os
 # 导入加固后的组件
-from app.security import SQLGuardian, SQLComplexityError
-from app.agent_graph import should_audit_and_retry, AuditState
+from app.skills.security import SQLGuardian, SQLComplexityError
+from app.core.agent_graph import should_audit_and_retry, AuditState
 
 def stress_test_v2():
     print("\n" + "="*60)

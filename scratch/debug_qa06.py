@@ -1,4 +1,4 @@
-from app.db_conn import get_clickhouse_client
+from app.infra.db_conn import get_clickhouse_client
 
 def test_template_sql():
     client = get_clickhouse_client()

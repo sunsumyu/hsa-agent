@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.getcwd())
 
-from app.audit_rules import rule_engine
+from app.skills.audit_rules import rule_engine
 from loguru import logger
 
 def test_enterprise_fix():

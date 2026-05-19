@@ -1,5 +1,5 @@
 import asyncio
-from app.agent_graph import audit_app
+from app.core.agent_graph import audit_app
 from langchain_core.messages import HumanMessage
 import os
 

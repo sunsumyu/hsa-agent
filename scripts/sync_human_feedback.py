@@ -7,7 +7,7 @@ from loguru import logger
 sys.path.append(os.getcwd())
 # HF_HOME: use .env or system default
 
-from app.semantic_memory import cognitive_memory_manager
+from app.memory.semantic_memory import cognitive_memory_manager
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 

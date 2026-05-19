@@ -44,10 +44,10 @@ if sys.platform == "win32":
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
 
-from app.agent_graph import workflow, _record_usage_with_budget
-from app.model_manager import model_manager
-from app.usage_tracker import usage_tracker
-from app.observability import init_observability, shutdown_observability
+from app.core.agent_graph import workflow, _record_usage_with_budget
+from app.infra.model_manager import model_manager
+from app.infra.usage_tracker import usage_tracker
+from app.core.observability import init_observability, shutdown_observability
 
 # ── LangChain Callback: 每次 LLM 调用前后完整打印 ────────────────────
 SEP  = "=" * 72
@@ -237,43 +237,134 @@ PREDICTED = {
 # ]
 
 
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-01", 
+#         "tag": "Deceased Patient Billing", 
+#         "diff": "*** ",
+#         "prompt": "查一下死亡人员的数据交叉比对，看看有没有人在民政那边已经宣告死亡注销户口了，但医保系统里还在源源不断地产生刷卡或者住院费用的。",
+#         "pred_tokens": 12000,
+#     },
+#     {
+#         "id": "QA-CUST-02", 
+#         "tag": "Gender Diagnosis Conflict", 
+#         "diff": "**  ",
+#         "prompt": "把全市参保人的结算单扫一遍，专门挑那些登记是男性，但是诊断或者收费明细里却开出了子宫彩超或者保胎药这种明显违反常识的记录。",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-CUST-03", 
+#         "tag": "Decomposed Hospitalization", 
+#         "diff": "****",
+#         "prompt": "排查一下二级医院的住院情况，有没有同一个病号因为同一个毛病，出院还没过半个月又被重新办入院手续的？这种分解住院骗统筹基金的要重点揪出来。",
+#         "pred_tokens": 14000,
+#     },
+#     {
+#         "id": "QA-CUST-04", 
+#         "tag": "Chronic Disease Over-prescription", 
+#         "diff": "*** ",
+#         "prompt": "把门诊慢特病的药店结算数据拉出来，重点看高血压和糖尿病，有没有单次开药量直接超过90天最大用药上限的？这种很大可能是药贩子在倒药。",
+#         "pred_tokens": 12000,
+#     },
+#     {
+#         "id": "QA-CUST-05", 
+#         "tag": "Abnormal Outpatient Billing", 
+#         "diff": "**  ",
+#         "prompt": "筛一下乡镇卫生院和社区诊所的数据，像普通感冒发烧这种小病，单次门诊报销如果直接奔着七八百甚至上千去了，肯定有串换项目或者搭车开药的问题，把超标明细全列出来。",
+#         "pred_tokens": 11000,
+#     },
+# ]
+
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-06", 
+#         "tag": "Concurrent Location Conflict", 
+#         "diff": "*** ",
+#         "prompt": "查一下有没有这种物理分身的单子：患者在A医院处于‘在院’状态（还没办理出院），但医保卡却同一时间跑到几十公里外的B药店或者C诊所刷卡买药了？这种典型的‘挂床住院’或者‘出借医保卡’的情况必须严查。",
+#         "pred_tokens": 12500,
+#     },
+#     {
+#         "id": "QA-CUST-07", 
+#         "tag": "Age-Diagnosis Mismatch", 
+#         "diff": "**  ",
+#         "prompt": "跑个数据，把那种参保人年龄和报销病种完全反人类的记录挑出来。比如不到五岁的儿童报销了‘老年性白内障’或者‘阿尔茨海默症’，这种绝对是医院为了多骗统筹基金瞎填疾病代码、高套病种的。",
+#         "pred_tokens": 11000,
+#     },
+#     {
+#         "id": "QA-CUST-08", 
+#         "tag": "Absurd Daily Billing", 
+#         "diff": "*** ",
+#         "prompt": "查下住院的收费明细表，有没有单日计费数量极其离谱的？比如系统里显示一天收了3次以上的‘一级护理费’，或者一天给同一个人拔了8颗以上的牙。把这种明显分解计费和虚构数量的清单导出来。",
+#         "pred_tokens": 11500,
+#     },
+#     {
+#         "id": "QA-CUST-09", 
+#         "tag": "Targeted Doctor Farming", 
+#         "diff": "****",
+#         "prompt": "重点筛查门诊统筹，有没有哪个参保人在半年内，跑了同一家基层定点机构超过50次，而且每次都是在系统里挂同一个医生的号开特慢病药？这种‘死盯一个大夫薅羊毛’的极有可能存在医患串通套保取药。",
+#         "pred_tokens": 14000,
+#     },
+#     {
+#         "id": "QA-CUST-10", 
+#         "tag": "Prescription-Pharmacy Collusion Ring", 
+#         "diff": "*****",
+#         "prompt": "帮我挖一个深度的‘回流药’利益链团伙（这个关联极其复杂）：去查在任意连续30天的滑动窗口内，有没有超过5个不同的参保人（互相之间预留了相同的手机号或家庭地址），他们都在同一家医院的同一个医生那里开出了高价慢病药，然后这批人竟然无一例外地都跑到同一家特定的院外定点药店去刷卡结算，并且药店结算时间跟医院开处方的时间相隔不到24小时？把这种‘指定医生开单-团伙集中拿药-特定药店洗钱’的闭环网络给我全盘抓出来。",
+#         "pred_tokens": 18000,
+#     },
+# ]
+
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-06", 
+#         "tag": "Duplicate Consultation Fees", 
+#         "diff": "*   ", # 简单：单表同日去重与频次校验
+#         "prompt": "给我扫一下基层门诊的流水，看看有没有哪个大夫给同一个病号，在一天之内竟然收了两次甚至三次‘一般诊疗费’的？这种拿基础挂号费疯狂重复计费的薅羊毛单子直接列个明细给我。",
+#         "pred_tokens": 8000,
+#     },
+#     {
+#         "id": "QA-CUST-07", 
+#         "tag": "ICU Patient Pharmacy Billing", 
+#         "diff": "*** ", # 中等：跨表时空与物理状态冲突
+#         "prompt": "把重症监护病房的数据和外面的药店数据做个交叉比对。去查查那些明明在系统里显示正躺在ICU里插管抢救的重病号，同一天居然还在外面的定点药店刷医保卡买了大额的慢性病药或者中药饮片？人都下不了床怎么去买的药，这种拿卡套现的直接锁死。",
+#         "pred_tokens": 12000,
+#     },
+#     {
+#         "id": "QA-CUST-08", 
+#         "tag": "Rehab Sliding Window Evasion", 
+#         "diff": "****", # 困难：跨机构滑动时间窗口聚合
+#         "prompt": "盯一下中医针灸和康复理疗这块。有些诊所为了躲系统‘单次疗程不超过15天’的报警，教唆病号每按满14天就换一家新店接着刷。你给我写个滚动算时间的逻辑，把那种连续半年内，像打游击一样跨了三四家不同诊所，累计理疗天数加起来超过100天的‘职业理疗客’全挖出来。",
+#         "pred_tokens": 15000,
+#     },
+#     {
+#         "id": "QA-CUST-09", 
+#         "tag": "Prescription Outflow Collusion Ring", 
+#         "diff": "*****", # 极难：高基数统计学基线 + 复杂机构利益链图谱
+#         "prompt": "来个有难度的，查一下处方外送背后的黑色利益链。去全省特慢病结算数据里跑个网络出来：看有没有某家公立大医院的某个特定科室，他们开出来的天价特药处方，有超过80%最后都流向了外面同一家不起眼的私人小药房结算？而且这家小药房全年的医保基金流水，竟然有一大半都是靠这一个科室的处方撑起来的。把这种‘指定医生开单-勾结特定药店洗钱’的高度绑定团伙给我揪出来。",
+#         "pred_tokens": 18000,
+#     },
+# ]
+
+
 TEST_CASES = [
     {
-        "id": "QA-CUST-01", 
-        "tag": "Deceased Patient Billing", 
-        "diff": "*** ",
-        "prompt": "查一下死亡人员的数据交叉比对，看看有没有人在民政那边已经宣告死亡注销户口了，但医保系统里还在源源不断地产生刷卡或者住院费用的。",
-        "pred_tokens": 12000,
+        "id": "QA-CUST-11", 
+        "tag": "False Anesthesia Billing", 
+        "diff": "****", # 困难：强业务逻辑冲突与隐含时序
+        "prompt": "查一下手术室和麻醉科的流水。有没有哪家医院给病人收了‘全身麻醉’或者‘椎管内麻醉’的钱，但是这人在同一天的费用明细里，连一丁点像丙泊酚、七氟烷或者罗哌卡因这种必备的麻醉药费都没产生的？光收高价操作费不耗药，这种虚构麻醉服务的造假单子全给我拉出来。",
+        "pred_tokens": 14500,
     },
     {
-        "id": "QA-CUST-02", 
-        "tag": "Gender Diagnosis Conflict", 
-        "diff": "**  ",
-        "prompt": "把全市参保人的结算单扫一遍，专门挑那些登记是男性，但是诊断或者收费明细里却开出了子宫彩超或者保胎药这种明显违反常识的记录。",
-        "pred_tokens": 11000,
-    },
-    {
-        "id": "QA-CUST-03", 
-        "tag": "Decomposed Hospitalization", 
-        "diff": "****",
-        "prompt": "排查一下二级医院的住院情况，有没有同一个病号因为同一个毛病，出院还没过半个月又被重新办入院手续的？这种分解住院骗统筹基金的要重点揪出来。",
-        "pred_tokens": 14000,
-    },
-    {
-        "id": "QA-CUST-04", 
-        "tag": "Chronic Disease Over-prescription", 
-        "diff": "*** ",
-        "prompt": "把门诊慢特病的药店结算数据拉出来，重点看高血压和糖尿病，有没有单次开药量直接超过90天最大用药上限的？这种很大可能是药贩子在倒药。",
-        "pred_tokens": 12000,
-    },
-    {
-        "id": "QA-CUST-05", 
-        "tag": "Abnormal Outpatient Billing", 
-        "diff": "**  ",
-        "prompt": "筛一下乡镇卫生院和社区诊所的数据，像普通感冒发烧这种小病，单次门诊报销如果直接奔着七八百甚至上千去了，肯定有串换项目或者搭车开药的问题，把超标明细全列出来。",
-        "pred_tokens": 11000,
+        "id": "QA-CUST-12", 
+        "tag": "Dialysis Phantom Billing Ring", 
+        "diff": "*****", # 极难：动态基线 + 图谱聚类 + 物理极限违背
+        "prompt": "盯紧那些民营综合医院的血透室，帮我抓个大案子：先算算他们这几家医院平时一天最多能接多少个透析病人。然后你去跑按月结算的数据，看有没有哪家医院在某个月里，它报销的‘血液透析’总人次，竟然远远超过了他们机器满负荷连轴转24小时能做出来的物理极限？顺便查一下，在这个超限的月份里，是不是有一批外地户口的特病患者突然集体‘空降’到这家医院集中刷卡？这绝对是成建制的买病人挂空床骗保。",
+        "pred_tokens": 18500,
     },
 ]
+
+
+
+
 
 # ── Judge Prompt ──────────────────────────────────────────────────────
 JUDGE_PROMPT = """You are a senior healthcare insurance audit judge.
@@ -324,7 +415,7 @@ class PhysicalTokenTracker:
         self.case_stats[cid] = {}
 
     def patch(self):
-        import app.agent_graph as ag
+        import app.core.agent_graph as ag
         self._original_fn = ag._record_usage_with_budget
         ref = self
 
@@ -632,7 +723,7 @@ async def main():
     logger.info("🛡️ [算力治理] 启动时保留历史黑名单状态，防止报废模型复活。")
 
     # [V174.0] 企业级多 Case 稳定性补强：启动时强制重置黑名单
-    from app.usage_tracker import usage_tracker
+    from app.infra.usage_tracker import usage_tracker
     usage_tracker.reset_blacklists()
     logger.info("✅ [算力治理] 已强制重置模型黑名单，确保 Benchmark 链路满血启动。")
 

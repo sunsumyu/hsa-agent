@@ -4,8 +4,8 @@ import sys
 # 强制设置 PYTHONPATH 以便导入 app
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.neo4j_manager import field_kg
-from app.schema_injector import BUILTIN_FIELD_SEEDS
+from app.infra.neo4j_manager import field_kg
+from app.skills.schema_injector import BUILTIN_FIELD_SEEDS
 
 def test_whitelist():
     # 模拟 SQLGuardian._validate_column_existence 的逻辑

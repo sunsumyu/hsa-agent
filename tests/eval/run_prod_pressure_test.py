@@ -3,8 +3,8 @@ import os
 import json
 import time
 from loguru import logger
-from app.agent_graph import get_graph_executor
-from app.usage_tracker import usage_tracker
+from app.core.agent_graph import get_graph_executor
+from app.infra.usage_tracker import usage_tracker
 
 # 2024 生产实战测试用例
 PROD_TEST_CASES = [

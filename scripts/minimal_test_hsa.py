@@ -19,7 +19,7 @@ class MockClient:
             return MockResult([('医保稽核',)], ['test_str'])
         return MockResult([], [])
 
-from app.db_conn import CharsetProxy
+from app.infra.db_conn import CharsetProxy
 
 async def test_charset_proxy():
     logger.info("🧪 测试 1: Charset Proxy Logic")
@@ -31,7 +31,7 @@ async def test_charset_proxy():
 
 def test_semantic_router():
     logger.info("🧪 测试 2: Semantic Router (Avoidance Guide)")
-    from app.semantic_layer import MetadataMappingLayer
+    from app.skills.semantic_layer import MetadataMappingLayer
     mapper = MetadataMappingLayer()
     guide = mapper.detect("我想查询重复住院的职工医保人员")
     logger.info(f"生成指南:\n{guide}")
@@ -40,7 +40,7 @@ def test_semantic_router():
 
 def test_sql_linter():
     logger.info("🧪 测试 3: SQL Agentic Linter")
-    from app.sql_validator import sql_validator
+    from app.skills.sql_validator import sql_validator
     bad_sql = "SELECT count(*) FROM fqz_table GROUP BY setl_id"
     ok, msg = sql_validator.agentic_linter(bad_sql)
     logger.info(f"Linter 拦截结果: {ok}, 消息: {msg}")
@@ -53,7 +53,7 @@ def test_sql_linter():
 
 def test_sequence_validator():
     logger.info("🧪 测试 4: Sequence Validator")
-    from app.agent_graph import SequenceValidator
+    from app.core.agent_graph import SequenceValidator
     state_bad = {
         "methodology": "Phase 1: Graph 分析发现团伙",
         "execution_trace": ["SQL 执行成功"]
@@ -65,7 +65,7 @@ def test_sequence_validator():
 
 def test_anomaly_data():
     logger.info("🧪 测试 5: Anomalous Data Warning")
-    from app.booster import booster
+    from app.core.booster import booster
     bad_data = [
         {"psn_no": "A1", "medfee": 14848},
         {"psn_no": "A2", "medfee": 14848},

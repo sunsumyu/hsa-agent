@@ -1,5 +1,5 @@
 import asyncio
-from app.agent_graph import workflow as audit_graph
+from app.core.agent_graph import workflow as audit_graph
 
 async def main():
     # 构造复杂泛化性问题

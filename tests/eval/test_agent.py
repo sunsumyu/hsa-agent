@@ -12,9 +12,9 @@ from dotenv import load_dotenv
 os.environ["CLICKHOUSE_DB"] = "hsa_sandbox"
 load_dotenv(override=True)
 
-from app.agent_graph import get_graph_executor as get_executor
-from app.core.prompt_registry import prompt_registry
-from app.core.rule_registry import rule_registry
+from app.core.agent_graph import get_graph_executor as get_executor
+from app.core.registry.prompt_registry import prompt_registry
+from app.core.registry.rule_registry import rule_registry
 
 
 # ──────────────────────────────────────────────────────────────
@@ -115,7 +115,7 @@ def _assert_sql_template_used(state: dict, expected_template_ids: list) -> None:
     
     我们通过 SQL 模板中独特的字段/子句特征做字符串匹配, 而不依赖 LLM。
     """
-    from app.core.rule_registry import rule_registry
+    from app.core.registry.rule_registry import rule_registry
 
     sql_query = (state.get("sql_query") or "").lower()
     methodology = (state.get("methodology") or "").lower()
