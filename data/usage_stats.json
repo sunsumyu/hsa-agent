@@ -1,0 +1,65 @@
+{
+  "today": "2026-05-21",
+  "daily_usage": {
+    "qwen-plus-latest": 6065,
+    "qwen-plus-2025-09-11": 5714,
+    "qwen-plus-2025-12-01": 28996,
+    "qwen-plus-character": 44529,
+    "qwen-plus-2025-07-28": 26024,
+    "qwen-plus-1220": 24681,
+    "qwen-plus-0112": 19129,
+    "qwen-plus-2025-07-14": 4427,
+    "qwen-plus-2025-04-28": 386,
+    "qwen-plus-2025-01-25": 1193
+  },
+  "daily_requests": {
+    "qwen-plus-latest": 1,
+    "qwen-plus-2025-09-11": 5,
+    "qwen-plus-2025-12-01": 4,
+    "qwen-plus-character": 7,
+    "qwen-plus-2025-07-28": 4,
+    "qwen-plus-1220": 8,
+    "qwen-plus-0112": 4,
+    "qwen-plus-2025-07-14": 2,
+    "qwen-plus-2025-04-28": 1,
+    "qwen-plus-2025-01-25": 2
+  },
+  "total_usage": {
+    "doubao-pro-32k": 552555,
+    "doubao-smart": 207482,
+    "deepseek-v3": 1707,
+    "deepseek-r1-bailian": 989631,
+    "qwen-72b-bailian": 1069951,
+    "deepseek-v3-bailian": 870140,
+    "qwen-turbo-bailian": 4834,
+    "qwen-plus-0112": 807762,
+    "qwen-plus-latest": 945728,
+    "qwen-plus-2025-07-28": 824583,
+    "qwen-plus-2025-09-11": 421487,
+    "qwen-plus-2025-04-28": 272828,
+    "qwen-plus-character": 433418,
+    "qwen-plus-2025-01-25": 429767,
+    "qwen-plus-2025-12-01": 508699,
+    "qwen-plus-1220": 452323,
+    "qwen-plus-2025-07-14": 311292,
+    "doubao-smart-router": 7425
+  },
+  "blacklist_expiry": {
+    "qwen-plus-2025-07-28": 1779379199.0,
+    "deepseek-v3-bailian": 1779379199.0,
+    "deepseek-r1-bailian": 1779379199.0,
+    "qwen-plus-latest": 1779379199.0
+  },
+  "stability_scores": {
+    "qwen-plus-latest": 0.0,
+    "deepseek-v3-bailian": 0.0,
+    "deepseek-r1-bailian": 0.0,
+    "doubao-smart-router": 0.0,
+    "doubao-smart": 0.0,
+    "qwen-plus-2025-01-25": 0.8,
+    "qwen-plus-2025-04-28": 0.8,
+    "qwen-plus-2025-12-01": 0.8,
+    "qwen-plus-2025-07-28": 0.0
+  },
+  "last_probe_date": "2026-05-21"
+}
