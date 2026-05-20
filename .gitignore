@@ -23,6 +23,13 @@ Thumbs.db
 *.json
 !llm_registry.json
 !llm_providers.json
+# configs/ 目录下的关键配置文件（必须追踪，另一台电脑启动需要）
+!configs/endpoint_pools.json
+!configs/llm_providers.json
+!configs/role_configs.json
+!configs/semantic_config.json
+!configs/audit_knowledge_base.json
+# app/ 下的旧路径保留兼容
 !app/role_configs.json
 !app/endpoint_pools.json
 !app/semantic_config.json

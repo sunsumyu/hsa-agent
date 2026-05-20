@@ -1,0 +1,203 @@
+{
+  "version": "1.25.0",
+  "ontology": {
+    "职工医保": {
+      "physical": "insutype = '310'",
+      "caveats": "核心：insutype='310'。严禁与 fixmedins_staff_flag (医院职工) 混淆。"
+    },
+    "重复结算/重复收费": {
+      "physical": "COUNT(DISTINCT setl_id) > 1",
+      "grouping_pattern": "GROUP BY psn_no, toDate(setl_time), fixmedins_code",
+      "caveats": "⚠️ [Recall 红线]：严禁按 setl_id 分组。必须按'人+院+天'聚合，统计 setl_id 的唯一数。"
+    },
+    "性别限制项目": {
+      "physical": "穿透诊疗名称与 ICD-10 诊断",
+      "caveats": "⚠️ [Recall 红线]：必须检查 hilist_name 是否包含妇科/男科专属关键词，且联动 gend 字段。"
+    },
+    "分解住院/重叠住院": {
+      "physical": "A.end_date >= B.start_date",
+      "caveats": "⚠️ [Recall 红线]：必须包含 '=' 以捕捉'当天出院即入院'。严禁仅使用 '>'。"
+    }
+  },
+  "algorithms": {
+    "DYNAMIC_VIX_SCAN": {
+      "desc": "自适应变异指数异常扫描（P95 自动阈值）",
+      "sql": "WITH (SELECT quantile(0.95)(vix) FROM {table}) AS p95 SELECT * FROM {table} WHERE vix > p95 ORDER BY vix DESC LIMIT {limit}"
+    },
+    "STRICT_STAY_SPLIT": {
+      "desc": "分解住院判定（同一人同一机构 N 天内再次住院）",
+      "policy_basis": "《医保基金监管条例》第十五条：禁止分解住院、挂床住院。",
+      "sql": "SELECT a.psn_no, a.psn_name, a.end_date, b.start_date, dateDiff('day', toDate(a.end_date), toDate(b.start_date)) as interval_days FROM {table} AS a INNER JOIN {table} AS b ON a.psn_no = b.psn_no WHERE a.fixmedins_code = b.fixmedins_code AND a.setl_id != b.setl_id AND interval_days >= 0 AND interval_days <= {days} LIMIT {limit}"
+    },
+    "FEDERATED_CLUSTER_CYPHER": {
+      "desc": "团伙聚类分析（图侧载模式）",
+      "cypher": "MATCH (p1:Patient)-[:HAS_PHONE]->(t:Phone)<-[:HAS_PHONE]-(p2:Patient) WHERE p1.psn_no <> p2.psn_no RETURN p1.psn_no, p2.psn_no, t.tel"
+    },
+    "GENDER_CONFLICT": {
+      "desc": "性别限制项目冲突核查",
+      "policy_basis": "《医疗保险诊疗项目范围》：特定性别专属项目严禁跨性别报销。",
+      "sql": "SELECT A.psn_no, A.fixmedins_name AS hospital, A.gend, A.hilist_name, A.det_item_fee_sumamt FROM fqz_fymx_test A LEFT JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code WHERE A.setl_time >= '2024-01-01' AND A.gend = '1' AND (C.nat_hi_druglist_memo LIKE '%限女性%' OR A.hilist_name LIKE '%妇科%' OR A.hilist_name LIKE '%产科%' OR A.hilist_name LIKE '%子宫%' OR A.hilist_name LIKE '%阴道%') LIMIT {limit}"
+    },
+    "HIGH_FREQ_DRUG_PURCHASE": {
+      "desc": "高频购药异常检测",
+      "policy_basis": "《社会保险法》第八十八条：禁止以欺诈、伪造证明材料或者其他手段骗取社会保险待遇。",
+      "sql": "SELECT psn_no, fixmedins_name, count() as purchase_count, sum(medfee_sumamt) as total_amt FROM fqz_gz_jzsj_all_ql WHERE med_type = '定点药店购药' AND toYear(toDateTime(setl_time)) = 2024 GROUP BY psn_no, fixmedins_code, fixmedins_name HAVING purchase_count >= 10 ORDER BY purchase_count DESC LIMIT {limit}"
+    },
+    "REPEAT_BILLING_DETECTOR": {
+      "desc": "重复收费检测（项目明细级）",
+      "policy_basis": "《医保基金监管条例》第十五条：禁止重复收费、超标准收费、分解项目收费。",
+      "sql": "SELECT A.psn_no, toDate(A.setl_time) as setl_date, A.fixmedins_code, B.hilist_name as item_name, count() as item_count, sum(B.det_item_fee_sumamt) as total_fee FROM fqz_gz_jzsj_all_ql A JOIN fqz_fymx_test B ON A.setl_id = B.setl_id WHERE A.setl_time >= '2024-01-01' GROUP BY A.psn_no, setl_date, A.fixmedins_code, item_name HAVING item_count > 1 ORDER BY item_count DESC LIMIT {limit}"
+    },
+    "CONTACT_SHARING": {
+      "desc": "共用联系方式团伙核查",
+      "policy_basis": "《医保基金监管条例》：禁止通过伪造、变造材料骗取医保基金。",
+      "sql": "SELECT psn_no, psn_name, tel, fixmedins_name, sum(medfee_sumamt) as total_amt FROM fqz_gz_jzsj_all_ql WHERE tel IN (SELECT tel FROM fqz_gz_jzsj_all_ql GROUP BY tel HAVING count(DISTINCT psn_no) > 2) AND toYear(toDateTime(setl_time)) = 2024 GROUP BY psn_no, psn_name, tel, fixmedins_name ORDER BY total_amt DESC LIMIT {limit}"
+    },
+    "SLIDING_WINDOW_30D": {
+      "desc": "连续30天滑动窗口欺诈探测（防高频拆单与骑缝跨期）",
+      "sql": "SELECT psn_no, setl_time, medfee_sumamt, sum(medfee_sumamt) OVER (PARTITION BY psn_no ORDER BY setl_time RANGE BETWEEN INTERVAL 30 DAY PRECEDING AND CURRENT ROW) AS rolling_30d_amt FROM {table} WHERE rolling_30d_amt > {threshold}"
+    }
+  },
+  "medical_codes": {
+    "妇科": {
+      "icd10": [
+        "O00",
+        "O99"
+      ],
+      "desc": "涉及妊娠、分娩和产褥期疾病及相关手术，包含妇科专属病种范围"
+    },
+    "产科": {
+      "icd10": [
+        "O00",
+        "O99"
+      ],
+      "desc": "涉及分娩、剖宫产、顺产及围产期相关治疗项目"
+    },
+    "妇产科": {
+      "icd10": [
+        "O00",
+        "O99"
+      ],
+      "desc": "妇产科专属医疗编码，涵盖妇科、产科、计划生育等项目"
+    },
+    "肿瘤": {
+      "icd10": [
+        "C00",
+        "D48"
+      ],
+      "desc": "涉及恶性肿瘤、原位癌及性质未定肿瘤"
+    },
+    "感冒": {
+      "icd10": [
+        "J00",
+        "J06"
+      ],
+      "desc": "急性上呼吸道感染，包含普通感冒、急性鼻咽炎、急性咽喉炎等"
+    },
+    "发烧": {
+      "icd10": [
+        "J00",
+        "J11"
+      ],
+      "desc": "包含流感、急性发热以及各类急性呼吸道感染项目"
+    },
+    "上呼吸道感染": {
+      "icd10": [
+        "J00",
+        "J06"
+      ],
+      "desc": "普通感冒及急性扁桃体炎、急性咽炎等上感诊断范围"
+    },
+    "高血压": {
+      "icd10": [
+        "I10",
+        "I15"
+      ],
+      "desc": "原发性高血压及继发性高血压慢特病用药核查"
+    },
+    "糖尿病": {
+      "icd10": [
+        "E10",
+        "E14"
+      ],
+      "desc": "Ⅰ型及Ⅱ型糖尿病慢特病超量开药与超频次购药核查"
+    },
+    "透析": {
+      "icd10": [
+        "Z49",
+        "Z49"
+      ],
+      "desc": "血液透析、腹膜透析及肾衰竭门诊特殊治疗项目"
+    },
+    "尿毒症": {
+      "icd10": [
+        "N18",
+        "N18"
+      ],
+      "desc": "慢性肾脏病5期，通常联动透析治疗项目进行违规报销扫描"
+    },
+    "老年性白内障": {
+      "icd10": [
+        "H25",
+        "H25"
+      ],
+      "desc": "老年高发眼科疾病"
+    },
+    "阿尔茨海默症": {
+      "icd10": [
+        "F00",
+        "F00"
+      ],
+      "desc": "阿尔茨海默病性痴呆"
+    },
+    "帕金森": {
+      "icd10": [
+        "G30",
+        "G31"
+      ],
+      "desc": "帕金森病及阿尔茨海默病等神经退行性疾病"
+    },
+    "前列腺增生": {
+      "icd10": [
+        "N40",
+        "N40"
+      ],
+      "desc": "老年男性高发良性前列腺增生"
+    },
+    "骨质疏松": {
+      "icd10": [
+        "M81",
+        "M81"
+      ],
+      "desc": "老年高发骨质疏松症伴病理性骨折"
+    },
+    "老年病": {
+      "icd10": [
+        "H25",
+        "N40",
+        "M81",
+        "F00"
+      ],
+      "desc": "泛指老年高发慢特病集合"
+    }
+  },
+  "org_codes": {
+    "药店": {
+      "code": [
+        "11",
+        "12",
+        "13",
+        "3"
+      ],
+      "desc": "定点零售药店/大药房等变体"
+    },
+    "诊所": {
+      "code": [
+        "A",
+        "B",
+        "2"
+      ],
+      "desc": "社区卫生服务站/门诊部/村卫生室等变体"
+    }
+  }
+}
