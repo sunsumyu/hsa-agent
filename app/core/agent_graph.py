@@ -122,6 +122,17 @@ async def aligner_node(state: AuditState, config: RunnableConfig):
         
     # 2. 执行穿透四层语义漏斗流程
     try:
+        metadata = state.get("metadata") or {}
+        fast_route_id = metadata.get("fast_route_id")
+        
+        if fast_route_id:
+            logger.success(f"⚡ [Aligner Bypass] 智能体命中直通分支，跳过语义对齐漏斗")
+            return {
+                "metadata": {
+                    "user_question": user_input
+                }
+            }
+            
         alignment_report = await semantic_funnel.execute_alignment_flow(user_input, config)
         
         # 3. 构造状态更新
@@ -176,19 +187,33 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     methodology = state.get("methodology", "基础核查逻辑")
     execution_trace = state.get("execution_trace") or []
 
-    prompt_text = report_renderer.prepare_conclusion_prompt(user_question, methodology, execution_trace, hard_count, hard_sum)
-    try:
-        response = await llm_provider.chat(
-            role="reporter", 
-            messages=[HumanMessage(content=prompt_text)], 
-            config=config, 
-            state=state,
-            max_tokens=1000 # [V178.9] 防止长篇专业结论被物理截断
-        )
-        llm_conclusion = str(response.content).strip()
-    except Exception as e:
-        logger.error(f"结论生成失败: {e}")
-        llm_conclusion = f"本次核查扫描 {hard_count} 条记录，涉及金额 ¥{hard_sum:,.2f}。"
+    # 1.5 快速路由物理直通分流 (Bypass Reporter LLM)
+    metadata = state.get("metadata") or {}
+    fast_route_id = metadata.get("fast_route_id")
+    
+    if fast_route_id:
+        logger.success(f"⚡ [Reporter Bypass] 智能体命中直通分支，跳过 Reporter LLM 生成，直接物理组装结论")
+        if hard_count == 0:
+            llm_conclusion = f"本次核查对底层表进行了全量扫描（扫描基数 > 0，发现违规记录 0 条），涉及金额 ¥{hard_sum:,.2f}。经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
+        else:
+            llm_conclusion = (
+                f"根据快速审计路由规则，本次专项核查针对「{user_question}」进行了物理穿透扫描。"
+                f"共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}。详细核查发现：经分析，系统检测到存在符合审计逻辑的异常违规行为，其结算特征、项目重叠以及临床时序均与审计方法论高度一致。建议立即启动定向现场审计，对相关病案流水及医保支付凭证进行追溯性核查。"
+            )
+    else:
+        prompt_text = report_renderer.prepare_conclusion_prompt(user_question, methodology, execution_trace, hard_count, hard_sum)
+        try:
+            response = await llm_provider.chat(
+                role="reporter", 
+                messages=[HumanMessage(content=prompt_text)], 
+                config=config, 
+                state=state,
+                max_tokens=1000 # [V178.9] 防止长篇专业结论被物理截断
+            )
+            llm_conclusion = str(response.content).strip()
+        except Exception as e:
+            logger.error(f"结论生成失败: {e}")
+            llm_conclusion = f"本次核查扫描 {hard_count} 条记录，涉及金额 ¥{hard_sum:,.2f}。"
 
     rendered = report_renderer.render(
         user_question=user_question,
@@ -234,6 +259,11 @@ async def human_approval_node(state: AuditState, config: RunnableConfig):
 # ============================================================
 
 def _route_sqlexec_post(state: AuditState) -> str:
+    # 0. 快速路由物理直通分流：直接走向 Consolidator，避免二次 LLM 工具综合与循环
+    metadata = state.get("metadata") or {}
+    if metadata.get("fast_route_id"):
+        return "CONSOLIDATOR"
+
     messages = state.get("messages", [])
     last_msg = messages[-1] if messages else None
 

@@ -67,59 +67,63 @@ def init_observability():
     os.environ["PYTHONUTF8"] = "1"
     
     # 1. OpenTelemetry & Phoenix 物理初始化
-    try:
-        os.environ["PHOENIX_GRPC_PORT"] = "4517"
-        os.environ["PHOENIX_HOST"] = "127.0.0.1"
-        phoenix_dir = os.path.join(os.getcwd(), "data", "phoenix")
-        os.makedirs(phoenix_dir, exist_ok=True)
-        # [V186.0] 终极硬化：显式指定数据库连接串，彻底绕过所有外部脏数据干扰
-        db_path = os.path.join(phoenix_dir, "phoenix.db")
-        os.environ["PHOENIX_DATA_DIR"] = phoenix_dir
-        os.environ["PHOENIX_DB_URL"] = f"sqlite:///{db_path}"
-
-        import phoenix as px
-        import io
-        from contextlib import redirect_stdout, redirect_stderr
-        
-        with io.StringIO() as buf, redirect_stdout(buf), redirect_stderr(buf):
-            _phoenix_session = px.launch_app()
-        
-        resource = Resource(attributes={
-            SERVICE_NAME: "hsa-audit-agent",
-            "version": "40.1-cloud-managed",
-            "environment": "production-hardened"
-        })
-        
-        provider = TracerProvider(resource=resource)
-        
-        # [V131.5] 增加物理探测：若端口未开放，则不加载 Exporter，防止后台重试报错干扰用户
-        import socket
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            is_collector_up = (s.connect_ex(("127.0.0.1", 4517)) == 0)
-
-        if is_collector_up:
-            exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4517", insecure=True)
-            processor = BatchSpanProcessor(exporter, max_queue_size=1024, max_export_batch_size=256, schedule_delay_millis=5000)
-            provider.add_span_processor(processor)
-            logger.info(">>> [Observability] OTel 导出器已挂载至 127.0.0.1:4517")
-        else:
-            logger.debug(">>> [Observability] Phoenix 采集器未就绪，Trace 导出已自动旁路（防止报错干扰）")
-        
-        _tracer_provider = provider
-        trace.set_tracer_provider(provider)
-        
-        LangChainInstrumentor().instrument(
-            tracer_provider=provider,
-            excluded_urls="172.25.128.80,127.0.0.1:4517,127.0.0.1:6006"
-        )
-        
-        logger.info(">>> [Observability] OTel 异步加固插桩已就绪")
-        
-    except Exception as e:
-        # [V186.5] 工业级降级：如果 Phoenix (观测系统) 损坏，不应阻塞审计主链路
-        logger.warning(f"⚠️ [Observability] Phoenix 采集器初始化失败（{e}），系统已自动切换至“脱机观测模式”。Trace 数据将不会发送至本地 Dashboard，但不影响审计任务。")
+    if os.getenv("DISABLE_PHOENIX", "false").lower() == "true":
+        logger.info(">>> [Observability] Phoenix 监控组件已旁路（DISABLE_PHOENIX=true），秒级跳过初始化。")
         _phoenix_session = None
+    else:
+        try:
+            os.environ["PHOENIX_GRPC_PORT"] = "4517"
+            os.environ["PHOENIX_HOST"] = "127.0.0.1"
+            phoenix_dir = os.path.join(os.getcwd(), "data", "phoenix")
+            os.makedirs(phoenix_dir, exist_ok=True)
+            # [V186.0] 终极硬化：显式指定数据库连接串，彻底绕过所有外部脏数据干扰
+            db_path = os.path.join(phoenix_dir, "phoenix.db")
+            os.environ["PHOENIX_DATA_DIR"] = phoenix_dir
+            os.environ["PHOENIX_DB_URL"] = f"sqlite:///{db_path}"
+
+            import phoenix as px
+            import io
+            from contextlib import redirect_stdout, redirect_stderr
+            
+            with io.StringIO() as buf, redirect_stdout(buf), redirect_stderr(buf):
+                _phoenix_session = px.launch_app()
+            
+            resource = Resource(attributes={
+                SERVICE_NAME: "hsa-audit-agent",
+                "version": "40.1-cloud-managed",
+                "environment": "production-hardened"
+            })
+            
+            provider = TracerProvider(resource=resource)
+            
+            # [V131.5] 增加物理探测：若端口未开放，则不加载 Exporter，防止后台重试报错干扰用户
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                is_collector_up = (s.connect_ex(("127.0.0.1", 4517)) == 0)
+
+            if is_collector_up:
+                exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4517", insecure=True)
+                processor = BatchSpanProcessor(exporter, max_queue_size=1024, max_export_batch_size=256, schedule_delay_millis=5000)
+                provider.add_span_processor(processor)
+                logger.info(">>> [Observability] OTel 导出器已挂载至 127.0.0.1:4517")
+            else:
+                logger.debug(">>> [Observability] Phoenix 采集器未就绪，Trace 导出已自动旁路（防止报错干扰）")
+            
+            _tracer_provider = provider
+            trace.set_tracer_provider(provider)
+            
+            LangChainInstrumentor().instrument(
+                tracer_provider=provider,
+                excluded_urls="172.25.128.80,127.0.0.1:4517,127.0.0.1:6006"
+            )
+            
+            logger.info(">>> [Observability] OTel 异步加固插桩已就绪")
+            
+        except Exception as e:
+            # [V186.5] 工业级降级：如果 Phoenix (观测系统) 损坏，不应阻塞审计主链路
+            logger.warning(f"⚠️ [Observability] Phoenix 采集器初始化失败（{e}），系统已自动切换至“脱机观测模式”。Trace 数据将不会发送至本地 Dashboard，但不影响审计任务。")
+            _phoenix_session = None
 
     # 2. Langfuse 物理初始化 (V131.6 加固型：增加云端连通性预检)
     try:

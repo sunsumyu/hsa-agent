@@ -50,6 +50,46 @@ class AuditCoderAgent:
         all_tools = skill_registry.get_all_skills()
         tools = permission_manager.filter_skills(user_id, all_tools)
 
+        # 1.5 快速路由物理直通分流 (Bypass Coder LLM)
+        metadata = state.get("metadata") or {}
+        fast_route_id = metadata.get("fast_route_id")
+        if fast_route_id:
+            logger.success(f"⚡ [Coder Bypass] 智能体命中直通分支，跳过 Coder LLM 生成，直接物理调用工具: {fast_route_id}")
+            from langchain_core.messages import AIMessage
+            
+            tool_calls = [{
+                "name": "audit_medical_rule",
+                "args": {
+                    "rule_id": fast_route_id,
+                    "extra_filters": metadata.get("extra_filters")
+                },
+                "id": f"call_fast_route_{fast_route_id}"
+            }]
+            
+            response = AIMessage(
+                content=f"已通过快速路由匹配到静态审计规则: {fast_route_id}，正在执行物理直通计算。",
+                tool_calls=tool_calls
+            )
+            
+            with tracer.span("SQL_EXECUTION", node="CODER") as span:
+                results = await self._invoke_tools_parallel(tool_calls, tools)
+                span.set_result(f"物理执行完成，获取 {len(results)} 组结果集")
+                
+            processed = self._process_tool_results(results, state)
+            
+            return {
+                "raw_data": processed["raw_data"],
+                "sql_query": processed["sql_query"],
+                "sql_history": processed["sql_history"],
+                "methodology": processed["methodology"],
+                "messages": [response] + processed["tool_msgs"],
+                "retry_count": retry + 1,
+                "sql_validated": True,
+                "error_log": None,
+                "execution_trace": tracer.to_legacy_list(),
+                "temp_table": state.get("temp_table")
+            }
+
         # 2. 上下文准备
         tasks_list = state.get("tasks", [])
         
