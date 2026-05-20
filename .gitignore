@@ -70,7 +70,7 @@ uuid
 anthropic_agents_text.txt
 
 # ── 大仓库内脏文件 ────────────────────────────────────────
-scratch/
+
 docs-log/
 docs/
 tools/_history_chunk.md
