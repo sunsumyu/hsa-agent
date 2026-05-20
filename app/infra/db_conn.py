@@ -151,7 +151,7 @@ def get_clickhouse_client():
                 import clickhouse_driver
                 client = clickhouse_driver.Client(
                     host=host, port=9000, user=user, password=password, database=database,
-                    connect_timeout=3, send_receive_timeout=5
+                    connect_timeout=3, send_receive_timeout=5, settings={"readonly": 1}
                 )
                 client.execute("SELECT 1")
                 logger.success("✅ [DB_CONN] 路径 1 (Native 9000) 连接成功！")
@@ -174,7 +174,7 @@ def get_clickhouse_client():
                     logger.info(f"🔗 [DB_CONN] 尝试连接 WSL IP: {wsl_ip}")
                     client = clickhouse_connect.get_client(
                         host=wsl_ip, port=8123, username=user, password=password, database=database,
-                        connect_timeout=3
+                        connect_timeout=3, settings={"readonly": 1}
                     )
                     logger.success(f"✅ [DB_CONN] 路径 2 ({wsl_ip}) 连接成功！")
                     break
@@ -188,7 +188,7 @@ def get_clickhouse_client():
             logger.info(f"🔌 [DB_CONN] 路径 3: localhost:8123 (HTTP)...")
             client = clickhouse_connect.get_client(
                 host='localhost', port=8123, username=user, password=password, database=database,
-                connect_timeout=3
+                connect_timeout=3, settings={"readonly": 1}
             )
             client.query("SELECT 1")
             logger.success("✅ [DB_CONN] 路径 3 连接成功！")

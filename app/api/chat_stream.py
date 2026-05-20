@@ -187,7 +187,7 @@ def classify_and_render_error(
                     reason="FreeTier Limit (Switch Required)",
                     permanent=True,
                 )
-                background_tasks.add_task(model_manager.run_health_check)
+                background_tasks.add_task(model_manager.probe_all_endpoints)
                 out.append(
                     f"\n\n> [!CAUTION]\n"
                     f"> **检测到算力配额冲突 (403)**\n> \n"
@@ -202,7 +202,7 @@ def classify_and_render_error(
                     reason="Provider Quota Exhausted (403)",
                     permanent=True,
                 )
-                background_tasks.add_task(model_manager.run_health_check)
+                background_tasks.add_task(model_manager.probe_all_endpoints)
                 out.append(
                     f"\n\n> [!WARNING]\n"
                     f"> **算力配额熔断 (403)**\n"

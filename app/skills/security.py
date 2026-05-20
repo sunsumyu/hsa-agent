@@ -283,6 +283,74 @@ class SQLGuardian:
                 if isinstance(right, exp.Literal) and right.is_string and re.match(r'^\d{4}$', right.this):
                     new_eq = sqlglot.parse_one(f"toYear(toDateTime({left.sql()})) = {right.this}", read="clickhouse")
                     eq.replace(new_eq)
+
+        # ──【企业级 v1.2】SQL AST 级方言自愈重写 ──
+        # 对语法树中的非法/非标/方言函数节点进行深度探测与平滑重写
+        for node in expression.walk():
+            # 1. 拦截与重写 Anonymous 节点 (sqlglot 无法解析为标准内置的自定义/外来函数)
+            if isinstance(node, exp.Anonymous):
+                func_name = node.name.upper()
+                
+                # 修复 MySQL DATEDIFF(A, B) -> ClickHouse dateDiff('day', B, A)
+                if func_name == "DATEDIFF" and len(node.expressions) == 2:
+                    arg1, arg2 = node.expressions[0].sql(), node.expressions[1].sql()
+                    new_node = sqlglot.parse_one(f"dateDiff('day', {arg2}, {arg1})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 MySQL DATEDIFF 为 ClickHouse dateDiff: {node.sql()} -> {new_node.sql()}")
+                
+                # 修复 MySQL IFNULL(A, B) -> ClickHouse ifNull(A, B)
+                elif func_name == "IFNULL" and len(node.expressions) == 2:
+                    arg1, arg2 = node.expressions[0].sql(), node.expressions[1].sql()
+                    new_node = sqlglot.parse_one(f"ifNull({arg1}, {arg2})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 IFNULL 为 ClickHouse ifNull")
+
+                # 修复 MySQL YEAR(A) -> ClickHouse toYear(A)
+                elif func_name == "YEAR" and len(node.expressions) == 1:
+                    arg = node.expressions[0].sql()
+                    new_node = sqlglot.parse_one(f"toYear({arg})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 YEAR 为 ClickHouse toYear")
+
+                # 修复 MySQL MONTH(A) -> ClickHouse toMonth(A)
+                elif func_name == "MONTH" and len(node.expressions) == 1:
+                    arg = node.expressions[0].sql()
+                    new_node = sqlglot.parse_one(f"toMonth({arg})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 MONTH 为 ClickHouse toMonth")
+
+                # 修复 MySQL DATE_FORMAT(A, fmt) -> ClickHouse formatDateTime(A, fmt)
+                elif func_name == "DATE_FORMAT" and len(node.expressions) == 2:
+                    arg1, arg2 = node.expressions[0].sql(), node.expressions[1].sql()
+                    new_node = sqlglot.parse_one(f"formatDateTime({arg1}, {arg2})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 DATE_FORMAT 为 ClickHouse formatDateTime")
+
+                # 修复 MySQL CURDATE() -> ClickHouse today()
+                elif func_name == "CURDATE":
+                    new_node = sqlglot.parse_one("today()", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 CURDATE 为 ClickHouse today()")
+
+                # 修复 MySQL GROUP_CONCAT(col) / GROUP_CONCAT(col, sep) -> ClickHouse arrayStringConcat(groupUniqArray(col), sep)
+                elif func_name == "GROUP_CONCAT" and len(node.expressions) >= 1:
+                    col = node.expressions[0].sql()
+                    sep = node.expressions[1].sql() if len(node.expressions) > 1 else "','"
+                    new_node = sqlglot.parse_one(f"arrayStringConcat(groupUniqArray({col}), {sep})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 GROUP_CONCAT 为 ClickHouse arrayStringConcat")
+
+            # 2. 拦截与重写已被部分解析的标准 AST Func 节点 (以防 sqlglot 将其解析为 DateDiff 等特定类)
+            elif isinstance(node, exp.Func):
+                func_name = node.key.upper()
+                
+                # 修复标准 DateDiff / DATEDIFF AST 节点为 ClickHouse 三参数版本
+                if func_name == "DATEDIFF" and len(node.expressions) == 2:
+                    arg1, arg2 = node.expressions[0].sql(), node.expressions[1].sql()
+                    new_node = sqlglot.parse_one(f"dateDiff('day', {arg2}, {arg1})", read="clickhouse")
+                    node.replace(new_node)
+                    logger.success(f"🔧 [AST自愈] 自动重写 DATEDIFF 节点为 ClickHouse dateDiff")
+
         return expression
 
     @staticmethod

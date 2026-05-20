@@ -343,9 +343,19 @@ class UsageTracker:
         logger.warning(f"!!! [健康降级] 节点 {target_id} 稳定性扣分: {current:.2f} -> {self.stability_scores[target_id]:.2f}")
 
     def record_success(self, model_id: str):
-        """成功后缓慢恢复健康分"""
+        """成功后缓慢恢复健康分，并清除黑名单"""
         current = self.get_stability_score(model_id)
         self.stability_scores[model_id] = min(1.0, current + 0.1)
+        
+        # [V201.0] 自愈：成功时自动清除黑名单与物理封禁
+        if model_id in self.blacklist_expiry:
+            self.blacklist_expiry.pop(model_id, None)
+            logger.info(f"💖 [自愈成功] 物理节点 {model_id} 已从每日黑名单中自动解除封禁！")
+        if model_id in self.model_configs:
+            cfg = self.model_configs[model_id]
+            cfg.is_active = True
+            cfg.last_error = None
+            
         self._save_stats()
 
 

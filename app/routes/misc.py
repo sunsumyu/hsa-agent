@@ -45,7 +45,9 @@ async def get_history(request: Request):
     ]
 
 
+@router.get("/agent/statistics")
 @router.get("/agent/metrics")
+@router.get("/ins-fqz/agent/statistics")
 @router.get("/ins-fqz/agent/metrics")
 async def get_metrics():
     """[V4.8.0] 可视化工具链：返回实时 Token 消耗、模型用量和成本统计"""
@@ -98,7 +100,9 @@ async def get_metrics():
     }
 
 
+@router.get("/agent/trajectory")
 @router.get("/agent/trace")
+@router.get("/ins-fqz/agent/trajectory")
 @router.get("/ins-fqz/agent/trace")
 async def get_trace():
     """[V4.8.0] 可视化工具链：返回最近一次推演的节点执行轨迹"""

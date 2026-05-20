@@ -345,37 +345,154 @@ PREDICTED = {
 # ]
 
 
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-11", 
+#         "tag": "False Anesthesia Billing", 
+#         "diff": "****", # 困难：强业务逻辑冲突与隐含时序
+#         "prompt": "查一下手术室和麻醉科的流水。有没有哪家医院给病人收了‘全身麻醉’或者‘椎管内麻醉’的钱，但是这人在同一天的费用明细里，连一丁点像丙泊酚、七氟烷或者罗哌卡因这种必备的麻醉药费都没产生的？光收高价操作费不耗药，这种虚构麻醉服务的造假单子全给我拉出来。",
+#         "pred_tokens": 14500,
+#     },
+#     {
+#         "id": "QA-CUST-12", 
+#         "tag": "Dialysis Phantom Billing Ring", 
+#         "diff": "*****", # 极难：动态基线 + 图谱聚类 + 物理极限违背
+#         "prompt": "盯紧那些民营综合医院的血透室，帮我抓个大案子：先算算他们这几家医院平时一天最多能接多少个透析病人。然后你去跑按月结算的数据，看有没有哪家医院在某个月里，它报销的‘血液透析’总人次，竟然远远超过了他们机器满负荷连轴转24小时能做出来的物理极限？顺便查一下，在这个超限的月份里，是不是有一批外地户口的特病患者突然集体‘空降’到这家医院集中刷卡？这绝对是成建制的买病人挂空床骗保。",
+#         "pred_tokens": 18500,
+#     },
+# ]
+
+
+# TEST_CASES = [
+#     {
+#         "id": "QA-CUST-13", 
+#         "tag": "Cross-Institution Medication Hoarding", 
+#         "diff": "****", # 困难：跨机构滑动时间窗与剂量冲突
+#         "prompt": "去查查跨院重复开药的漏子。给我设个滚动的时间窗，专门抓那种前脚刚在A医院开了足足30天用量的某种高价靶向药或者慢病药，结果连一个星期都没过，这人又跑到B医院或者外面的大药房，把一模一样的药又开了一个月的量。这种明显是跨机构囤药倒卖，拿医保统筹池当提款机呢，把这批人全给我筛出来。",
+#         "pred_tokens": 15000,
+#     },
+#     {
+#         "id": "QA-CUST-14", 
+#         "tag": "Bundled vs Unbundled Double Dipping", 
+#         "diff": "****", # 困难：医疗服务目录的层级包含与互斥逻辑
+#         "prompt": "扫一下重症监护室（ICU）和抢救室的明细清单，找那种‘双头吃’的乱收费硬伤。比如医院明明已经按天收了高昂的‘重症监护综合费’或者打包的抢救费，按国家医保目录规定，这块已经包含了基础的吸痰、指尖测血糖、特级护理这些常规动作。结果你再去他当天的流水里看，他又把这些应该免费包含的小项目单独拆出来，一天继续计费个十几次甚至几十次。这种把打包收费和单项收费混着报的，全给我扒出来。",
+#         "pred_tokens": 14500,
+#     },
+#     {
+#         "id": "QA-CUST-15", 
+#         "tag": "Surgeon Physical Limit Violation", 
+#         "diff": "*****", # 极难：医生维度的时序聚合与物理极限
+#         "prompt": "给我深挖一下外科系统的主刀大夫考勤和手术记录。你用系统里国家规定的手术基准时长去算，把同一个大夫在同一天内作为‘第一主刀’的所有三四级大手术的基准时长全加起来。去看看有没有那种一天24小时不吃不喝连轴转，做出来的手术总时长居然超过了30个小时的？这要不是主刀医生会分身术，要不就是科室在疯狂虚记手术台次、或者让没有资质的规培生代刀骗高额手术费，直接按重大欺诈线索给我提取。",
+#         "pred_tokens": 17500,
+#     },
+#     {
+#         "id": "QA-CUST-16", 
+#         "tag": "DRG Revolving Door Admission", 
+#         "diff": "*****", # 极难：DRG/DIP博弈下的复杂序列状态匹配
+#         "prompt": "盯紧DRG付费改革后那些搞‘假出院’的医院。你去查那种卡着病种付费最高额度办理出院的重病号，这人出院还没满48小时，立马又在同一家医院或者同一个医疗集团下的分院重新办了入院，而且看的主诊断连变都没变。最绝的是，你对比下这两段住院期间的医嘱和耗材明细，比如呼吸机使用记录或者高压氧舱根本就没断过。这绝对是医院为了躲避单次住院超支扣款，强行把一次连贯的治疗切成两次来赚两次病种钱的，给我打个极高风险的标签。",
+#         "pred_tokens": 18500,
+#     },
+#     {
+#         "id": "QA-CUST-17", 
+#         "tag": "Household Card Sharing Ring", 
+#         "diff": "*****", # 极难：弱连通分量(WCC)实体聚类 + 家族图谱
+#         "prompt": "搞个复杂的团伙图谱分析。你把药店的高血压、糖尿病这种好倒卖的特慢病结算数据拉出来，先别看单个人，你去查‘家庭’。看看有没有那种三个甚至五个不同的医保账号，他们留在系统里的紧急联系人手机号或者家庭住址高度相似或者是同一个，然后在过去的连续三个月里，这全家人就像商量好了一样，排队去同一家药店把慢病药的额度全部刷到顶？这根本不是一家人全得病了，这是药贩子收了一家子的卡在集中套现倒药，把这种家族式的套保关系网给我画出来。",
+#         "pred_tokens": 19000,
+#     },
+# ]
+
 TEST_CASES = [
     {
-        "id": "QA-CUST-11", 
-        "tag": "False Anesthesia Billing", 
-        "diff": "****", # 困难：强业务逻辑冲突与隐含时序
-        "prompt": "查一下手术室和麻醉科的流水。有没有哪家医院给病人收了‘全身麻醉’或者‘椎管内麻醉’的钱，但是这人在同一天的费用明细里，连一丁点像丙泊酚、七氟烷或者罗哌卡因这种必备的麻醉药费都没产生的？光收高价操作费不耗药，这种虚构麻醉服务的造假单子全给我拉出来。",
+        "id": "QA-CUST-18", 
+        "tag": "Pharmacy Inventory Discrepancy", 
+        "diff": "****", # 困难：跨库对比与进销存倒挂
+        "prompt": "去核查一下定点大药房的进销存数据。你把医保结算系统里某款贵重药的卖出数量，跟药店从正规医药公司进货入库的数量做个比对。要是发现哪家店医保卖出去的药，居然比他们采购进来的还要多，这种‘无中生有’的负库存绝对有问题。要不就是拿医保卡串换卖了大米食用油，要不就是从药贩子手里收的非法回流药，直接把库存倒挂的明细给我拉出来。",
+        "pred_tokens": 15500,
+    },
+    {
+        "id": "QA-CUST-19", 
+        "tag": "Ghost Doctor Prescription", 
+        "diff": "*** ", # 中等：人员状态与业务行为冲突
+        "prompt": "给我扫一遍医生的考勤排班和HIS接诊记录。挑那种明明在人事系统里登记了休产假、出国进修，甚至已经离职退休的大夫，结果他的工号在同一时间段里，还天天在门诊系统里源源不断地开出大额处方、甚至主刀做手术的。这种幽灵医生要不就是科室里有人盗用账号违规代签，要不就是纯粹虚构诊疗记录骗保。",
+        "pred_tokens": 13000,
+    },
+    {
+        "id": "QA-CUST-20", 
+        "tag": "DRG Upcoding Without Evidence", 
+        "diff": "*****", # 极难：DRG高套与临床路径(诊疗手段)交叉互斥
+        "prompt": "盯一下今年呼吸科和心内科的病案首页。看看有没有那种本来只是普通心绞痛或者轻微感冒的病人，医院为了硬凑高级别的DRG分组多拿钱，出院主诊断全给夸大写成‘心力衰竭’或者‘重症肺炎伴呼吸衰竭’。你重点用收费明细去做交叉校验：如果他主诊断写了重症心衰，结果整个住院期间连一丁点强心利尿的抢救药都没开过，也没有上过呼吸机，这种光写重病不给重治的，直接按恶意高套病种抓典型。",
+        "pred_tokens": 18500,
+    },
+    {
+        "id": "QA-CUST-21", 
+        "tag": "Excessive Cross-Hospital Testing", 
+        "diff": "****", # 困难：跨机构短时间内医疗行为重复
+        "prompt": "跑个跨院大型检查的数据。现在卫健委明文要求同级医院检查结果互认，你给我查查，有没有哪个病号在一家三甲医院刚做完一套上千块的增强CT或者核磁共振，出院连三天都没过，跑到另一家三甲医院，原封不动又被开了一模一样的大型检查？这种极其浪费统筹基金的重复检查，要么是医生为了科室创收，要么就是拿病号当刷单工具，把这些重复开单的记录列出来。",
         "pred_tokens": 14500,
     },
     {
-        "id": "QA-CUST-12", 
-        "tag": "Dialysis Phantom Billing Ring", 
-        "diff": "*****", # 极难：动态基线 + 图谱聚类 + 物理极限违背
-        "prompt": "盯紧那些民营综合医院的血透室，帮我抓个大案子：先算算他们这几家医院平时一天最多能接多少个透析病人。然后你去跑按月结算的数据，看有没有哪家医院在某个月里，它报销的‘血液透析’总人次，竟然远远超过了他们机器满负荷连轴转24小时能做出来的物理极限？顺便查一下，在这个超限的月份里，是不是有一批外地户口的特病患者突然集体‘空降’到这家医院集中刷卡？这绝对是成建制的买病人挂空床骗保。",
-        "pred_tokens": 18500,
+        "id": "QA-CUST-22", 
+        "tag": "Malicious Patient Transfer before Cap", 
+        "diff": "*****", # 极难：费用临界点探测与转院逻辑链路
+        "prompt": "查一下重症和肿瘤病人的转院记录。去挖那种情况：病号在A医院住院，眼看着总费用刚好快要逼近DRG单次支付的盈亏临界点了，突然就极其突兀地被办了转院或者出院，然后当天或者第二天就推到了同城的B医院接着住院治疗。把这种一到费用红线就恶意推诿重病号、故意分解住院费用的操作，按转院时间差和前一次费用的报销占比给我精准定位出来。",
+        "pred_tokens": 18000,
     },
 ]
 
-
-
-
-
 # ── Judge Prompt ──────────────────────────────────────────────────────
-JUDGE_PROMPT = """You are a senior healthcare insurance audit judge.
-Score the following audit report on 7 dimensions (0-10 each, total 70):
-1. Success       : Was the task completed? Did SQL/code execute?
-2. Recall        : Were all suspicious violations found (no omissions)?
-3. Precision     : Are flagged violations accurate (no false positives)?
-4. Faithfulness  : Is the conclusion grounded in actual data (no hallucination)?
-5. Relevance     : Does the report directly answer the original question?
-6. Professionalism: Is the audit logic compliant with healthcare insurance regulations?
-7. Interpretability: Is the report clear with solid evidence chains?
+JUDGE_PROMPT = """You are a senior healthcare insurance audit judge with 20 years of experience in medical fraud detection.
+Score the following audit report on 7 dimensions (0-10 each, total 70).
+Use the detailed rubrics below — do NOT give blanket high scores for zero-findings reports without evidence of thorough scanning.
+
+SCORING RUBRICS:
+
+1. Success (0-10): Was the task fully completed?
+   - 10: SQL executed, full report delivered, all task elements addressed including any "draw the graph" requirement
+   - 7-9: SQL executed, report delivered, minor gaps
+   - 4-6: SQL executed but report is incomplete or one major task element missing
+   - 0-3: SQL failed to execute, or report is empty/placeholder
+
+2. Recall (0-10): Were all suspicious violations found? No omissions?
+   - 10: Zero-findings reports MUST include: (a) total scan record count, (b) time range covered, (c) ICD-10 code coverage list, (d) 3-tier sensitivity analysis (original/+20%/+50% threshold relaxation)
+   - 10: Non-zero findings must cover all logical violation patterns described in the task
+   - 7-9: Zero-findings with partial scan boundary proof OR non-zero findings with minor pattern gaps
+   - 4-6: Zero-findings with NO scan boundary proof, or only superficial pattern coverage
+   - 0-3: Zero-findings with no justification, or obvious logical violations missed
+
+3. Precision (0-10): Are flagged violations accurate? No false positives?
+   - 10: All flagged violations have concrete data evidence, no speculation
+   - 7-9: Mostly accurate, 1-2 borderline cases
+   - 4-6: Some findings lack data backing or use hallucinated data
+   - 0-3: Major false positives or fabricated findings
+
+4. Faithfulness (0-10): Is the conclusion grounded in actual data? No hallucination?
+   - 10: Every claim traceable to actual SQL output; no invented statistics
+   - 7-9: Mostly faithful, minor extrapolations
+   - 4-6: Some claims not supported by shown data
+   - 0-3: Significant hallucination or contradiction with shown data
+
+5. Relevance (0-10): Does the report directly answer the original question?
+   - 10: Answers all aspects of original question PLUS provides actionable next steps (specific, not generic)
+   - 7-9: Answers main question but lacks actionable specifics
+   - 4-6: Partially answers, misses key aspects of original question
+   - 0-3: Fails to address the core audit question
+
+6. Professionalism (0-10): Compliant with healthcare insurance regulations?
+   - 10: Cites specific regulatory documents (e.g., 医保发〔2021〕48号, 国卫医发〔2022〕18号) with article numbers; uses correct ICD-10 codes; proper DRG terminology
+   - 7-9: Uses correct professional terminology but lacks specific policy citations
+   - 4-6: Generally professional but with terminology errors or missing policy basis
+   - 0-3: Non-professional language, incorrect regulatory references, or fabricated policies
+
+7. Interpretability (0-10): Is the report clear with solid evidence chains?
+   - 10: Contains visual aids (Mermaid graphs for network tasks, ASCII timeline for surgery tasks, comparison tables for double-billing tasks) PLUS clear evidence chains PLUS calculation examples
+   - 7-9: Clear evidence chains but lacks visual aids for tasks that explicitly required them (e.g., "画出来")
+   - 4-6: Some evidence chains but largely text-only with no visual proof
+   - 0-3: Opaque logic, no evidence chains, hard to follow
+
+CRITICAL DEDUCTIONS:
+- If original task said "画出来" (draw it) and report has NO Mermaid/graph visualization: Interpretability MAX = 6, Success MAX = 7
+- If zero-findings report has NO scan boundary proof (total record count, time range, code coverage): Recall MAX = 5
+- If report cites no specific policy document numbers for DRG/ICD/surgery-grade tasks: Professionalism MAX = 7
 
 Return STRICT JSON (no extra text):
 {"scores": {"success": 0, "recall": 0, "precision": 0, "faithfulness": 0, "relevance": 0, "professionalism": 0, "interpretability": 0}, "total": 0, "advice": "..."}
@@ -543,7 +660,7 @@ async def run_one(case: dict, judge_llm) -> dict:
     print_block(f"FINAL REPORT from Agent [{cid}]", report_text, sep=SEP)
 
     # ── Judge ──────────────────────────────────────────────────────
-    judge_input = f"{JUDGE_PROMPT}\n\nAudit Task: {prompt}\n\nGenerated Report:\n{report_text[:4000]}"
+    judge_input = f"{JUDGE_PROMPT}\n\nAudit Task: {prompt}\n\nGenerated Report:\n{report_text}"
 
     print(f"\n{SEP3}")
     print(f"  JUDGE PHASE - [{cid}]")
@@ -726,6 +843,10 @@ async def main():
     from app.infra.usage_tracker import usage_tracker
     usage_tracker.reset_blacklists()
     logger.info("✅ [算力治理] 已强制重置模型黑名单，确保 Benchmark 链路满血启动。")
+
+    # 禁用语义动作缓存以强制执行物理 SQL 取证与工具调用流程
+    os.environ["DISABLE_AUDIT_CACHE"] = "true"
+    logger.info("⚡ [Benchmark] 已禁用动作链缓存，强制物理 SQL 执行。")
 
     # [V75.0] 企业级观测激活：确保 Benchmark 过程被全量追踪
     init_observability()

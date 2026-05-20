@@ -121,35 +121,17 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
                     content = event["data"]["chunk"].content
                     if not content: continue
                     
-                    # [V15.0 核心拦截] 只有 REPORTER 节点的输出才允许流向前端
-                    if active_node != "reporter":
-                        # [V15.1 智能心跳] 如果正在推演，每隔 40 个 token 喂一个点，防止死机错觉
-                        discard_counter += 1
-                        if discard_counter >= 40:
-                            yield "."
-                            discard_counter = 0
-                        continue
-                    
-                    # 关键增强：过滤并提取有效文本，移除 JSON/思维链 结构
+                    # 关键增强：提取所有有效文本，供后续容器包装
                     text_to_append = ""
                     if isinstance(content, str):
                         text_to_append = content
                     elif isinstance(content, list):
-                        # 处理结构化内容：提取文本与思维链，实现透明化推演
                         for item in content:
                             if not isinstance(item, dict): continue
-                            
-                            i_type = item.get("type", "")
-                            if i_type == "text":
-                                text_to_append += item.get("text", "")
-                            elif i_type in ["thought", "reasoning", "thinking"]:
-                                # 思维片段：即便非交付阶段，也实时下发以降低用户焦虑
-                                thought_chunk = item.get("thought") or item.get("reasoning") or item.get("text", "")
-                                if thought_chunk:
-                                    yield f"[[[THOUGHT:{sanitize(thought_chunk)}]]]\n\n"
+                            if item.get("type") in ["text", "thought", "reasoning", "thinking"]:
+                                text_to_append += str(item.get("text") or item.get("thought") or item.get("reasoning") or "")
                     elif isinstance(content, dict):
-                        if content.get("type") == "text":
-                            text_to_append = content.get("text", "")
+                        text_to_append = str(content.get("text") or content.get("thought") or "")
                     
                     # [V4.6.1] 拦截器 + 强制脱敏双重过滤
                     interceptor_chunks = interceptor.process_chunk(text_to_append)
@@ -158,14 +140,19 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
                             filtered_content = sanitize(chunk)
                             if filtered_content:
                                 # [V15.7] 场景化分流：根据活跃节点识别"交付阶段"与"推演阶段"
-                                # 只有 REPORTER 的输出被视为最终用户可见并落库
                                 if active_node == "REPORTER":
+                                    if in_thought:
+                                        yield "\n:::\n\n"
+                                        in_thought = False
                                     full_buffer += filtered_content
                                     ai_response_content += filtered_content # 只有交付节点内容计入持久化
                                     yield filtered_content
                                 else:
-                                    # 专家的推演过程以 THOUGHT 标签实时下发给 UI 展示，但不计入 ai_response_content (不落库)
-                                    yield f"[[[THOUGHT:{filtered_content}]]]\n\n"
+                                    # [流式升级] 非交付节点的内容自动被 :::thought 容器包裹
+                                    if not in_thought:
+                                        yield f"\n:::thought\n**【{lg_node or name}】推演日志:**\n"
+                                        in_thought = True
+                                    yield filtered_content
                 
                 elif kind == "on_chain_start":
                     # [V15.3 强固检测] 优先使用 metadata 中的节点名称，其次使用 chain name
@@ -173,6 +160,9 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
                     # [重构 V90.0] 节点切换的协议包生成委托给 emit_node_status
                     if check_name in ("DATA_EXPERT", "AUDITOR", "FINANCIAL_EXPERT", "REPORTER", "SOLO_EXPERT"):
                         active_node = "REPORTER" if check_name == "REPORTER" else "EXPERT"
+                        if active_node == "REPORTER" and in_thought:
+                            yield "\n:::\n\n"
+                            in_thought = False
                         for packet in emit_node_status(check_name, name):
                             yield packet
 
@@ -180,6 +170,9 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
                     name = event['name']
                     inputs = event['data']['input'] or {}
                     logger.info(f"审计工具执行: {name} -> {inputs}")
+                    if in_thought:
+                        yield "\n:::\n\n"
+                        in_thought = False
                     # [重构 V90.0] 工具启动协议包委托给 emit_tool_start_events
                     for packet in emit_tool_start_events(name, inputs):
                         yield packet
@@ -187,12 +180,18 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
                 elif kind == "on_tool_end":
                     name = event['name']
                     output = event['data'].get('output', '')
-                    # [V23.1] 取证公示：将工具执行结果实时推送到 UI
+                    if in_thought:
+                        yield "\n:::\n\n"
+                        in_thought = False
+                    # [V23.1] 取证公示：将工具执行结果实时推送到 UI，改用 Markdown 容器
                     if name in ["execute_audit_sql", "search_expert_knowledge", "list_tables"]:
-                        summary = str(output)[:200].replace('\n', ' ')
-                        yield f"[[[LOGIC: [取证回显] {name} 产出 -> {summary}...]]]\n\n"
+                        summary = str(output)[:1000]
+                        yield f"\n:::sql_trace\n-- [物理取证执行] 工具: {name}\n{summary}\n:::\n\n"
 
                 elif kind == "on_chat_model_end":
+                    if in_thought:
+                        yield "\n:::\n\n"
+                        in_thought = False
                     # 算力资源遥测与最终交付补益
                     data = event.get('data', {}) or {}
                     output = data.get('output')

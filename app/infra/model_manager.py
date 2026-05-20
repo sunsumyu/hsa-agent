@@ -113,7 +113,7 @@ class EnrichedChatOpenAI(ChatOpenAI):
         content = str(result.generations[0].message.content)
         chatty_keywords = ["你好", "很高兴为您服务", "我是一个大语言模型", "作为一个AI", "有什么可以帮您", "抱歉"]
         if not _is_probe and any(kw in content for kw in chatty_keywords) and len(content) < 300:
-            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            m_id = getattr(self, 'endpoint_id', getattr(self, 'model_name', getattr(self, 'model', 'unknown')))
             logger.warning(f"🚫 [ANTI_CHAT] 节点 {m_id} 输出了闲聊废话，强行判定为失败并切流。")
             endpoint_pool_manager.record_failure(m_id, "Detected conversational chatty response.")
             raise ValueError(f"Chatty response detected from {m_id}")
@@ -138,13 +138,14 @@ class EnrichedChatOpenAI(ChatOpenAI):
 
 class EnrichedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """[V40.1] 为 Google Gemini 提供故障感知的增强类"""
+    endpoint_id: str = "unknown"
     
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
         try:
             result = await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
             return result
         except Exception as e:
-            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            m_id = getattr(self, 'endpoint_id', getattr(self, 'model_name', getattr(self, 'model', 'unknown')))
             err_msg = str(e)
             
             if "429" in err_msg or "limit" in err_msg.lower():
@@ -165,7 +166,7 @@ class EnrichedChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
             result = super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
             return result
         except Exception as e:
-            m_id = getattr(self, 'model_name', getattr(self, 'model', 'unknown'))
+            m_id = getattr(self, 'endpoint_id', getattr(self, 'model_name', getattr(self, 'model', 'unknown')))
             err_msg = str(e)
             
             if "429" in err_msg or "limit" in err_msg.lower():
@@ -383,7 +384,7 @@ class ModelManager:
         
         try:
             if provider == "google":
-                return EnrichedChatGoogleGenerativeAI(
+                llm = EnrichedChatGoogleGenerativeAI(
                     model=model_name,
                     api_key=api_key, 
                     google_api_key=api_key,
@@ -391,6 +392,8 @@ class ModelManager:
                     timeout=60.0,
                     streaming=True
                 )
+                object.__setattr__(llm, 'endpoint_id', name)
+                return llm
             else:
                 llm = EnrichedChatOpenAI(
                     model=model_name,
@@ -483,39 +486,100 @@ class ModelManager:
                     break
         return Reranker(reranker_id, cfg) if cfg else None
 
+    async def probe_all_endpoints(self):
+        """[V201.0] 主动探活所有可用与处于熔断/冷却中的节点，实现智能探测自愈"""
+        logger.info("🔍 [HealthCheck] 开始单次全量节点健康拨测...")
+        
+        # 收集所有独特的 endpoints
+        endpoints_to_probe = {}
+        for pool_id, pool in endpoint_pool_manager.pools.items():
+            for ep in pool.endpoints:
+                endpoints_to_probe[ep.id] = (ep, pool_id)
+                
+        healthy_count = 0
+        recovered_count = 0
+        failed_count = 0
+        
+        for ep_id, (ep, pool_id) in endpoints_to_probe.items():
+            state = endpoint_pool_manager.states.get(ep_id)
+            is_cooling = state and state.is_cooling
+            is_blacklisted = ep_id in usage_tracker.blacklist_expiry
+            
+            # 如果不处于熔断/冷却状态，则可以认为健康
+            if is_cooling or is_blacklisted:
+                logger.info(f"⏳ [HealthCheck] 发现处于熔断或冷却的节点: {ep_id}，启动主动探活拨测...")
+                
+                # 尝试用非常便宜的 ping (max_tokens=1) 来探活
+                success = await self._probe_single_endpoint(ep_id, ep)
+                if success:
+                    logger.success(f"💖 [HealthCheck] 节点 {ep_id} 拨测成功！立即激活恢复算力链路。")
+                    # 解除冷却并清除黑名单
+                    endpoint_pool_manager.record_success(ep_id)
+                    recovered_count += 1
+                else:
+                    logger.warning(f"❌ [HealthCheck] 节点 {ep_id} 拨测依然失败，继续维持封禁。")
+                    failed_count += 1
+            else:
+                healthy_count += 1
+                
+            # 同步状态至 Redis
+            is_active = True
+            if ep_id in usage_tracker.blacklist_expiry:
+                is_active = False
+            elif state and state.is_cooling:
+                is_active = False
+            redis_manager.record_node_health(ep_id, is_active)
+            
+        logger.info(f"📊 [HealthCheck] 拨测完成: 正常={healthy_count} | 恢复={recovered_count} | 封禁中={failed_count}")
+
+    async def _probe_single_endpoint(self, ep_id: str, ep: Any) -> bool:
+        """[V201.0] 对单个物理节点发送最廉价的 ping 请求以验证可用性"""
+        provider = ep.provider
+        api_key, base_url = self._resolve_credentials(ep)
+        if not api_key:
+            return False
+            
+        try:
+            from langchain_core.messages import HumanMessage
+            if provider == "google":
+                # Google Gemini
+                llm = ChatGoogleGenerativeAI(
+                    model=ep.model_name,
+                    api_key=api_key, 
+                    google_api_key=api_key,
+                    temperature=0.0,
+                    timeout=10.0,
+                    max_retries=0
+                )
+            else:
+                default_headers = {}
+                if provider == "dashscope":
+                    default_headers["x-dashscope-sse"] = "enable"
+                
+                llm = ChatOpenAI(
+                    model=ep.model_name,
+                    openai_api_key=api_key,
+                    openai_api_base=base_url,
+                    temperature=0.0,
+                    timeout=10.0,
+                    max_retries=0,
+                    default_headers=default_headers
+                )
+                
+            await llm.ainvoke([HumanMessage(content="ping")], max_tokens=1)
+            return True
+        except Exception as e:
+            logger.debug(f"拨测 {ep_id} 发生异常 (预期中): {e}")
+            return False
+
     async def run_health_check(self):
-        """[V90.0] 周期性健康检查: 校验端点池中每个 endpoint 的可用性。
-        
-        原版为空 pass, 但启动时 main.py 已经 asyncio.create_task() 它,
-        系统声称具备"算力自愈"能力, 实际为空操作。
-        
-        现在的实现:
-          - 每 5 分钟巡检一次
-          - 通过 endpoint_pool_manager 的黑名单状态做轻量级心跳
-          - 仅记录指标, 不主动调用外部 API (避免烧 token)
-        """
+        """[V90.0] 周期性健康检查: 校验端点池中每个 endpoint 的可用性。"""
         interval_seconds = int(os.getenv("HEALTH_CHECK_INTERVAL_SECONDS", "300"))
         logger.info(f"[HealthCheck] 启动, interval={interval_seconds}s")
         while True:
             try:
                 await asyncio.sleep(interval_seconds)
-                pools = endpoint_pool_manager.list_pools() if hasattr(endpoint_pool_manager, "list_pools") else []
-                healthy = 0
-                blacklisted = 0
-                for pool_id in pools:
-                    pool_endpoints = endpoint_pool_manager.get_pool_endpoints(pool_id) if hasattr(endpoint_pool_manager, "get_pool_endpoints") else []
-                    for ep in pool_endpoints:
-                        ep_id = getattr(ep, "id", None) or (ep.get("id") if isinstance(ep, dict) else None)
-                        if ep_id and usage_tracker.is_blacklisted(ep_id):
-                            blacklisted += 1
-                        else:
-                            healthy += 1
-                        
-                        # [V140.3] 同步全局节点状态至 Redis，实现集群共享黑名单
-                        if ep_id:
-                            redis_manager.record_node_health(ep_id, ep_id not in usage_tracker.blacklist)
-                            
-                logger.info(f"[HealthCheck] healthy={healthy} blacklisted={blacklisted} (Synced to Redis)")
+                await self.probe_all_endpoints()
             except asyncio.CancelledError:
                 logger.info("[HealthCheck] 收到取消信号, 优雅退出")
                 break
