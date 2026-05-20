@@ -47,7 +47,8 @@ Thumbs.db
 data/reports/
 data/phoenix/
 data/semantic_index/
-data/usage_stats.json
+# 故意不忽略 usage_stats.json 以便跨电脑同步黑名单状态
+!data/usage_stats.json
 
 # ── 备份和临时文件 ────────────────────────────────────────
 *.bak
