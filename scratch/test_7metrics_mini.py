@@ -5,27 +5,20 @@ HSA 7-Dimension Agent Benchmark [MINIMAL TEST]
 Runs only one case (QA-01) to verify the 7-dimension scoring logic.
 """
 import os, sys, asyncio, json, time, subprocess
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 from datetime import datetime
 from loguru import logger
 from langchain_core.messages import BaseMessage
 from typing import Any, List, Union
 
 # Use Rich for better console output if available
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.theme import Theme
-    from rich.syntax import Syntax
-    console = Console(theme=Theme({
-        "info": "cyan",
-        "warning": "yellow",
-        "error": "bold red",
-        "success": "bold green",
-        "role": "bold magenta"
-    }))
-except ImportError:
-    console = None
+console = None
 
 def log_print(msg):
     if console:
@@ -43,7 +36,7 @@ log_print("[info]Loading Agent Graph and Model Manager... (This may take 30-60s 
 from app.core.agent_graph import workflow
 from app.infra.model_manager import model_manager
 from app.infra.usage_tracker import usage_tracker
-log_print("[success]✓ Models and Graph loaded.[/]")
+log_print("[success][OK] Models and Graph loaded.[/]")
 
 # Import logic from run_7metrics_bench (cloned for minimal test)
 JUDGE_PROMPT = """You are a senior healthcare insurance audit judge.
@@ -153,7 +146,7 @@ async def run_mini_test():
             dims = ["success", "recall", "precision", "faithfulness", "relevance", "professionalism", "interpretability"]
             for d in dims:
                 v = sc.get(d, 0)
-                bar = "█" * int(v) + "░" * (10 - int(v))
+                bar = "#" * int(v) + "-" * (10 - int(v))
                 table.add_row(d.capitalize(), str(v), bar)
             
             console.print(table)

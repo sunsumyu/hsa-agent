@@ -21,6 +21,8 @@ from rich.theme import Theme
 from rich.text import Text
 from rich.live import Live
 from rich.status import Status
+from rich.markdown import Markdown
+from rich.json import JSON
 
 console = Console(theme=Theme({
     "info": "cyan",
@@ -29,6 +31,49 @@ console = Console(theme=Theme({
     "success": "bold green",
     "role": "bold magenta"
 }))
+
+# ── AOP 全局织入 (Global Rich Print Interceptor) ───────────────
+import builtins
+
+_original_print = builtins.print
+
+def aop_rich_print(*args, **kwargs):
+    """类似 Java AOP 切片，全局拦截 print，自动识别内容并织入富文本渲染"""
+    if not args:
+        console.print(**kwargs)
+        return
+
+    # 如果已经是 Rich 支持的渲染对象，直接放行
+    if hasattr(args[0], "__rich_console__") or hasattr(args[0], "__rich_measure__"):
+        console.print(*args, **kwargs)
+        return
+
+    text = " ".join(str(a) for a in args)
+    stripped = text.strip()
+
+    # 拦截分隔符，替换为 Rich 的 Rule
+    if stripped and len(stripped) >= 10 and len(set(stripped)) == 1 and stripped[0] in "=-~":
+        console.rule(style="dim")
+        return
+
+    # 自动识别 Markdown
+    if "```" in text or "## " in text or "**" in text:
+        console.print(Markdown(text), **kwargs)
+    # 自动识别 JSON
+    elif stripped.startswith("{") and stripped.endswith("}") and '"' in stripped:
+        try:
+            console.print(JSON(stripped))
+        except:
+            console.print(*args, **kwargs)
+    # 自动识别 SQL
+    elif "SELECT " in text.upper() and "FROM " in text.upper():
+        console.print(Syntax(text, "sql", theme="monokai", word_wrap=True), **kwargs)
+    else:
+        # 默认放行
+        console.print(*args, **kwargs)
+
+# 执行统一织入
+builtins.print = aop_rich_print
 
 sys.path.append(os.getcwd())
 os.environ["PYTHONIOENCODING"] = "utf-8"
@@ -57,6 +102,11 @@ SEP3 = "~" * 72
 class VerboseLLMCallback(BaseCallbackHandler):
     """拦截 LangChain 的每次 LLM 调用，使用 Rich 美化输出。"""
 
+    def __init__(self):
+        super().__init__()
+        self.start_times = {}
+        self.last_llm_time = 0.0
+
     def _render_content(self, content: Any) -> str:
         if isinstance(content, str):
             # 尝试检测是否为 SQL
@@ -66,6 +116,10 @@ class VerboseLLMCallback(BaseCallbackHandler):
         return str(content)
 
     def on_chat_model_start(self, serialized: dict, messages: List[List[BaseMessage]], **kwargs):
+        run_id = kwargs.get("run_id")
+        if run_id:
+            self.start_times[run_id] = time.time()
+            
         model = serialized.get("name", serialized.get("id", ["?"])[-1])
         console.rule(f"[bold blue]LLM INVOKE: {model}[/]", style="blue")
         
@@ -89,6 +143,10 @@ class VerboseLLMCallback(BaseCallbackHandler):
                 ))
 
     def on_llm_end(self, response: LLMResult, **kwargs):
+        run_id = kwargs.get("run_id")
+        if run_id and run_id in self.start_times:
+            self.last_llm_time = time.time() - self.start_times.pop(run_id)
+
         for gen_list in response.generations:
             for gen in gen_list:
                 text = getattr(gen, "text", None) or getattr(getattr(gen, "message", None), "content", str(gen))
@@ -535,15 +593,25 @@ SEP2 = "-" * 72
 SEP3 = "~" * 72
 
 def print_block(title: str, content: str, sep: str = SEP2):
-    """把一段内容用明显的边框打印出来"""
-    print(f"\n{sep}")
-    print(f"  {title}")
-    print(sep)
-    # 每行加缩进
-    for line in content.splitlines():
-        print(f"  {line}")
-    print(sep)
-    sys.stdout.flush()
+    """AOP 切片渲染器：识别大块文本内容，统一装配 Panel 并完成富文本高亮织入"""
+    display = content
+    if isinstance(content, str):
+        if "```" in content or "## " in content or "**" in content:
+            display = Markdown(content)
+        elif "SELECT " in content.upper() and "FROM " in content.upper():
+            display = Syntax(content, "sql", theme="monokai", word_wrap=True)
+        elif content.strip().startswith("{") and content.strip().endswith("}"):
+            try:
+                display = JSON(content)
+            except:
+                pass
+
+    console.print(Panel(
+        display,
+        title=f"[bold cyan]{title}[/]",
+        border_style="cyan",
+        padding=(1, 2)
+    ))
 
 # ── Physical Token + Content Interceptor ─────────────────────────────
 class PhysicalTokenTracker:
@@ -637,10 +705,12 @@ class PhysicalTokenTracker:
                 ref.case_stats[cid] = {}
             s = ref.case_stats[cid]
             if role not in s:
-                s[role] = {"in": 0, "out": 0, "calls": 0}
+                s[role] = {"in": 0, "out": 0, "calls": 0, "time": 0.0}
             s[role]["in"]    += in_t
             s[role]["out"]   += out_t
             s[role]["calls"] += 1
+            s[role]["time"]  += VERBOSE_CB.last_llm_time
+            VERBOSE_CB.last_llm_time = 0.0
 
             sys.stdout.flush()
             ref._original_fn(role, response, model_id, prompt)
@@ -743,7 +813,8 @@ async def run_one(case: dict, judge_llm) -> dict:
 
         j_in  = usage_tracker._estimate_tokens(judge_input)
         j_out = usage_tracker._estimate_tokens(content)
-        tracker.case_stats[cid]["judge"] = {"in": j_in, "out": j_out, "calls": 1}
+        j_time = time.time() - tj0
+        tracker.case_stats[cid]["judge"] = {"in": j_in, "out": j_out, "calls": 1, "time": j_time}
         print(f"\n  [JUDGE TOKEN] in:{j_in}(pred:{PREDICTED['judge']['in']}) "
               f"out:{j_out}(pred:{PREDICTED['judge']['out']})")
     except Exception as ex:
@@ -835,6 +906,70 @@ def print_summary(results: list):
 
     # 汇总统计
     n = max(len(results), 1)
+
+    # === Sub-process Summary Table ===
+    console.print("\n[bold cyan]Sub-process Time & Token Consumption Summary:[/]")
+    sub_table = Table(show_header=True, header_style="bold cyan", box=None)
+    sub_table.add_column("Sub-process (Role)", style="magenta", width=20)
+    sub_table.add_column("Calls", justify="right")
+    sub_table.add_column("Input Tokens", justify="right", style="dim")
+    sub_table.add_column("Output Tokens", justify="right", style="dim")
+    sub_table.add_column("Total Tokens", justify="right", style="yellow")
+    sub_table.add_column("Total Time (s)", justify="right", style="green")
+    sub_table.add_column("Avg Time/Call (s)", justify="right")
+
+    role_agg = {}
+    for r in results:
+        roles = r.get("roles", {})
+        for role, stats in roles.items():
+            if role not in role_agg:
+                role_agg[role] = {"calls": 0, "in": 0, "out": 0, "time": 0.0}
+            role_agg[role]["calls"] += stats.get("calls", 0)
+            role_agg[role]["in"] += stats.get("in", 0)
+            role_agg[role]["out"] += stats.get("out", 0)
+            role_agg[role]["time"] += stats.get("time", 0.0)
+
+    tot_calls = tot_in = tot_out = 0
+    tot_time = 0.0
+    sorted_roles = sorted(role_agg.keys())
+    
+    for role in sorted_roles:
+        stats = role_agg[role]
+        c = stats["calls"]
+        i = stats["in"]
+        o = stats["out"]
+        t = stats["time"]
+        tot = i + o
+        avg_t = t / c if c > 0 else 0
+        
+        tot_calls += c
+        tot_in += i
+        tot_out += o
+        tot_time += t
+
+        sub_table.add_row(
+            role,
+            str(c),
+            f"{i:,}",
+            f"{o:,}",
+            f"{tot:,}",
+            f"{t:.2f}",
+            f"{avg_t:.2f}"
+        )
+
+    sub_table.add_section()
+    sub_table.add_row(
+        "[bold]TOTAL[/]",
+        f"[bold]{tot_calls}[/]",
+        f"[bold]{tot_in:,}[/]",
+        f"[bold]{tot_out:,}[/]",
+        f"[bold yellow]{tot_in + tot_out:,}[/]",
+        f"[bold green]{tot_time:.2f}[/]",
+        ""
+    )
+
+    console.print(sub_table)
+
     console.print(f"\n[bold]Agent Success: [green]{n_ok}[/] / {len(results)}[/]")
     
     # 维度平均分图表
