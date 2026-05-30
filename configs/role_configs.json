@@ -1,37 +1,37 @@
 {
   "io_router": {
     "pool": "tier-1-chat",
-    "preferred_endpoint": null,
+    "preferred_endpoint": "deepseek-v4-flash",
     "max_input_tokens": 1000,
     "max_output_tokens": 500
   },
   "planner_light": {
     "pool": "tier-1-chat",
-    "preferred_endpoint": null,
+    "preferred_endpoint": "deepseek-v4-flash",
     "max_input_tokens": 4000,
     "max_output_tokens": 2000
   },
   "planner_heavy": {
     "pool": "tier-1-bailian-preferred",
-    "preferred_endpoint": null,
+    "preferred_endpoint": "deepseek-v4-pro",
     "max_input_tokens": 16000,
     "max_output_tokens": 8000
   },
   "coder": {
     "pool": "tier-1-chat",
-    "preferred_endpoint": null,
+    "preferred_endpoint": "deepseek-v4-pro",
     "max_input_tokens": 8000,
     "max_output_tokens": 4000
   },
   "auditor": {
     "pool": "tier-1-chat",
-    "preferred_endpoint": null,
+    "preferred_endpoint": "deepseek-v4-pro",
     "max_input_tokens": 4000,
     "max_output_tokens": 2000
   },
   "reporter": {
     "pool": "tier-1-chat",
-    "preferred_endpoint": null,
+    "preferred_endpoint": "deepseek-v4-flash",
     "max_input_tokens": 4000,
     "max_output_tokens": 2000
   }

@@ -59,6 +59,14 @@ def aop_rich_print(*args, **kwargs):
     # 自动识别 Markdown
     if "```" in text or "## " in text or "**" in text:
         console.print(Markdown(text), **kwargs)
+    # 自动识别 DBMS Warning 通知或 GqlStatusObject
+    elif "Received notification from DBMS server:" in text or "GqlStatusObject" in text:
+        console.print(Panel(
+            f"[yellow]{text}[/]",
+            title="⚠️ [bold yellow]DBMS Server Warning[/]",
+            border_style="yellow",
+            style="dim"
+        ))
     # 自动识别 JSON
     elif stripped.startswith("{") and stripped.endswith("}") and '"' in stripped:
         try:
@@ -99,67 +107,121 @@ SEP  = "=" * 72
 SEP2 = "-" * 72
 SEP3 = "~" * 72
 
+# LangGraph 节点名称（on_chain_start 的 serialized["name"] 或 name kwarg 会携带节点名）
+_TRACKED_NODES = {"PLANNER", "ALIGNER", "SQLEXEC", "CRITIC", "REPORTER", "CONSOLIDATOR", "HUMAN_APPROVAL"}
+
 class VerboseLLMCallback(BaseCallbackHandler):
-    """拦截 LangChain 的每次 LLM 调用，使用 Rich 美化输出。"""
+    """
+    拦截 LangChain/LangGraph 的每次 LLM 调用和 Graph 节点执行。
+    - on_chat_model_start / on_llm_end : LLM 裸延迟（用于调试展示）
+    - on_chain_start / on_chain_end    : Graph 节点真实墙钟耗时（用于统计）
+    """
 
     def __init__(self):
         super().__init__()
-        self.start_times = {}
-        self.last_llm_time = 0.0
+        # run_id -> (node_name, start_time)
+        self._llm_start: dict = {}        # run_id -> start_time (LLM)
+        self._node_start: dict = {}       # run_id -> (node_name, start_time)
+        self.last_llm_time = 0.0          # 最后一次 LLM 裸延迟（秒），供 token tracker 使用
+        # 当前 case 的节点级耗时累计: node_name -> {calls, time}
+        self.node_times: dict = {}
+
+    def reset_node_times(self):
+        """每个 Case 开始前调用，清空节点级统计"""
+        self.node_times = {}
 
     def _render_content(self, content: Any) -> str:
         if isinstance(content, str):
-            # 尝试检测是否为 SQL
             if "SELECT" in content.upper() and "FROM" in content.upper():
                 return Syntax(content, "sql", theme="monokai", word_wrap=True)
             return content
         return str(content)
 
+    # ── LLM 级别钩子 ────────────────────────────────────────────────
     def on_chat_model_start(self, serialized: dict, messages: List[List[BaseMessage]], **kwargs):
         run_id = kwargs.get("run_id")
         if run_id:
-            self.start_times[run_id] = time.time()
-            
+            self._llm_start[run_id] = time.time()
+
         model = serialized.get("name", serialized.get("id", ["?"])[-1])
         console.rule(f"[bold blue]LLM INVOKE: {model}[/]", style="blue")
-        
+
         for turn in messages:
             for msg in turn:
                 role = type(msg).__name__.replace("Message", "")
                 color = "magenta" if role == "System" else "green" if role == "Human" else "cyan"
-                
                 content = getattr(msg, "content", str(msg))
-                # 如果内容是 SQL，使用 Syntax 高亮
                 if isinstance(content, str) and ("SELECT" in content.upper() or "INSERT" in content.upper()):
                     display = Syntax(content, "sql", theme="monokai", word_wrap=True)
                 else:
                     display = content
-
                 console.print(Panel(
-                    display, 
-                    title=f"[bold {color}]{role}[/]", 
+                    display,
+                    title=f"[bold {color}]{role}[/]",
                     border_style=color,
                     padding=(0, 1)
                 ))
+        # 提示流式输出开始
+        console.print("[bold yellow]LLM STREAM RESPONSE >>>[/] ", end="", highlight=False)
+        sys.stdout.flush()
+
+    def on_llm_new_token(self, token: str, **kwargs):
+        """实时将每一个 token 流式地输出在控制台，消灭卡死卡顿现象"""
+        sys.stdout.write(token)
+        sys.stdout.flush()
 
     def on_llm_end(self, response: LLMResult, **kwargs):
         run_id = kwargs.get("run_id")
-        if run_id and run_id in self.start_times:
-            self.last_llm_time = time.time() - self.start_times.pop(run_id)
+        if run_id and run_id in self._llm_start:
+            self.last_llm_time = time.time() - self._llm_start.pop(run_id)
 
-        for gen_list in response.generations:
-            for gen in gen_list:
-                text = getattr(gen, "text", None) or getattr(getattr(gen, "message", None), "content", str(gen))
-                console.print(Panel(
-                    text, 
-                    title="[bold yellow]LLM RESPONSE[/]", 
-                    border_style="yellow",
-                    padding=(0, 1)
-                ))
-        console.print("\n")
+        # 换行并输出优雅的生成成功提示
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        console.print(f"✨ [bold green]LLM GENERATED SUCCESS[/] | Model Latency: [cyan]{self.last_llm_time:.2f}s[/]\n")
 
     def on_llm_error(self, error: Union[Exception, KeyboardInterrupt], **kwargs):
+        sys.stdout.write("\n")
+        sys.stdout.flush()
         console.print(Panel(str(error), title="[bold red]LLM ERROR[/]", border_style="red"))
+
+    # ── Graph 节点级别钩子（真实墙钟计时）─────────────────────────────
+    def on_chain_start(self, serialized: dict, inputs: dict, **kwargs):
+        """LangGraph 每个节点开始执行时触发"""
+        run_id = kwargs.get("run_id")
+        if not run_id:
+            return
+        # 节点名可能在 serialized["name"] 或 kwargs["name"] 中
+        node_name = (
+            kwargs.get("name")
+            or (serialized or {}).get("name", "")
+            or (serialized or {}).get("id", [""])[-1]
+        ).upper()
+        if node_name in _TRACKED_NODES:
+            self._node_start[run_id] = (node_name, time.time())
+
+    def on_chain_end(self, outputs: dict, **kwargs):
+        """LangGraph 每个节点执行完成时触发，累计真实墙钟耗时"""
+        run_id = kwargs.get("run_id")
+        if not run_id or run_id not in self._node_start:
+            return
+        node_name, t0 = self._node_start.pop(run_id)
+        elapsed = time.time() - t0
+        if node_name not in self.node_times:
+            self.node_times[node_name] = {"calls": 0, "time": 0.0}
+        self.node_times[node_name]["calls"] += 1
+        self.node_times[node_name]["time"] += elapsed
+
+    def on_chain_error(self, error: Exception, **kwargs):
+        """节点执行出错时也要清理，避免 _node_start 泄漏"""
+        run_id = kwargs.get("run_id")
+        if run_id and run_id in self._node_start:
+            node_name, t0 = self._node_start.pop(run_id)
+            elapsed = time.time() - t0
+            if node_name not in self.node_times:
+                self.node_times[node_name] = {"calls": 0, "time": 0.0}
+            self.node_times[node_name]["calls"] += 1
+            self.node_times[node_name]["time"] += elapsed
 
 # 全局回调实例（注入到每次 workflow.ainvoke 的 config 中）
 VERBOSE_CB = VerboseLLMCallback()
@@ -622,7 +684,7 @@ class PhysicalTokenTracker:
       3. 统计 Token 并与预测对比
     """
     def __init__(self):
-        self.case_stats   = {}
+        self.case_stats   = {}   # cid -> {role: {in, out, calls, time}}
         self._current     = None
         self._original_fn = None
 
@@ -709,6 +771,8 @@ class PhysicalTokenTracker:
             s[role]["in"]    += in_t
             s[role]["out"]   += out_t
             s[role]["calls"] += 1
+            # NOTE: token-level time is only a hint; real node wall-clock
+            # time is tracked via VERBOSE_CB.node_times (on_chain_end)
             s[role]["time"]  += VERBOSE_CB.last_llm_time
             VERBOSE_CB.last_llm_time = 0.0
 
@@ -727,13 +791,22 @@ tracker.patch()
 async def run_one(case: dict, judge_llm) -> dict:
     cid, prompt, pred = case["id"], case["prompt"], case["pred_tokens"]
 
-    print(f"\n{SEP}")
-    print(f"  START CASE [{cid}]  {case['tag']}  diff:{case['diff']}")
-    print(f"  QUESTION: {prompt}")
-    print(f"  PREDICTED TOKENS: {pred:,}")
-    print(SEP)
+    # Start Case Header Card
+    case_header = (
+        f"[bold cyan]🎯 Tag           :[/]" f" {case['tag']}  [dim](Difficulty: {case['diff']})[/]\n"
+        f"[bold cyan]❓ Question      :[/]" f" {prompt}\n"
+        f"[bold cyan]🔮 Budget Tokens :[/]" f" [bold yellow]{pred:,}[/]"
+    )
+    console.print(Panel(
+        case_header,
+        title=f"🚀 [bold blue]START CASE [{cid}][/]",
+        border_style="blue"
+    ))
 
     tracker.set_case(cid)
+    # 清空上一个 case 遗留的节点耗时
+    VERBOSE_CB.reset_node_times()
+
     t0 = time.time()
     report_text = "(no report)"
     agent_ok    = False
@@ -755,7 +828,24 @@ async def run_one(case: dict, judge_llm) -> dict:
         report_text = f"(Agent error: {ex})"
         logger.error(f"[{cid}] Agent error: {ex}")
 
+    # 真实墙钟总耗时（含工具调用、调度开销、SQL 执行等）
     agent_t = time.time() - t0
+
+    # ── 将 VERBOSE_CB.node_times（on_chain_end 追踪的节点耗时）合并入 case_stats
+    #    这样 print_summary 中的子进程表格可以显示 PLANNER/SQLEXEC/REPORTER 等的真实耗时
+    node_t = VERBOSE_CB.node_times.copy()
+    for node_name, nt in node_t.items():
+        role_key = node_name.lower()  # 统一用小写 key
+        if cid not in tracker.case_stats:
+            tracker.case_stats[cid] = {}
+        s = tracker.case_stats[cid]
+        if role_key not in s:
+            # 该节点没有 token 统计（不走 _record_usage_with_budget），只补充耗时
+            s[role_key] = {"in": 0, "out": 0, "calls": nt["calls"], "time": nt["time"]}
+        else:
+            # 已有 token 统计（如通过 _record_usage_with_budget 记录），补充真实时间
+            s[role_key]["time"] = nt["time"]
+            s[role_key]["calls"] = nt["calls"]
 
     # ── 打印最终报告 ─────────────────────────────────────────────────
     print_block(f"FINAL REPORT from Agent [{cid}]", report_text, sep=SEP)
@@ -776,7 +866,9 @@ async def run_one(case: dict, judge_llm) -> dict:
     try:
         # [V73.1] 修复 BUG：必须 await 异步函数才能解包
         judge_llm, j_model = await model_manager.get_llm_by_role("planner_heavy")
+        _judge_invoke_t0 = time.time()
         res     = await judge_llm.ainvoke(judge_input)
+        _judge_invoke_elapsed = time.time() - _judge_invoke_t0
         content = str(res.content)
 
         # 打印 Judge 原始输出
@@ -813,35 +905,66 @@ async def run_one(case: dict, judge_llm) -> dict:
 
         j_in  = usage_tracker._estimate_tokens(judge_input)
         j_out = usage_tracker._estimate_tokens(content)
-        j_time = time.time() - tj0
+        # 使用 judge_llm.ainvoke() 真实墙钟耗时，不包含 JSON 解析等后处理
+        j_time = _judge_invoke_elapsed
         tracker.case_stats[cid]["judge"] = {"in": j_in, "out": j_out, "calls": 1, "time": j_time}
-        print(f"\n  [JUDGE TOKEN] in:{j_in}(pred:{PREDICTED['judge']['in']}) "
-              f"out:{j_out}(pred:{PREDICTED['judge']['out']})")
+        # Beautiful Rich Panel for Judge Token Audit
+        console.print(Panel(
+            f"[bold cyan]⚖️ Judge Token Audit[/]\n"
+            f"[magenta]Input Tokens  :[/]" f" {j_in:,} [dim](Budget: {PREDICTED['judge']['in']:,})[/]\n"
+            f"[magenta]Output Tokens :[/]" f" {j_out:,} [dim](Budget: {PREDICTED['judge']['out']:,})[/]\n"
+            f"[magenta]Judge LLM Time:[/]" f" [green]{j_time:.2f}s[/]",
+            border_style="cyan"
+        ))
     except Exception as ex:
         logger.error(f"[{cid}] Judge parse error: {ex}")
 
-    judge_t = time.time() - tj0
+    judge_t = time.time() - tj0   # 含解析的完整 judge 阶段耗时（用于展示）
     actual  = tracker.total(cid)
     dev_pct = (actual - pred) / pred * 100
 
     # ── Case Score Summary ──────────────────────────────────────────
     sc   = eval_res.get("scores", {})
     dims = ["success","recall","precision","faithfulness","relevance","professionalism","interpretability"]
+    labels = ["Success","Recall","Precision","Faithful","Relevance","Profess.","Interpret"]
 
-    print(f"\n{SEP}")
-    print(f"  CASE RESULT SUMMARY [{cid}]")
-    print(SEP)
-    labels = ["Success","Recall ","Precision","Faithful","Relevance","Profess.","Interpret"]
+    score_table = Table(show_header=True, header_style="bold magenta", box=None)
+    score_table.add_column("Dimension", style="magenta")
+    score_table.add_column("Score", justify="right")
+    score_table.add_column("Bar Indicator", width=15)
+
     for lab, dim in zip(labels, dims):
-        v   = sc.get(dim, 0)
-        bar = "#" * int(v) + "-" * (10 - int(v))
-        print(f"  {lab:<10}: [{bar}] {v}/10")
-    print(f"  {'-'*52}")
-    print(f"  Total      : {eval_res.get('total','N/A')} / 70")
-    print(f"  Advice     : {str(eval_res.get('advice',''))[:250]}")
-    print(f"  Tokens     : predicted={pred:,}  actual={actual:,}  deviation={dev_pct:+.1f}%")
-    print(f"  Time       : agent={agent_t:.1f}s  judge={judge_t:.1f}s")
-    print(SEP)
+        v = sc.get(dim, 0)
+        bar_char = "█" * int(v) + "░" * (10 - int(v))
+        color = "green" if v >= 7 else "yellow" if v >= 5 else "red"
+        score_table.add_row(lab, f"[{color}]{v}/10[/]", f"[{color}]{bar_char}[/]")
+
+    tot_score = eval_res.get('total', 'N/A')
+    advice_text = str(eval_res.get('advice',''))
+
+    # 从 node_times 中提取各节点汇总时间用于展示
+    _node_breakdown = "  ".join(
+        f"{k.upper()}={v['time']:.1f}s"
+        for k, v in sorted(tracker.case_stats.get(cid, {}).items())
+        if k != "judge"
+    )
+    summary_text = (
+        f"[bold cyan]📊 Metrics & Costs:[/]\n"
+        f"  • [bold]Total Score[/] : [bold yellow]{tot_score} / 70[/]\n"
+        f"  • [bold]Tokens[/]      : [dim]predicted={pred:,} | actual={actual:,} | deviation={dev_pct:+.1f}%[/]\n"
+        f"  • [bold]Wall Time[/]   : [green]agent_total={agent_t:.1f}s | judge_llm={judge_t:.1f}s[/]\n"
+        f"  • [bold]Node Breakdown[/]: [dim]{_node_breakdown if _node_breakdown else 'N/A (nodes not instrumented)'}[/]\n\n"
+        f"[bold cyan]💡 Judge Advice:[/]\n"
+        f"  {advice_text}\n"
+    )
+
+    console.print(Panel(
+        score_table,
+        title=f"🏆 [bold blue]CASE RESULT SUMMARY [{cid}][/]",
+        subtitle=f"[dim]{case['tag']}[/]",
+        border_style="cyan"
+    ))
+    console.print(Panel(summary_text, border_style="cyan"))
     sys.stdout.flush()
 
     return {
@@ -904,11 +1027,68 @@ def print_summary(results: list):
 
     console.print(table)
 
+    # === Sub-process Consumption Per Case ===
+    console.print("\n[bold cyan]Sub-process Time & Token Consumption Details (Per Case):[/]")
+    for r in results:
+        cid = r.get("id", "Unknown Case")
+        tag = r.get("tag", "Unknown Tag")
+        roles = r.get("roles", {})
+        
+        case_table = Table(title=f"[bold magenta]Case {cid} ({tag}) Sub-process Breakdowns[/]", show_header=True, header_style="bold magenta", box=None)
+        case_table.add_column("Sub-process (Role)", style="magenta", width=20)
+        case_table.add_column("Calls", justify="right")
+        case_table.add_column("Input Tokens", justify="right", style="dim")
+        case_table.add_column("Output Tokens", justify="right", style="dim")
+        case_table.add_column("Total Tokens", justify="right", style="yellow")
+        case_table.add_column("Total Time (s)", justify="right", style="green")
+        case_table.add_column("Avg Time/Call (s)", justify="right")
+        
+        c_calls = c_in = c_out = 0
+        c_time = 0.0
+        sorted_c_roles = sorted(roles.keys())
+        
+        for role in sorted_c_roles:
+            stats = roles[role]
+            c = stats.get("calls", 0)
+            i = stats.get("in", 0)
+            o = stats.get("out", 0)
+            t = stats.get("time", 0.0)
+            tot = i + o
+            avg_t = t / c if c > 0 else 0
+            
+            c_calls += c
+            c_in += i
+            c_out += o
+            c_time += t
+            
+            case_table.add_row(
+                role,
+                str(c),
+                f"{i:,}",
+                f"{o:,}",
+                f"{tot:,}",
+                f"{t:.2f}",
+                f"{avg_t:.2f}"
+            )
+            
+        case_table.add_section()
+        case_table.add_row(
+            "[bold]TOTAL[/]",
+            f"[bold]{c_calls}[/]",
+            f"[bold]{c_in:,}[/]",
+            f"[bold]{c_out:,}[/]",
+            f"[bold yellow]{c_in + c_out:,}[/]",
+            f"[bold green]{c_time:.2f}[/]",
+            ""
+        )
+        console.print(case_table)
+        console.print()
+
     # 汇总统计
     n = max(len(results), 1)
 
     # === Sub-process Summary Table ===
-    console.print("\n[bold cyan]Sub-process Time & Token Consumption Summary:[/]")
+    console.print("\n[bold cyan]Global Sub-process Time & Token Consumption Summary (Aggregate):[/]")
     sub_table = Table(show_header=True, header_style="bold cyan", box=None)
     sub_table.add_column("Sub-process (Role)", style="magenta", width=20)
     sub_table.add_column("Calls", justify="right")

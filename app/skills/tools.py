@@ -763,3 +763,7 @@ def clear_audit_notes() -> str:
     except Exception as e:
         logger.error(f"📓 [NoteTool] 清空便签失败: {e}")
         return f"❌ 清空外部便签失败: {e}"
+
+def get_embeddings():
+    from app.core.memory.embedding import embedding_engine
+    return embedding_engine

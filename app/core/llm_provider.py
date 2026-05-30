@@ -22,7 +22,7 @@ from app.memory.semantic_memory import cognitive_memory_manager
 
 class LLMProvider:
     def __init__(self):
-        self.default_model = "deepseek-v3"
+        self.default_model = "deepseek-v4-pro"
 
     async def chat(
         self, 
@@ -99,7 +99,20 @@ class LLMProvider:
         
         for attempt in range(max_attempts):
             try:
-                response = await llm.ainvoke(messages, config=obs_config)
+                # [V300.0] 彻底解决伪流式问题：若模型支持流式，使用 astream 以实时分发 on_chat_model_stream 事件
+                if getattr(llm, "streaming", False):
+                    chunks = []
+                    async for chunk in llm.astream(messages, config=obs_config):
+                        chunks.append(chunk)
+                    if chunks:
+                        response = chunks[0]
+                        for chunk in chunks[1:]:
+                            response += chunk
+                    else:
+                        from langchain_core.messages import AIMessage
+                        response = AIMessage(content="")
+                else:
+                    response = await llm.ainvoke(messages, config=obs_config)
                 latency_ms = (time.time() - start_time) * 1000
                 
                 # 6. 计费与用量追踪
@@ -136,8 +149,8 @@ class LLMProvider:
         """将逻辑层级映射为物理模型 ID (从配置中心读取)"""
         from app.core.config import settings
         if tier == "HEAVY":
-            return settings.get("HEAVY_MODEL", "deepseek-v3")
-        return settings.get("LIGHT_MODEL", "deepseek-v2.5") # 默认 Lite 模型
+            return settings.get("HEAVY_MODEL", "deepseek-v4-pro")
+        return settings.get("LIGHT_MODEL", "deepseek-v4-flash") # 默认 Lite 模型
 
     def _extract_last_user_message(self, messages: List[Union[BaseMessage, tuple]]) -> str:
         for msg in reversed(messages):

@@ -1,4 +1,28 @@
 {
+  "deepseek-v4-pro": {
+    "provider": "openai",
+    "model_name": "deepseek-chat",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "base_url_env": "DEEPSEEK_BASE_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.00014,
+    "output_cost_1k": 0.00028
+  },
+  "deepseek-v4-flash": {
+    "provider": "openai",
+    "model_name": "deepseek-chat",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.5,
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "base_url_env": "DEEPSEEK_BASE_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.00014,
+    "output_cost_1k": 0.00028
+  },
   "doubao-smart-router": {
     "provider": "volcengine",
     "model_name": "ep-20260414173115-j9m9b",

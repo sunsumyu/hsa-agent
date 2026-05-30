@@ -138,20 +138,33 @@ async def run_mini_test():
         advice = eval_res.get("advice", "")
 
         if console:
-            table = Table(title=f"7-Dimension Scores for {cid}")
-            table.add_column("Dimension", style="magenta")
-            table.add_column("Score", justify="right", style="green")
-            table.add_column("Bar")
+            # 7-Dimension Table with premium styling
+            score_table = Table(show_header=True, header_style="bold magenta", box=None)
+            score_table.add_column("Dimension", style="magenta")
+            score_table.add_column("Score", justify="right")
+            score_table.add_column("Bar Indicator", width=15)
 
             dims = ["success", "recall", "precision", "faithfulness", "relevance", "professionalism", "interpretability"]
-            for d in dims:
+            labels = ["Success", "Recall", "Precision", "Faithful", "Relevance", "Profess.", "Interpret"]
+            for lab, d in zip(labels, dims):
                 v = sc.get(d, 0)
-                bar = "#" * int(v) + "-" * (10 - int(v))
-                table.add_row(d.capitalize(), str(v), bar)
-            
-            console.print(table)
-            console.print(f"[bold yellow]Total Score: {total} / 70[/]")
-            console.print(f"[bold]Advice:[/] {advice}")
+                bar_char = "█" * int(v) + "░" * (10 - int(v))
+                color = "green" if v >= 7 else "yellow" if v >= 5 else "red"
+                score_table.add_row(lab, f"[{color}]{v}/10[/]", f"[{color}]{bar_char}[/]")
+
+            summary_text = (
+                f"[bold cyan]📊 Metrics Summary:[/]\n"
+                f"  • [bold]Total Score[/] : [bold yellow]{total} / 70[/]\n\n"
+                f"[bold cyan]💡 Judge Advice:[/]\n"
+                f"  {advice}\n"
+            )
+
+            console.print(Panel(
+                score_table,
+                title=f"🏆 [bold blue]CASE RESULT SUMMARY [{cid}][/]",
+                border_style="cyan"
+            ))
+            console.print(Panel(summary_text, border_style="cyan"))
         else:
             print(f"\nScores: {sc}")
             print(f"Total: {total}/70")
@@ -164,7 +177,11 @@ async def run_mini_test():
 
     judge_t = time.time() - tj0
     if console:
-        console.print(f"\n[info]Time:[/] Agent {agent_t:.1f}s, Judge {judge_t:.1f}s")
+        console.print(Panel(
+            f"[green]Time Cost:[/] Agent {agent_t:.1f}s | Judge {judge_t:.1f}s",
+            title="⏱️ Session Time Summary",
+            border_style="green"
+        ))
 
 if __name__ == "__main__":
     asyncio.run(run_mini_test())

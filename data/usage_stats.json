@@ -1,32 +1,16 @@
 {
-  "today": "2026-05-21",
+  "today": "2026-05-30",
   "daily_usage": {
-    "qwen-plus-latest": 6065,
-    "qwen-plus-2025-09-11": 30472,
-    "qwen-plus-2025-12-01": 52881,
-    "qwen-plus-character": 127291,
-    "qwen-plus-2025-07-28": 26024,
-    "qwen-plus-1220": 70555,
-    "qwen-plus-0112": 19129,
-    "qwen-plus-2025-07-14": 45879,
-    "qwen-plus-2025-04-28": 45507,
-    "qwen-plus-2025-01-25": 7450
+    "deepseek-v4-pro": 51133,
+    "deepseek-v4-flash": 10790
   },
   "daily_requests": {
-    "qwen-plus-latest": 1,
-    "qwen-plus-2025-09-11": 10,
-    "qwen-plus-2025-12-01": 11,
-    "qwen-plus-character": 21,
-    "qwen-plus-2025-07-28": 4,
-    "qwen-plus-1220": 20,
-    "qwen-plus-0112": 4,
-    "qwen-plus-2025-07-14": 7,
-    "qwen-plus-2025-04-28": 8,
-    "qwen-plus-2025-01-25": 6
+    "deepseek-v4-pro": 9,
+    "deepseek-v4-flash": 13
   },
   "total_usage": {
     "doubao-pro-32k": 552555,
-    "doubao-smart": 207482,
+    "doubao-smart": 207808,
     "deepseek-v3": 1707,
     "deepseek-r1-bailian": 989631,
     "qwen-72b-bailian": 1069951,
@@ -35,28 +19,18 @@
     "qwen-plus-0112": 807762,
     "qwen-plus-latest": 945728,
     "qwen-plus-2025-07-28": 824583,
-    "qwen-plus-2025-09-11": 446245,
-    "qwen-plus-2025-04-28": 317949,
-    "qwen-plus-character": 516180,
-    "qwen-plus-2025-01-25": 436024,
-    "qwen-plus-2025-12-01": 532584,
-    "qwen-plus-1220": 498197,
-    "qwen-plus-2025-07-14": 352744,
-    "doubao-smart-router": 7425
+    "qwen-plus-2025-09-11": 490339,
+    "qwen-plus-2025-04-28": 361902,
+    "qwen-plus-character": 580682,
+    "qwen-plus-2025-01-25": 467121,
+    "qwen-plus-2025-12-01": 593877,
+    "qwen-plus-1220": 533919,
+    "qwen-plus-2025-07-14": 362406,
+    "doubao-smart-router": 8860,
+    "deepseek-v4-pro": 153707,
+    "deepseek-v4-flash": 31454
   },
   "blacklist_expiry": {},
-  "stability_scores": {
-    "qwen-plus-latest": 0.0,
-    "deepseek-v3-bailian": 0.0,
-    "deepseek-r1-bailian": 0.0,
-    "doubao-smart-router": 0.0,
-    "doubao-smart": 0.0,
-    "qwen-plus-2025-01-25": 0.8,
-    "qwen-plus-2025-04-28": 0.8,
-    "qwen-plus-2025-12-01": 0.8,
-    "qwen-plus-2025-07-28": 0.0,
-    "qwen-plus-0112": 0.0,
-    "doubao-pro-32k": 0.0
-  },
+  "stability_scores": {},
   "last_probe_date": "2026-05-21"
 }

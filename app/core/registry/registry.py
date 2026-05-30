@@ -13,6 +13,7 @@ from loguru import logger
 class SkillRegistry:
     def __init__(self):
         self._skills: Dict[str, BaseTool] = {}
+        self.register_default_skills()
 
     def register(self, skill: BaseTool):
         """注册一个工具到全局注册表"""
@@ -21,6 +22,22 @@ class SkillRegistry:
             logger.warning(f"⚠️ [Registry] 覆盖已存在的工具: {name}")
         self._skills[name] = skill
         logger.info(f"✅ [Registry] 工具注册成功: {name}")
+
+    def register_default_skills(self):
+        """自动导入并注册所有定义好的工具"""
+        try:
+            import app.skills.tools as tools_mod
+            import inspect
+            from langchain_core.tools import BaseTool
+            
+            count = 0
+            for name, obj in inspect.getmembers(tools_mod):
+                if isinstance(obj, BaseTool):
+                    self.register(obj)
+                    count += 1
+            logger.info(f"✨ [Registry] 自动加载并注册了 {count} 个默认工具。")
+        except Exception as e:
+            logger.error(f"❌ [Registry] 自动加载默认工具失败: {e}")
 
     def get_skill(self, name: str) -> Optional[BaseTool]:
         """根据名称获取工具实例"""

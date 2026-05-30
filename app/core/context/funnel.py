@@ -187,7 +187,7 @@ class SemanticFunnel:
                             
                     logger.info(f"🔍 [Funnel] 向量相似度检索 '{kw_clean}': 最高匹配为 '{best_key}' (得分: {best_score:.4f})")
                     
-                    if best_key and best_score >= 0.65:
+                    if best_key and best_score >= 0.85:
                         dict_val = self.medical_codes[best_key]
                         icd = dict_val.get("icd10", [])
                         if icd and len(icd) == 2:

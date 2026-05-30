@@ -28,7 +28,7 @@ CAPABILITIES = {
     AuditRole.SENIOR: {
         "list_tables", "get_table_schema", "lookup_medical_schema", 
         "check_audit_governance", "search_expert_knowledge", "audit_medical_rule",
-        "run_anomaly_detection", "federated_graph_sideloader",
+        "run_anomaly_detection", "federated_graph_sideloader", "execute_audit_sql",
         "write_audit_note", "read_all_audit_notes", "clear_audit_notes"
     },
     AuditRole.ADMIN: {

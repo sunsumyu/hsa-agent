@@ -33,7 +33,7 @@ class EnrichedChatOpenAI(ChatOpenAI):
             platform_tag = "未知平台"
             endpoint_cfg = endpoint_pool_manager.get_endpoint_config(m_id)
             if endpoint_cfg:
-                platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "阿里百炼"
+                platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "DeepSeek官网" if endpoint_cfg.platform == "official" else "阿里百炼"
             
             err_msg = str(e)
             disp_name = endpoint_pool_manager.get_endpoint_display_name(m_id)
@@ -75,7 +75,7 @@ class EnrichedChatOpenAI(ChatOpenAI):
             platform_tag = "未知平台"
             endpoint_cfg = endpoint_pool_manager.get_endpoint_config(m_id)
             if endpoint_cfg:
-                platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "阿里百炼"
+                platform_tag = "火山引擎" if endpoint_cfg.platform == "volcengine" else "DeepSeek官网" if endpoint_cfg.platform == "official" else "阿里百炼"
             
             fatal_quota_sigs = ["SetLimitExceeded", "quota_exceeded", "balance", "余额不足", "限额已达到"]
             is_fatal = any(sig in err_msg for sig in fatal_quota_sigs)

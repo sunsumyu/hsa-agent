@@ -46,7 +46,7 @@ class AuditCoderAgent:
             return {"error_log": "REACHED_MAX_RETRIES"}
 
         # 1. 动态权限与工具准备
-        user_id = (state.get("metadata") or {}).get("user_id", "default_senior")
+        user_id = (state.get("metadata") or {}).get("user_id", "default_admin")
         all_tools = skill_registry.get_all_skills()
         tools = permission_manager.filter_skills(user_id, all_tools)
 
