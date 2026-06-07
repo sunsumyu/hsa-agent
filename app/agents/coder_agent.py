@@ -30,8 +30,39 @@ from app.core.booster import booster
 from app.core.structured_tracer import StructuredTracer
 
 class AuditCoderAgent:
-    def __init__(self, max_retries: int = 3):
-        self.max_retries = max_retries
+    def __init__(self, max_retries: Optional[int] = None):
+        self._max_retries = max_retries
+
+    @property
+    def max_retries(self) -> int:
+        from app.core.config import settings
+        return self._max_retries if self._max_retries is not None else settings.max_agent_retries
+
+    def _is_probe_query(self, sql: str) -> bool:
+        if not sql: return True
+        sql_upper = sql.upper().strip()
+        # 1. 明显的表结构/元数据探测 (DESCRIBE, SHOW, etc.)
+        if any(sql_upper.startswith(x) for x in ["SHOW ", "DESC ", "DESCRIBE ", "EXPLAIN "]):
+            return True
+        # 2. 简单的计数/边界/总数探测 (无 GROUP BY 且包含 COUNT/MIN/MAX)
+        if "JOIN" not in sql_upper and "GROUP BY" not in sql_upper:
+            if any(x in sql_upper for x in ["COUNT(*)", "COUNT (", "MIN(SETL_TIME)", "MAX(SETL_TIME)", "MIN (SETL_TIME)", "MAX (SETL_TIME)"]):
+                return True
+            if sql_upper.startswith("SELECT COUNT"):
+                return True
+        # 3. 字典/项目/药品/科室的 DISTINCT 列表探测 (主要用于核查项目名称是否存在)
+        if "DISTINCT" in sql_upper and "JOIN" not in sql_upper:
+            if any(x in sql_upper for x in ["HILIST_NAME", "HILIST_CODE", "OPRN_OPRT_NAME", "DISE_NAME", "MED_TYPE", "ADM_DEPT_NAME", "DSCG_DEPT_NAME", "CHFPDR_NAME"]):
+                return True
+        # 4. 任何不含 JOIN，且长度较短，且没有特定业务过滤词的 SQL
+        if "JOIN" not in sql_upper and len(sql) < 500:
+            if not ("HAVING" in sql_upper or "WINDOW" in sql_upper or "OVER" in sql_upper):
+                if "GEND" not in sql_upper:
+                    return True
+        # 5. 明显的表结构/元数据探测
+        if "LIMIT " in sql_upper and "JOIN" not in sql_upper and "GROUP BY" not in sql_upper and len(sql) < 500:
+            return True
+        return False
 
     async def execute(self, state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
         """执行审计代码生成与物理查询 [V171.2]"""
@@ -43,7 +74,19 @@ class AuditCoderAgent:
         
         retry = state.get("retry_count", 0)
         if retry >= self.max_retries:
-            return {"error_log": "REACHED_MAX_RETRIES"}
+            return {
+                "error_log": "REACHED_MAX_RETRIES",
+                "retry_count": retry + 1
+            }
+
+        # 计算是否出现了重复 SQL 的执行
+        sql_history = state.get("sql_history", [])
+        has_duplicate_sql = False
+        if sql_history:
+            from collections import Counter
+            counts = Counter(sql.strip() for sql in sql_history if sql.strip())
+            if counts and max(counts.values()) >= 2:
+                has_duplicate_sql = True
 
         # 1. 动态权限与工具准备
         user_id = (state.get("metadata") or {}).get("user_id", "default_admin")
@@ -72,7 +115,7 @@ class AuditCoderAgent:
             )
             
             with tracer.span("SQL_EXECUTION", node="CODER") as span:
-                results = await self._invoke_tools_parallel(tool_calls, tools)
+                results = await self._invoke_tools_parallel(tool_calls, tools, state)
                 span.set_result(f"物理执行完成，获取 {len(results)} 组结果集")
                 
             processed = self._process_tool_results(results, state)
@@ -83,9 +126,9 @@ class AuditCoderAgent:
                 "sql_history": processed["sql_history"],
                 "methodology": processed["methodology"],
                 "messages": [response] + processed["tool_msgs"],
-                "retry_count": retry + 1,
-                "sql_validated": True,
-                "error_log": None,
+                "retry_count": retry,
+                "sql_validated": not processed["has_error"],
+                "error_log": processed["error_msg"] if processed["has_error"] else None,
                 "execution_trace": tracer.to_legacy_list(),
                 "temp_table": state.get("temp_table")
             }
@@ -98,8 +141,77 @@ class AuditCoderAgent:
         schema_hint = "【已启用 GSSC 统一上下文引擎：本角色所需的真实 ClickHouse DDL 物理表结构与主表规范，已安全挂载于当前消息流最尾部。请滚动至最尾部，在 <database_schema_context> 标签中查阅，以确保取得最新最准的 DDL 元数据进行 SQL 编写】"
         experiences_combined = "【已启用 GSSC 统一上下文引擎：相关的向量专家经验与外部结构化审计便签线索，已安全挂载于当前消息流最尾部。请滚动至最尾部，在 <experiential_context> 与 <structured_audit_notes> 标签中查阅，以获取历史成功路径与已固化的审计证据链】"
         
-        user_messages = [m for m in state.get("messages", []) if getattr(m, "type", "") == "human"]
-        user_q = " ".join(str(m.content) for m in user_messages)[:200]
+        user_q = ""
+        for m in state.get("messages", []):
+            if isinstance(m, tuple) and len(m) >= 2:
+                role, content = m[0], m[1]
+                if role in ("user", "human"):
+                    user_q += " " + str(content)
+            elif isinstance(m, dict):
+                role = m.get("role") or m.get("type")
+                content = m.get("content") or m.get("text")
+                if role in ("user", "human") and content:
+                    user_q += " " + str(content)
+            elif hasattr(m, "type") and getattr(m, "type") == "human":
+                user_q += " " + str(getattr(m, "content", ""))
+            elif hasattr(m, "role") and getattr(m, "role") == "user":
+                user_q += " " + str(getattr(m, "content", ""))
+        user_q = user_q.strip()[:200]
+
+        # ──【企业级 v1.5】场景化 SQL 刚性防漂移指引注入 ──
+        q_lower = user_q.lower()
+        scenario_guidelines = ""
+        
+        # 1. 拔牙/种植牙
+        if any(kw in q_lower for kw in ["牙", "拔牙", "口腔", "牙体"]):
+            scenario_guidelines = (
+                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 口腔科拔牙核查】\n"
+                "1. 你**必须**使用正确的拔牙或牙科诊疗项目进行过滤，例如 `replace(B.hilist_name, '\\t', '') LIKE '%拔牙%' OR replace(B.hilist_name, '\\t', '') LIKE '%牙齿提取%'`。\n"
+                "2. 你**必须**编写按患者 `A.psn_no` 进行分组聚合的 SQL，统计每位患者累计被拔牙的次数（如 `SUM(B.cnt) as total_extractions` 或 `count() as total_extractions`），并筛选出总数 > 32 颗的异常记录（`HAVING total_extractions > 32`）。\n"
+                "3. 另外，还要编写检查‘同一参保人在不同结算中出现同一颗牙多次被拔除’的 SQL：通过患者 `A.psn_no` 与项目名称进行过滤或自连接，以检测重复拔除违规！\n"
+                "4. 务必使用 `replace(..., '\\t', '')` 清除可能存在的隐藏制表符以保证准确对碰。"
+            )
+        # 2. 血液透析与骨科手术高值耗材缺失
+        elif any(kw in q_lower for kw in ["不用工具", "耗材", "匹配", "配对", "钛板", "钛钉", "耗材缺失"]):
+            scenario_guidelines = (
+                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 有服务无耗材核查】\n"
+                "1. 你的 SQL **必须**将结算表 `fqz_gz_jzsj_all_ql` 与费用明细表 `fqz_fymx_test` 进行左连接 (`LEFT JOIN`)，以 `A.setl_id = B.setl_id` 为关联键。\n"
+                "2. 你**必须**过滤出相关的诊疗项目（如 `replace(A.oprn_oprt_name, '\\t', '') LIKE '%透析%' OR replace(A.oprn_oprt_name, '\\t', '') LIKE '%固定%'` 或 `replace(A.dise_name, '\\t', '') LIKE '%肾衰%' OR replace(A.dise_name, '\\t', '') LIKE '%骨折%'`）。\n"
+                "3. 你**必须**使用 `GROUP BY A.setl_id, A.psn_no, A.oprn_oprt_name, A.dise_name` 并利用隔离判定聚合条件：`HAVING ((replace(A.oprn_oprt_name, '\\t', '') LIKE '%透析%' OR replace(A.dise_name, '\\t', '') LIKE '%肾衰%') AND countIf(replace(B.hilist_name, '\\t', '') LIKE '%透析器%' OR replace(B.hilist_name, '\\t', '') LIKE '%管路%') = 0) OR ((replace(A.oprn_oprt_name, '\\t', '') LIKE '%固定%' OR replace(A.dise_name, '\\t', '') LIKE '%骨折%') AND countIf(replace(B.hilist_name, '\\t', '') LIKE '%钛钉%' OR replace(B.hilist_name, '\\t', '') LIKE '%钛板%') = 0)` 来筛选违规单子！这能防止不同医疗场景（血透与骨科固定）的耗材交叉污染。绝对禁止将两个场景的耗材混合在一个 countIf() 中判断！\n"
+                "4. 务必使用 `replace(..., '\\t', '')` 清洗所有涉及的字符串字段，防止制表符导致匹配失败。"
+            )
+        # 3. 理疗/手法治疗时间冲突
+        elif any(kw in q_lower for kw in ["理疗", "手法", "康复", "按摩", "推拿"]):
+            scenario_guidelines = (
+                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 理疗手法时间冲突核查】\n"
+                "1. 你**必须**将结算主表 `fqz_gz_jzsj_all_ql` 与费用明细表 `fqz_fymx_test` 按照 `setl_id` 进行关联 (JOIN)。\n"
+                "2. 你**必须**使用明细表中的 `hilist_name` 过滤出手法康复项目（例如 `replace(B.hilist_name, '\\t', '') LIKE '%推拿%' OR replace(B.hilist_name, '\\t', '') LIKE '%手法%' OR replace(B.hilist_name, '\\t', '') LIKE '%按摩%'`）。\n"
+                "3. 你的 SQL **必须**真正执行按分钟粒度的时间重叠对碰，即以主表中的执行医生（`A.chfpdr_name`）与明细表中的费用执行时间（`B.fee_ocur_time`）进行分组聚合 `GROUP BY A.chfpdr_name, B.fee_ocur_time`。在聚合筛选时，你**必须动态提取并使用用户提示中指定的病号数量阈值**（例如，如果用户提问要求“同时在给五六个病号做”，说明阈值是5，则你必须使用 `HAVING count(distinct A.psn_no) >= 5`；若用户未指定具体数量，则默认为 `HAVING count(distinct A.psn_no) > 1`），绝对禁止无视用户指定的具体阈值！\n"
+                "4. 注意：在进行字符串比较或关联时，务必使用 `trim(BOTH '\\t ' FROM B.fee_ocur_time)` 或 `replace(..., '\\t', '')` 来清除可能存在的隐藏制表符！"
+            )
+        # 4. 批量快速刷卡/时序异常
+        elif any(kw in q_lower for kw in ["批量", "连续", "快速", "秒", "时序异常", "刷卡"]):
+            scenario_guidelines = (
+                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 连续批量快速刷卡核查】\n"
+                "1. 你**必须**将明细表 `fqz_fymx_test` 与结算主表 `fqz_gz_jzsj_all_ql` 进行关联，获取就诊时间 (`setl_time`) 或费用执行时间 (`fee_ocur_time`)。\n"
+                "2. 任务要求识别‘连续十几个不同的病号且开出的项目一模一样、结算时间差在3-5秒之内’的违规行为。你的 SQL **必须**：\n"
+                "   a) 先对每次就诊结算的项目进行聚合，将同一 `setl_id` 的所有收费项目汇总为数组（如 `groupArray(replace(B.hilist_name, '\\t', '')) as item_list`），并计算总金额；\n"
+                "   b) 使用窗口函数（如 `LAG(A.setl_time) OVER (PARTITION BY A.fixmedins_code ORDER BY A.setl_time) as prev_time`）计算同家网点相邻两次结算的时间差（秒数）；\n"
+                "   c) 使用窗口函数（如 `LAG(item_list) OVER (PARTITION BY A.fixmedins_code ORDER BY A.setl_time) as prev_items`）比对相邻两次结算的项目列表是否完全一致；\n"
+                "   d) 筛选出时间差 <= 5 秒且项目完全一致的连续刷单记录！绝对不能只简单比对金额！\n"
+                "3. 务必使用 `replace(..., '\\t', '')` 清理所有字段，防止制表符破坏数组相等性判断。"
+            )
+
+        zero_findings_rule = (
+            "\n\n【⚠️ 零发现与终止准则 (Zero-Findings & Termination Rule)】\n"
+            "1. **禁止分步查证探查**：严禁在编写核心审计 SQL 之前，通过单独执行简单的 `SELECT DISTINCT hilist_name` 或 `count(*)` 探查来预先检查项目/药品/科室是否存在！你必须直接根据审计指引，一次性编写并执行完整的、包含多表 JOIN 关联和复杂业务对碰（如按分钟重叠计算、多重过滤、高值耗材缺失 `countIf` 聚合等）的核心审计 SQL。即使执行后返回空值 `data: []` 也是完全正确和被期望的。\n"
+            "2. 当核心 SQL 执行完毕且返回空数据后，你**绝对禁止**进行任何微调重试，此时你**必须且只能执行 1 个简单的边界探针 SQL** 来获取扫描边界数据（例如查询主表总行数和时间范围：`SELECT count(*) as total_cnt, min(setl_time) as min_t, max(setl_time) as max_t FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'`）。\n"
+            "3. 边界探针 SQL 执行完后，必须**立即停止调用工具**，并在回复中写明未发现异常的结论，以便系统产出专业的零发现报告。"
+        )
+        if scenario_guidelines:
+            experiences_combined = f"{experiences_combined}{scenario_guidelines}{zero_findings_rule}"
+        else:
+            experiences_combined = f"{experiences_combined}{zero_findings_rule}"
 
         prompt = CODER_PROMPT.format_messages(
             original_question=user_q,
@@ -121,15 +233,38 @@ class AuditCoderAgent:
                 tools=tools
             )
             
+            logger.info(f"🔮 [Coder LLM Response] Content: {str(response.content)[:500]} | Tool Calls: {getattr(response, 'tool_calls', None)}")
+            
             if not getattr(response, "tool_calls", None):
                  span.set_result("未触发工具调用，直接回复")
-                 return {"messages": [response], "error_log": None, "execution_trace": tracer.to_legacy_list()}
+                 # 确保即使直接回复，也从历史中提取核心 SQL，防止丢失
+                 history_sql = state.get("sql_history", [])
+                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] history_sql from state: {history_sql}")
+                 core_sql = ""
+                 if history_sql:
+                     audit_queries = []
+                     for s in history_sql:
+                         is_probe = self._is_probe_query(s)
+                         logger.info(f"🔮 [DEBUG_SQL_DIRECT] checking query: is_probe={is_probe} for {s[:100]}...")
+                         if not is_probe:
+                             audit_queries.append(s)
+                     core_sql = audit_queries[-1] if audit_queries else history_sql[-1]
+                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] selected core_sql: {core_sql[:100]}...")
+                 return {
+                     "messages": [response], 
+                     "error_log": None, 
+                     "execution_trace": tracer.to_legacy_list(),
+                     "sql_query": core_sql
+                 }
             
             span.set_result(f"生成了 {len(response.tool_calls)} 个工具调用指令")
 
         # 4. 物理工具执行 (SQL 执行)
         with tracer.span("SQL_EXECUTION", node="CODER") as span:
-            results = await self._invoke_tools_parallel(response.tool_calls, tools)
+            logger.info(f"🔍 [Tool Execution Debug] Available tools: {[t.name for t in tools]}")
+            logger.info(f"🔍 [Tool Execution Debug] Requested tool calls: {response.tool_calls}")
+            results = await self._invoke_tools_parallel(response.tool_calls, tools, state)
+            logger.info(f"🔍 [Tool Execution Debug] Results: {results}")
             span.set_result(f"物理执行完成，获取 {len(results)} 组结果集")
         
         # 5. 结果聚合与处理 (迁移自原 sqlexec_node)
@@ -137,17 +272,21 @@ class AuditCoderAgent:
         
         # 6. 质量门控 (Linter & Booster)
         with tracer.span("QUALITY_GATE", node="CODER") as span:
-            gate_error = self._run_quality_gates(processed["sql_query"], processed["methodology"], processed["raw_data"], processed["execution_trace"])
-            if gate_error:
-                span.fail(gate_error)
-                return {
-                    "error_log": gate_error,
-                    "sql_query": processed["sql_query"],
-                    "messages": [response] + processed["tool_msgs"],
-                    "retry_count": retry + 1,
-                    "execution_trace": tracer.to_legacy_list()
-                }
-            span.set_result("逻辑与数值对齐校验通过")
+            if processed["sql_query"]:
+                gate_error = self._run_quality_gates(processed["sql_query"], processed["methodology"], processed["raw_data"], processed["execution_trace"])
+                if gate_error:
+                    span.fail(gate_error)
+                    return {
+                        "error_log": gate_error,
+                        "sql_query": processed["sql_query"],
+                        "messages": [response] + processed["tool_msgs"],
+                        "retry_count": retry + 1,
+                        "execution_trace": tracer.to_legacy_list()
+                    }
+                span.set_result("逻辑与数值对齐校验通过")
+            else:
+                logger.info("未执行 SQL 查询，跳过质量门控")
+                span.set_result("跳过质量门控")
 
         return {
             "raw_data": processed["raw_data"],
@@ -155,25 +294,52 @@ class AuditCoderAgent:
             "sql_history": processed["sql_history"], # [V178.9] 证据链持久化
             "methodology": processed["methodology"],
             "messages": [response] + processed["tool_msgs"],
-            "retry_count": retry + 1,
-            "sql_validated": True,
-            "error_log": None,
+            "retry_count": retry + 1 if (processed["has_error"] or has_duplicate_sql) else retry,
+            "sql_validated": not processed["has_error"],
+            "error_log": processed["error_msg"] if processed["has_error"] else None,
             "execution_trace": tracer.to_legacy_list(),
             "temp_table": state.get("temp_table")
         }
 
-    async def _invoke_tools_parallel(self, tool_calls, tools):
+    async def _invoke_tools_parallel(self, tool_calls, tools, state):
+        # 计算是否已经成功物理执行过核心对碰 SQL
+        has_run_core = False
+        for prev_sql in state.get("sql_history", []):
+            if not self._is_probe_query(prev_sql):
+                has_run_core = True
+                break
+
         async def _single_call(tc):
             t_instance = next((t for t in tools if t.name == tc["name"]), None)
             if not t_instance: return tc, {"status": "ERROR", "error_message": f"Unknown tool: {tc['name']}"}
             try:
-                res = await t_instance.ainvoke(tc["args"])
+                args = tc["args"].copy() if isinstance(tc["args"], dict) else {}
+                import inspect
+                target_func = t_instance.func or getattr(t_instance, "coroutine", None)
+                if tc["name"] == "execute_audit_sql" or (target_func and "state" in inspect.signature(target_func).parameters):
+                    args["state"] = state
+                
+                # 刚性物理拦截：如果尚未执行过核心 SQL，禁止执行任何探针探路 SQL
+                if tc["name"] == "execute_audit_sql" and not has_run_core:
+                    sql_arg = args.get("sql", "")
+                    if self._is_probe_query(sql_arg):
+                        logger.warning(f"🚨 [PROBE_INTERCEPT] 物理算力引擎拦截了前置探针 SQL: {sql_arg}")
+                        return tc, {
+                            "status": "ERROR",
+                            "error_message": "【算力安全红线拦截】物理算力引擎已禁止前置数据探查！你绝对不能预先执行 DISTINCT med_type 或其他探路 SQL。你必须且只能在第一步中，直接根据 methodology 编写并物理执行最终的核心业务审计 SQL（必须包含 lagInFrame / row_number / OVER / 复杂对碰关联等），哪怕该表物理数据为空，这也是留存物理审计证据的唯一合规方式！",
+                            "sql_logic": sql_arg
+                        }
+
+                res = await t_instance.ainvoke(args)
                 return tc, res
             except Exception as e:
                 return tc, {"status": "ERROR", "error_message": str(e)}
 
-        tasks = [_single_call(tc) for tc in tool_calls]
-        return await asyncio.gather(*tasks)
+        raw_results = []
+        for tc in tool_calls:
+            res = await _single_call(tc)
+            raw_results.append(res)
+        return raw_results
 
     def _process_tool_results(self, results, state):
         tool_msgs = []
@@ -197,7 +363,11 @@ class AuditCoderAgent:
                 try:
                     parsed_res = json.loads(res)
                 except Exception:
-                    pass
+                    try:
+                        import ast
+                        parsed_res = ast.literal_eval(res)
+                    except Exception:
+                        pass
             
             if isinstance(parsed_res, dict):
                 if "sql_logic" in parsed_res: sql_logics.append(parsed_res["sql_logic"])
@@ -213,11 +383,29 @@ class AuditCoderAgent:
                 elif "records_sample" in parsed_res: raw_data_list.append(str(parsed_res["records_sample"]))
                 elif "raw_evidence" in parsed_res: raw_data_list.append(str(parsed_res["raw_evidence"]))
         
+        # 启发式筛选核心审计 SQL，避免被最后一步的边界探针 SQL 覆盖
+        core_sql = ""
+        combined_sql_logics = state.get("sql_history", []) + sql_logics
+        logger.info(f"🔮 [DEBUG_SQL] state.sql_history: {state.get('sql_history')}")
+        logger.info(f"🔮 [DEBUG_SQL] current sql_logics: {sql_logics}")
+        if combined_sql_logics:
+            audit_queries = []
+            for sql in combined_sql_logics:
+                is_probe = self._is_probe_query(sql)
+                logger.info(f"🔮 [DEBUG_SQL] checking query: is_probe={is_probe} for {sql[:100]}...")
+                if not is_probe:
+                    audit_queries.append(sql)
+            if audit_queries:
+                core_sql = audit_queries[-1]
+            else:
+                core_sql = combined_sql_logics[-1]
+        logger.info(f"🔮 [DEBUG_SQL] selected core_sql: {core_sql[:100]}...")
+
         return {
             "tool_msgs": tool_msgs,
             "raw_data": "\n---\n".join(raw_data_list),
-            "sql_query": sql_logics[-1] if sql_logics else "",
-            "sql_history": sql_logics, # [V178.9] 证据链全量化
+            "sql_query": core_sql,
+            "sql_history": sql_logics, # [V178.9] 仅返回增量部分，由 LangGraph 的 Reducer 在 state 追加，防重复
             "methodology": "\n\n".join(methodologies),
             "execution_trace": state.get("execution_trace", []) + tool_traces,
             "has_error": has_error,

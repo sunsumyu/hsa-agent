@@ -9,6 +9,7 @@ from loguru import logger
 # 环境初始化
 sys.path.append(os.getcwd())
 os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["DISABLE_AUDIT_CACHE"] = "true"  # 禁用缓存以保证干净的直通路由执行
 # [V48.1 极致体验] 强制 HuggingFace 使用离线缓存或快速失败，杜绝网络超时卡死
 os.environ["HF_HUB_OFFLINE"] = "1"
 

@@ -47,7 +47,7 @@ class PerfMonitor:
         
         table = Table(show_header=False, box=None)
         table.add_row(
-            f"[bold blue]⏱️  {category}[/bold blue]",
+            f"[bold blue][PERF] {category}[/bold blue]",
             f"[white]{name}[/white]",
             f"[{color}]{duration_ms:.2f} ms[/{color}]"
         )

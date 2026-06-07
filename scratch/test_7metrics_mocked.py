@@ -113,7 +113,7 @@ async def run_metrics_logic_test():
             dims = ["success", "recall", "precision", "faithfulness", "relevance", "professionalism", "interpretability"]
             for d in dims:
                 v = sc.get(d, 0)
-                bar = "█" * int(v) + "░" * (10 - int(v))
+                bar = "=" * int(v) + "-" * (10 - int(v))
                 table.add_row(d.capitalize(), str(v), bar)
             
             console.print(table)

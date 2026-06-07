@@ -72,6 +72,8 @@ tables:
       - { name: acct_pay,         type: Float64,  desc: "个人账户支付" }
       - { name: cash_payamt,      type: Float64,  desc: "现金支付金额" }
       - { name: admdvs_name,      type: String,   desc: "行政区划名称" }
+      - { name: chfpdr_code,      type: String,   desc: "主管医师国临代码 / 医生唯一编码" }
+      - { name: chfpdr_name,      type: String,   desc: "主管医师姓名" }
 
   - name: fqz_drug_mcs_info_list
     alias: 医保限制目录
@@ -106,3 +108,5 @@ tables:
       - { name: det_item_fee_sumamt, type: Float64, desc: "明细费用总额" }
       - { name: psn_no,           type: String,   desc: "参保人唯一ID" }
       - { name: fixmedins_name,   type: String,   desc: "医疗机构名称" }
+      - { name: fee_ocur_time,    type: String,   desc: "费用发生时间 / 费用执行时间 (String, 例如 '2024-03-15 10:30:00')" }
+      - { name: setl_time,        type: String,   desc: "就诊费用结算时间" }

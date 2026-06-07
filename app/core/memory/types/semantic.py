@@ -162,14 +162,20 @@ class SemanticMemory:
         if not items: return "未找到相关的物理表字段信息。"
         
         lines = ["【推荐的物理模型关联】"]
-        for i, item in enumerate(items, 1):
+        idx = 1
+        for item in items:
             # 兼容 MemoryItem.content 可能已经是 Dict 的情况 (从旧数据加载)
             data = item.content if isinstance(item.content, dict) else item.metadata
-            col = data.get("column", "unknown")
-            tbl = data.get("table", "unknown")
+            col = data.get("column")
+            tbl = data.get("table")
+            if not col or not tbl or col == "unknown" or tbl == "unknown":
+                continue
             desc = data.get("desc", "")
-            lines.append(f"{i}. [{tbl}.{col}] - {desc}")
+            lines.append(f"{idx}. [{tbl}.{col}] - {desc}")
+            idx += 1
         
+        if len(lines) == 1:
+            return "未找到相关的物理表字段信息。"
         return "\n".join(lines)
 
     def get_avoidance_guides(self, query: str) -> str:

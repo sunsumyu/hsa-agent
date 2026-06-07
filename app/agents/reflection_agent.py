@@ -68,7 +68,8 @@ class AuditReflectionAgent:
         
         return {
             "error_log": f"[CRITIC 反馈] {feedback}",
-            "messages": [response]
+            "messages": [response],
+            "retry_count": retry + 1
         }
 
     def _extract_original_question(self, messages: List[BaseMessage]) -> Optional[str]:

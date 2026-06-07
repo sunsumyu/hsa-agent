@@ -8,6 +8,10 @@ app/core/config.py
 
 import os
 from typing import Optional, List
+from dotenv import load_dotenv
+
+# Ensure standard .env variables are loaded into os.environ
+load_dotenv()
 from pydantic import Field
 
 # [V4.5.4] 物理环境全局配置中心

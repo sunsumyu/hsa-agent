@@ -43,7 +43,7 @@ def _record_usage_with_budget(role: str, response: Any, model_id: str, prompt: A
     usage_tracker.record_usage(model_id, in_t, out_t, prompt=prompt, response_text=str(getattr(response, "content", "")))
 
 def _trim_messages(left: List, right: List) -> List:
-    return trim_and_sanitize(left, right, max_total=15, keep_head=3, keep_tail=7)
+    return trim_and_sanitize(left, right, max_total=40, keep_head=5, keep_tail=25)
 
 def _merge_dict(left: Dict, right: Dict) -> Dict:
     new = (left or {}).copy()
@@ -157,7 +157,9 @@ async def aligner_node(state: AuditState, config: RunnableConfig):
 async def sqlexec_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 CoderAgent 执行工具调用与验证"""
     from app.agents.coder_agent import coder_agent
-    return await coder_agent.execute(state, config)
+    res = await coder_agent.execute(state, config)
+    logger.info(f"🔍 [DEBUG Graph] sqlexec_node returned: sql_query = {repr(res.get('sql_query'))}")
+    return res
 
 async def critic_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ReflectionAgent 执行自愈诊断"""
@@ -166,6 +168,7 @@ async def critic_node(state: AuditState, config: RunnableConfig):
 
 async def reporter_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ReportRenderer 执行报告渲染与事实对齐"""
+    logger.info(f"🔍 [DEBUG Graph] reporter_node received: sql_query = {repr(state.get('sql_query'))}")
     from app.reporting.report_renderer import report_renderer
     from app.core.booster import booster
     from app.core.registry.schema_registry import schema_registry
@@ -174,7 +177,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 
     logger.info(">>> [REPORTER] 正在执行渲染任务...")
     raw_data_list = report_renderer.clean_and_parse_raw_data(state.get("raw_data"))
-    hard_sum = sum(float(r.get("medfee_sumamt", r.get("amount", 0))) for r in raw_data_list)
+    hard_sum = sum(float(r.get("det_item_fee_sumamt") or r.get("total_fee") or r.get("fee_b") or r.get("total_amt") or r.get("amount") or r.get("medfee_sumamt") or 0) for r in raw_data_list)
     hard_count = len(raw_data_list)
     
     user_question = (state.get("metadata") or {}).get("user_question") or "医保专项审计"
@@ -196,12 +199,41 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         if hard_count == 0:
             llm_conclusion = f"本次核查对底层表进行了全量扫描（扫描基数 > 0，发现违规记录 0 条），涉及金额 ¥{hard_sum:,.2f}。经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
         else:
+            sample_details = []
+            for r in raw_data_list[:3]:
+                psn = r.get("psn_no") or r.get("PSN_NO") or "未明参保人"
+                hosp = r.get("hospital") or r.get("fixmedins_name") or r.get("hospital_a") or r.get("fixmedins_code") or "未知机构"
+                item = r.get("hilist_name") or r.get("item_name") or r.get("tel") or "限定性违规结算"
+                if r.get("tel"):
+                    item = f"共用联系人电话 {item}"
+                elif r.get("hospital_b"):
+                    item = f"跨机构住院重叠 ({hosp} 与 {r.get('hospital_b')})"
+                
+                amt_val = r.get("det_item_fee_sumamt") or r.get("total_fee") or r.get("fee_b") or r.get("total_amt") or r.get("amount") or r.get("medfee_sumamt") or 0
+                try:
+                    amt = float(amt_val)
+                except Exception:
+                    amt = 0.0
+                sample_details.append(f"参保人 {psn} 在 {hosp} 涉及「{item}」违规结算金额 ¥{amt:,.2f}")
+            
+            samples_str = "；".join(sample_details)
             llm_conclusion = (
-                f"根据快速审计路由规则，本次专项核查针对「{user_question}」进行了物理穿透扫描。"
-                f"共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}。详细核查发现：经分析，系统检测到存在符合审计逻辑的异常违规行为，其结算特征、项目重叠以及临床时序均与审计方法论高度一致。建议立即启动定向现场审计，对相关病案流水及医保支付凭证进行追溯性核查。"
+                f"根据快速审计路由规则，本次专项核查针对「{user_question}」进行了物理穿透扫描。\n\n"
+                f"共穿透扫描相关违规明细记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}。详细核查发现：\n"
+                f"系统检测到存在明确的违规行为。典型违规样本包括：{samples_str}。\n"
+                f"这些记录的结算特征、项目限定约束以及临床时序均与审计方法论及医保监管政策冲突，判定为明确违规。建议立即启动定向现场审计，对相关病案流水及医保支付凭证进行追溯性核查。"
             )
     else:
-        prompt_text = report_renderer.prepare_conclusion_prompt(user_question, methodology, execution_trace, hard_count, hard_sum)
+        semantic_align = (state.get("metadata") or {}).get("semantic_alignment") or {}
+        rewritten_q = semantic_align.get("rewritten_question")
+        prompt_text = report_renderer.prepare_conclusion_prompt(
+            user_question, 
+            methodology, 
+            execution_trace, 
+            hard_count, 
+            hard_sum, 
+            rewritten_question=rewritten_q
+        )
         try:
             response = await llm_provider.chat(
                 role="reporter", 
@@ -227,7 +259,8 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         finding_count=hard_count,
         execution_trace=execution_trace,
         audit_metadata=audit_meta, # [V156.0]
-        semantic_alignment=(state.get("metadata") or {}).get("semantic_alignment") # [NEW]
+        semantic_alignment=(state.get("metadata") or {}).get("semantic_alignment"), # [NEW]
+        raw_data_str=state.get("raw_data") # [NEW]
     )
 
     is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), llm_conclusion)

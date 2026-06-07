@@ -28,15 +28,15 @@ templates:
           A.det_item_fee_sumamt AS amount,
           A.setl_time           AS setl_time
       FROM {table} A
-      LEFT JOIN fqz_drug_mcs_info_list C ON A.hilist_code = C.med_list_code
+      LEFT JOIN default.fqz_drug_mcs_info_list C ON replace(A.hilist_code, '\t', '') = replace(C.med_list_code, '\t', '')
       WHERE A.setl_time >= '2024-01-01' AND A.setl_time <= '2024-12-31'
-        AND A.gend = '1'
+        AND replace(A.gend, '\t', '') = '1'
         AND (
-            C.nat_hi_druglist_memo LIKE '%限女性%'
-            OR A.hilist_name LIKE '%妇科%'
-            OR A.hilist_name LIKE '%产科%'
-            OR A.hilist_name LIKE '%子宫%'
-            OR A.hilist_name LIKE '%阴道%'
+            replace(C.nat_hi_druglist_memo, '\t', '') LIKE '%限女性%'
+            OR replace(A.hilist_name, '\t', '') LIKE '%妇科%'
+            OR replace(A.hilist_name, '\t', '') LIKE '%产科%'
+            OR replace(A.hilist_name, '\t', '') LIKE '%子宫%'
+            OR replace(A.hilist_name, '\t', '') LIKE '%阴道%'
         )
       ORDER BY A.det_item_fee_sumamt DESC
       LIMIT {limit}
@@ -207,4 +207,53 @@ templates:
       GROUP BY A.psn_no, A.psn_name, A.fixmedins_name, A.tel
       HAVING visit_count > 3
       ORDER BY total_amt DESC
+      LIMIT {limit}
+
+  SERVICE_WITHOUT_CONSUMABLE:
+    description: "伴生高值耗材缺失检测 (有服务无耗材)"
+    category: rule
+    default_table: fqz_gz_jzsj_all_ql
+    default_limit: 50
+    tolerance: 1000
+    methodology: >
+      【审计方法论】有服务无伴生耗材核查：结算主表 (fqz_gz_jzsj_all_ql) 与费用明细表 (fqz_fymx_test) 进行左连接，
+      根据就诊主诊断/操作限定不同治疗场景，在 HAVING 中针对不同场景分别计算专属耗材数（如透析器/管路、钛钉/钛板）。
+      注意：必须使用隔离判定条件，防止多个独立场景的耗材计数发生交叉污染造成漏报。
+      合规依据：《基本医疗保险定点医疗机构服务协议》关于诊疗耗材匹配的相关规范，
+      以及《医疗保障基金使用监督管理条例》第十五条。
+    policy_basis: "《医疗保障基金使用监督管理条例》第十五条"
+    sql_template: |
+      SELECT 
+          A.setl_id, 
+          A.psn_no, 
+          A.oprn_oprt_name,
+          A.dise_name,
+          sum(B.det_item_fee_sumamt) AS total_consumable_fee
+      FROM {table} A 
+      LEFT JOIN fqz_fymx_test B ON A.setl_id = B.setl_id 
+      WHERE A.setl_time >= '2024-01-01' AND A.setl_time <= '2024-12-31'
+        AND (
+            replace(A.oprn_oprt_name, '\t', '') LIKE '%透析%' 
+            OR replace(A.oprn_oprt_name, '\t', '') LIKE '%固定%' 
+            OR replace(A.dise_name, '\t', '') LIKE '%肾衰%' 
+            OR replace(A.dise_name, '\t', '') LIKE '%骨折%'
+        ) 
+      GROUP BY 
+          A.setl_id, 
+          A.psn_no, 
+          A.oprn_oprt_name,
+          A.dise_name
+      HAVING 
+          -- 逻辑分支 1：血液透析场景，但透析耗材（透析器、管路）缺失
+          (
+              (replace(A.oprn_oprt_name, '\t', '') LIKE '%透析%' OR replace(A.dise_name, '\t', '') LIKE '%肾衰%')
+              AND countIf(replace(B.hilist_name, '\t', '') LIKE '%透析器%' OR replace(B.hilist_name, '\t', '') LIKE '%管路%') = 0
+          )
+          OR 
+          -- 逻辑分支 2：骨科固定场景，但骨科固定耗材（钛钉、钛板）缺失
+          (
+              (replace(A.oprn_oprt_name, '\t', '') LIKE '%固定%' OR replace(A.dise_name, '\t', '') LIKE '%骨折%')
+              AND countIf(replace(B.hilist_name, '\t', '') LIKE '%钛钉%' OR replace(B.hilist_name, '\t', '') LIKE '%钛板%') = 0
+          )
+      ORDER BY total_consumable_fee DESC
       LIMIT {limit}

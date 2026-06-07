@@ -22,7 +22,7 @@ from app.memory.semantic_memory import cognitive_memory_manager
 
 class LLMProvider:
     def __init__(self):
-        self.default_model = "deepseek-v4-pro"
+        self.default_model = "doubao-pro-32k"
 
     async def chat(
         self, 
@@ -93,12 +93,19 @@ class LLMProvider:
         # 4. 构建可观测性配置
         obs_config = build_obs_config(config, role, state or {})
 
-        # 5. 执行调用
+        # 5. [Pairing Safety Guard] 确保工具调用配对 100% 完整，绝对防爆 400 Bad Request
+        from app.memory.message_sanitizer import ensure_tool_pairing
+        messages = ensure_tool_pairing(messages)
+
+        # 6. 执行调用
         start_time = time.time()
         max_attempts = 3
         
         for attempt in range(max_attempts):
             try:
+                # 打印消息链结构，抓取 pairing 漏洞
+                logger.info(f"🐛 [LLM Debug] 消息链结构: " + ", ".join(f"{getattr(m, 'type', m.__class__.__name__)}(has_tc={bool(getattr(m, 'tool_calls', None))})" for m in messages))
+                
                 # [V300.0] 彻底解决伪流式问题：若模型支持流式，使用 astream 以实时分发 on_chat_model_stream 事件
                 if getattr(llm, "streaming", False):
                     chunks = []
@@ -146,11 +153,11 @@ class LLMProvider:
                     raise e
 
     def _resolve_tier_id(self, tier: str) -> str:
-        """将逻辑层级映射为物理模型 ID (从配置中心读取)"""
-        from app.core.config import settings
+        """将逻辑层级映射为物理模型 ID (从配置中心/环境变量读取)"""
+        import os
         if tier == "HEAVY":
-            return settings.get("HEAVY_MODEL", "deepseek-v4-pro")
-        return settings.get("LIGHT_MODEL", "deepseek-v4-flash") # 默认 Lite 模型
+            return os.getenv("HEAVY_MODEL", "doubao-pro-32k")
+        return os.getenv("LIGHT_MODEL", "doubao-smart") # 默认 Lite 模型
 
     def _extract_last_user_message(self, messages: List[Union[BaseMessage, tuple]]) -> str:
         for msg in reversed(messages):

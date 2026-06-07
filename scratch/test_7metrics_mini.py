@@ -148,7 +148,7 @@ async def run_mini_test():
             labels = ["Success", "Recall", "Precision", "Faithful", "Relevance", "Profess.", "Interpret"]
             for lab, d in zip(labels, dims):
                 v = sc.get(d, 0)
-                bar_char = "█" * int(v) + "░" * (10 - int(v))
+                bar_char = "=" * int(v) + "-" * (10 - int(v))
                 color = "green" if v >= 7 else "yellow" if v >= 5 else "red"
                 score_table.add_row(lab, f"[{color}]{v}/10[/]", f"[{color}]{bar_char}[/]")
 

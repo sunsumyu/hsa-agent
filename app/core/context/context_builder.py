@@ -99,6 +99,10 @@ class ContextBuilder:
         if self.config.enable_compression:
             structured_messages = await self._compress_messages_budget(structured_messages)
 
+        # 5. Pairing Guard (工具调用配对安全网)
+        from app.memory.message_sanitizer import ensure_tool_pairing
+        structured_messages = ensure_tool_pairing(structured_messages)
+
         logger.info(f"✅ [ContextBuilder] GSSC 治理成功！共精选出 {len(selected_packets)} 个黄金上下文信息包。")
         return structured_messages
 
@@ -161,27 +165,19 @@ class ContextBuilder:
                 with open(note_file, "r", encoding="utf-8") as f:
                     note_content = f.read().strip()
                 if note_content:
-                    logger.info("📓 [ContextBuilder] 成功 Gather 外部审计便签线索")
+                    # [V215.0] 为了防止 Token 爆炸和跨任务交叉污染，我们只加载最近的 3 条便签线索
+                    note_parts = [p.strip() for p in note_content.split("---") if p.strip()]
+                    recent_notes = note_parts[-3:] if len(note_parts) > 3 else note_parts
+                    note_content_cleaned = "\n\n---\n\n".join(recent_notes)
+                    
+                    logger.info("📓 [ContextBuilder] 成功 Gather 最近 3 条外部审计便签线索")
                     packets.append(ContextPacket(
-                        content=note_content,
+                        content=note_content_cleaned,
                         relevance_score=1.0,
                         metadata={"type": "note_evidence", "priority": "high"}
                     ))
             except Exception as e:
                 logger.warning(f"读取外部便签失败: {e}")
-
-        # 4. Gather 历史 ReAct 对话轨迹
-        # 时间戳从旧到新排列，旧消息自动在评分中执行指数衰减
-        now = datetime.datetime.now()
-        chat_msgs = [m for m in history if m.type != 'system']
-        for idx, msg in enumerate(chat_msgs):
-            mock_time = now - datetime.timedelta(minutes=10 * (len(chat_msgs) - idx))
-            packets.append(ContextPacket(
-                content=f"{msg.type}: {msg.content}",
-                timestamp=mock_time,
-                relevance_score=0.5,
-                metadata={"type": "react_history", "original_message": msg}
-            ))
 
         return packets
 
@@ -259,10 +255,11 @@ class ContextBuilder:
         return max(0.1, min(1.0, math.exp(-decay_factor * age_hours)))
 
     def _structure_into_messages(self, selected: List[ContextPacket], original_history: List[BaseMessage]) -> List[BaseMessage]:
-        # 分离出 System 消息、聊天历史和事实载荷
+        # 分离出 System 消息和历史聊天记录 (保留消息的原有对象和绝对自然顺序，防止 API 400 校验失效)
         system_msgs = [m for m in original_history if m.type == 'system']
+        chat_msgs = [m for m in original_history if m.type != 'system']
         
-        schemas, memories, histories, notes, alignments = [], [], [], [], []
+        schemas, memories, notes, alignments = [], [], [], []
 
         for p in selected:
             t = p.metadata.get("type")
@@ -272,36 +269,34 @@ class ContextBuilder:
                 memories.append(p.content)
             elif t == "note_evidence":
                 notes.append(p.content)
-            elif t == "react_history":
-                # 重新恢复历史消息对象本身
-                histories.append(p.metadata["original_message"])
             elif t == "semantic_alignment":
                 alignments.append(p.content)
 
         # 构建干净的事实载荷 XML
         xml_payload = "<context_engineering_payload>\n"
         
-        if alignments:
-            for align in alignments:
-                xml_payload += f"  {align}\n"
-        
-        if notes:
-            xml_payload += "  <structured_audit_notes>\n"
-            for note in notes:
-                xml_payload += f"    {note}\n"
-            xml_payload += "  </structured_audit_notes>\n"
-
+        # [V215.1] DDL 物理 Schema 关系到 SQL 编写的生死，必须置于 XML 最前，避免被 Compaction 截断丢失
         if schemas:
             xml_payload += "  <database_schema_context>\n"
             for schema in schemas:
                 xml_payload += f"    {schema}\n"
             xml_payload += "  </database_schema_context>\n"
-            
+
+        if alignments:
+            for align in alignments:
+                xml_payload += f"  {align}\n"
+        
         if memories:
             xml_payload += "  <experiential_context>\n"
             for mem in memories:
                 xml_payload += f"    {mem}\n"
             xml_payload += "  </experiential_context>\n"
+
+        if notes:
+            xml_payload += "  <structured_audit_notes>\n"
+            for note in notes:
+                xml_payload += f"    {note}\n"
+            xml_payload += "  </structured_audit_notes>\n"
             
         xml_payload += "</context_engineering_payload>"
 
@@ -309,10 +304,10 @@ class ContextBuilder:
         final_messages = []
         # 1. 填入初始 System 指令
         final_messages.extend(system_msgs)
-        # 2. 填入精选的历史聊天记录 (保留消息的原有对象)
-        final_messages.extend(histories)
-        # 3. 将 XML 事实载荷物理隔离地注入进消息链尾部
+        # 2. 将 XML 事实载荷物理隔离地注入系统指令后方 (前置载荷)
         final_messages.append(SystemMessage(content=f"【当前审计黄金上下文载荷 (GSSC 动态精选渲染版)】：\n{xml_payload}"))
+        # 3. 填入完整的历史聊天记录 (保证绝对自然顺序留在最尾部)
+        final_messages.extend(chat_msgs)
         
         return final_messages
 
@@ -324,32 +319,81 @@ class ContextBuilder:
 
         logger.warning(f"⚠️ [ContextBuilder] 整合后消息流超限 ({total_tokens} > {self.config.max_tokens})，触发 Model-Driven Compaction 摘要重置！")
         
-        retained = []
-        truncated = []
-        current_sum = 0
-        
-        # 预留一部分 Token 空间给摘要生成 (约 400 tokens)
-        retained_budget = self.config.max_tokens - 400
-        
+        # 区分消息类型
+        system_msgs = []
+        gssc_msg = None
+        chat_msgs = []
+
         for m in messages:
+            if isinstance(m, SystemMessage) and "【当前审计黄金上下文载荷" in m.content:
+                gssc_msg = m
+            elif m.type == 'system':
+                system_msgs.append(m)
+            else:
+                chat_msgs.append(m)
+
+        # 优先保留:
+        # 1. 初始 System 消息
+        # 2. 最新的 10 个聊天记录 (确保 Agent 的即时交互记忆不丢失)
+        keep_recent_count = 10
+        recent_chat_msgs = chat_msgs[-keep_recent_count:] if len(chat_msgs) > keep_recent_count else chat_msgs
+        older_chat_msgs = chat_msgs[:-keep_recent_count] if len(chat_msgs) > keep_recent_count else []
+
+        # 计算已保留消息的 token
+        retained_base = system_msgs + recent_chat_msgs
+        base_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in retained_base)
+
+        # 预算分配 (预留约 400 给摘要生成)
+        budget_for_others = self.config.max_tokens - base_tokens - 400
+        
+        gssc_tokens = ContextPacket.estimate_tokens(gssc_msg.content) if gssc_msg else 0
+
+        retained_others = []
+        truncated = []
+
+        if gssc_msg:
+            if gssc_tokens <= budget_for_others:
+                retained_others.append(gssc_msg)
+                budget_for_others -= gssc_tokens
+            else:
+                # GSSC 载荷太大，物理截断它
+                truncated_gssc = SystemMessage(
+                    content=gssc_msg.content[:4000] + "\n\n[⚠️ GSSC 载荷过长，部分内容已被物理截断]"
+                )
+                retained_others.append(truncated_gssc)
+                budget_for_others = 0
+
+        # 对 older_chat_msgs 进行装载或截断
+        for m in older_chat_msgs:
             m_t = ContextPacket.estimate_tokens(m.content)
-            if current_sum + m_t <= retained_budget:
-                retained.append(m)
-                current_sum += m_t
+            if m_t <= budget_for_others:
+                retained_others.append(m)
+                budget_for_others -= m_t
             else:
                 truncated.append(m)
-                
+
         if not truncated:
-            return messages
+            final_msgs = system_msgs.copy()
+            gssc_added = None
+            for m in retained_others:
+                if m == gssc_msg or "[⚠️ GSSC" in getattr(m, "content", ""):
+                    final_msgs.append(m)
+                    gssc_added = m
+                    break
+            for m in retained_others:
+                if m != gssc_added:
+                    final_msgs.append(m)
+            final_msgs.extend(recent_chat_msgs)
+            return final_msgs
 
         # 收集被截断消息的文本内容进行摘要蒸馏
         truncated_text = "\n".join(f"[{m.type}]: {m.content[:500]}" for m in truncated)
         
-        summary_content = "[⚠️ 事实载荷超出预算，已被物理截断]"
+        summary_content = "[⚠️ 较早的历史事实载荷超出预算，已被物理截断]"
         try:
             from app.core.llm_provider import llm_provider
             summary_prompt = (
-                f"你是一个资深的医保稽核审计专家。以下部分审计线索和对话历史因为 Token 预算超限即将被物理截断。\n"
+                f"你是一个资深的医保稽核审计专家。以下部分较早的审计线索和对话历史因为 Token 预算超限即将被物理截断。\n"
                 f"请你用最精简、凝练的语言（不超过 150 字），总结这段被截断历史中的**核心 SQL 语句、查询表名、核心核查规则及中间结论**，以便智能体恢复审计状态：\n\n"
                 f"【被截断的历史事实】：\n{truncated_text}\n\n"
                 f"请直接给出高保真审计摘要，不要有任何客套话："
@@ -365,8 +409,25 @@ class ContextBuilder:
         except Exception as summary_err:
             logger.warning(f"⚠️ [ContextBuilder] 摘要蒸馏失败，降级为物理截断: {summary_err}")
             # 降级截断处理
-            summary_content = f"[⚠️ 数据超出预算，已被物理降级截断] (截断内容包含: {', '.join(m.type for m in truncated[:3])} 等)"
+            summary_content = f"[⚠️ 较早数据超出预算，已被物理降级截断] (截断内容包含: {', '.join(m.type for m in truncated[:3])} 等)"
 
-        retained.append(SystemMessage(content=summary_content))
-        return retained
+        # 拼装最终结果：
+        # system_msgs -> GSSC (或截断GSSC) -> 摘要 -> 剩下的 older 消息 -> recent_chat_msgs
+        final_msgs = system_msgs.copy()
+        
+        gssc_added = None
+        for m in retained_others:
+            if m == gssc_msg or "[⚠️ GSSC" in getattr(m, "content", ""):
+                final_msgs.append(m)
+                gssc_added = m
+                break
+                
+        final_msgs.append(SystemMessage(content=summary_content))
+        
+        for m in retained_others:
+            if m != gssc_added:
+                final_msgs.append(m)
+                
+        final_msgs.extend(recent_chat_msgs)
+        return final_msgs
 

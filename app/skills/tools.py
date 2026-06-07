@@ -362,8 +362,7 @@ def search_expert_knowledge(query: str) -> str:
     return "\n\n".join(matched)
 
 @tool
-@perf_monitor.time_it("RULE_ENGINE_EXEC")
-async def audit_medical_rule(rule_id: str) -> str:
+async def audit_medical_rule(rule_id: str, extra_filters: Optional[Dict[str, str]] = None) -> str:
     """[V176.0] 加固版规则引擎
     执行预定义的物理违规规则匹配。自动映射语义到物理算子，并异步执行。
     """
@@ -380,10 +379,10 @@ async def audit_medical_rule(rule_id: str) -> str:
     elif "CROSS" in rule_key or "重复住院" in rule_key or "同时住院" in rule_key:
                                                               target_rule = "CROSS_HOSPITAL_OVERLAP"
     elif "REPEAT_BILLING" in rule_key or "重复收费" in rule_key: target_rule = "REPEAT_BILLING_DETECTOR"
-    elif "CONTACT_SHARING" in rule_key or "联系方式" in rule_key: target_rule = "CONTACT_SHARING_DETECTOR"
+    elif "CONTACT_SHARING" in rule_key or "联系方式" in rule_key: target_rule = "CONTACT_SHARING"
     else: target_rule = rule_key
     
-    sql = rule_engine.get_rule_sql(target_rule)
+    sql = rule_engine.get_rule_sql(target_rule, extra_filters=extra_filters)
     if not sql:
         return json.dumps({"report": f"未找到匹配的审计算子: {rule_id}", "evidence_count": 0, "raw_evidence": []})
 
@@ -417,7 +416,6 @@ async def audit_medical_rule(rule_id: str) -> str:
         })
 
 @tool
-@perf_monitor.time_it("ANOMALY_ALGO_EXEC")
 async def run_anomaly_detection(algorithm_id: str, threshold: float = 0.95) -> str:
     """[V176.0] 加固版异常检测
     运行统计学异常检测算法。自动映射语义到物理算子，并异步执行。
@@ -499,7 +497,6 @@ async def query_knowledge_base(query: str, limit: int = 5, expert_mode: bool = F
 # ──────────────────────────────────────────────────────────
 
 @tool
-@perf_monitor.time_it("NEO4J_GRAPH_QUERY")
 async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
     """
     [V59.6] 执行 Neo4j Cypher 查询，用于发现隐蔽的医疗欺诈团伙。
@@ -582,7 +579,6 @@ def expand_medical_codes(intent: str) -> str:
     return "\n\n".join(matched)
 
 @tool
-@perf_monitor.time_it("FEDERATED_SIDELOADER")
 async def federated_graph_sideloader(cypher: str, return_key: str = "") -> Dict[str, Any]:
     """
     [企业级联邦侧载工具] 

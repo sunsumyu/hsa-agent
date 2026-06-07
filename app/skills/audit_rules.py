@@ -23,13 +23,23 @@ class AuditRuleEngine:
             logger.error(f"加载规则库失败: {e}")
         return {}
 
-    def get_rule_sql(self, rule_id: str, table_name: Optional[str] = None, limit: int = 50, extra_filters: Optional[Dict[str, str]] = None) -> str:
-        rule = self.rules.get(rule_id.upper())
-        if not rule:
-            logger.debug(f"算子 {rule_id} 不在规则库")
-            return ""
+    def get_rule_sql(self, rule_id: str, table_name: Optional[str] = None, limit: int = 1000, extra_filters: Optional[Dict[str, str]] = None) -> str:
+        rule_key = rule_id.upper()
+        rule = self.rules.get(rule_key)
         
-        template = rule.get("sql", "")
+        template = ""
+        if rule:
+            template = rule.get("sql", "")
+        else:
+            # [Fallback] 尝试从 rule_registry 中获取 YAML 模板
+            from app.core.registry.rule_registry import rule_registry
+            entry = rule_registry.sql_templates.get(rule_key)
+            if entry:
+                template = entry.sql_template
+            else:
+                logger.debug(f"算子 {rule_id} 不在规则库且在注册表中未找到")
+                return ""
+        
         if not template:
             return ""
 
@@ -57,8 +67,20 @@ class AuditRuleEngine:
         return sql
 
     def _inject_filters(self, sql: str, extra_filters: Dict[str, Any]) -> str:
-        # (Simplified for now, can be expanded to match original complexity)
-        filter_clauses = [f"({k} = '{v}')" for k, v in extra_filters.items()]
+        filter_clauses = []
+        for k, v in extra_filters.items():
+            v_str = str(v).strip()
+            v_upper = v_str.upper()
+            if (v_upper.startswith("LIKE") or 
+                v_str.startswith(">") or 
+                v_str.startswith("<") or 
+                v_str.startswith("=") or 
+                v_str.startswith("!=") or 
+                v_str.startswith("<=") or 
+                v_str.startswith(">=")):
+                filter_clauses.append(f"({k} {v_str})")
+            else:
+                filter_clauses.append(f"({k} = '{v_str}')")
         if filter_clauses:
             combined = " AND ".join(filter_clauses)
             if "WHERE" in sql.upper():

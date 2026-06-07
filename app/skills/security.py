@@ -75,23 +75,20 @@ class SQLGuardian:
         # ── Step 1: 表名白名单校验 (从 SchemaRegistry 读取) ────
         forbidden_tables = {t.lower() for t in schema_registry.get_forbidden_table_names()}
         valid_prefixes = tuple(p.lower() for p in schema_registry.get_valid_prefixes())
+        
+        # 收集所有的 CTE 别名，避免将它们误判为物理幻觉表
+        cte_names = set()
+        for cte in expression.find_all(exp.CTE):
+            if cte.alias:
+                cte_names.add(cte.alias.lower())
+                
         for table in expression.find_all(exp.Table):
             table_name = table.name.lower()
-            if table_name in forbidden_tables or (
-                not any(table_name.startswith(p) for p in valid_prefixes)
-                and table_name not in {"dual"}
-            ):
-                is_cte = False
-                parent = table.parent
-                while parent:
-                    if isinstance(parent, exp.CTE) and parent.alias == table.name:
-                        is_cte = True
-                        break
-                    parent = parent.parent
-                
-                if not is_cte:
-                    logger.error(f"[SECURITY] 发现物理不存在的幻觉表: {table_name}")
-                    raise SecurityViolationError(f"物理拦截：表 `{table_name}` 是虚假幻觉表！请务必使用物理主表。")
+            if table_name in cte_names or table_name in {"dual"}:
+                continue
+            if table_name in forbidden_tables or not any(table_name.startswith(p) for p in valid_prefixes):
+                logger.error(f"[SECURITY] 发现物理不存在的幻觉表: {table_name}")
+                raise SecurityViolationError(f"物理拦截：表 `{table_name}` 是虚假幻觉表！请务必使用物理主表。")
 
         # 3. 结构化指令审计
         allowed_keys = ("select", "with", "show", "describe", "explain")
@@ -167,8 +164,12 @@ class SQLGuardian:
         from app.core.registry.schema_registry import schema_registry
         from app.infra.neo4j_manager import field_kg
         
-        # 1. 提取当前 SQL 涉及的所有物理表
-        tables = [t.name.lower() for t in expression.find_all(exp.Table)]
+        # 1. 提取当前 SQL 涉及的所有物理表 (排除 CTE 临时表)
+        cte_names = set()
+        for cte in expression.find_all(exp.CTE):
+            if cte.alias:
+                cte_names.add(cte.alias.lower())
+        tables = [t.name.lower() for t in expression.find_all(exp.Table) if t.name.lower() not in cte_names]
         
         # 2. 构建针对当前表的“物理真理库”
         physical_columns = set()
@@ -192,7 +193,8 @@ class SQLGuardian:
             "datediff", "ifnull", "arraystringconcat", "groupuniqarray", "multisearchany",
             "substring", "countdistinct", "grouparray", "tostring", "toint64", "coalesce",
             "any", "uniq", "round", "length", "format", "if", "multiif", "greatest", "least",
-            "and", "or", "not", "anonymous", "anonymousaggfunc"
+            "and", "or", "not", "anonymous", "anonymousaggfunc",
+            "row_number", "laginframe", "lead", "lag", "rank", "dense_rank"
         }
 
         for node in expression.walk():
@@ -374,7 +376,7 @@ class SQLGuardian:
             full_sql_upper = str(expression).upper()
             for predicate in expression.find_all((exp.EQ, exp.In, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Between)):
                 pred_str = str(predicate).upper()
-                if "PSN_NO" in pred_str:
+                if "PSN_NO" in pred_str or "SETL_ID" in pred_str:
                     has_index_filter = True
                 if any(tf in pred_str for tf in ["SETL_TIME", "START_DATE", "END_DATE"]):
                     has_time_filter = True

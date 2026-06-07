@@ -41,7 +41,7 @@ class RedisClient:
             self.is_connected = True
             logger.success(f"🚀 [REDIS] 成功连接至 {self.host}:{self.port}")
         except Exception as e:
-            logger.warning(f"⚠️ [REDIS] 连接失败 (可能是未启动服务): {e}。已切换至本地 Mock 模式。")
+            logger.warning(f"⚠️ [REDIS] 连接失败 (可能是未启动服务): {e}。已切换至旁路降级模式（无缓存直通运行）。")
             self.is_connected = False
 
     def set_cache(self, key: str, value: Any, expire_hours: int = 24):

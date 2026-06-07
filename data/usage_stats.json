@@ -1,12 +1,12 @@
 {
-  "today": "2026-05-30",
+  "today": "2026-06-08",
   "daily_usage": {
-    "deepseek-v4-pro": 51133,
-    "deepseek-v4-flash": 10790
+    "doubao-1-5-pro": 1822,
+    "doubao-1-5-lite": 2857
   },
   "daily_requests": {
-    "deepseek-v4-pro": 9,
-    "deepseek-v4-flash": 13
+    "doubao-1-5-pro": 2,
+    "doubao-1-5-lite": 2
   },
   "total_usage": {
     "doubao-pro-32k": 552555,
@@ -27,10 +27,16 @@
     "qwen-plus-1220": 533919,
     "qwen-plus-2025-07-14": 362406,
     "doubao-smart-router": 8860,
-    "deepseek-v4-pro": 153707,
-    "deepseek-v4-flash": 31454
+    "deepseek-v4-pro": 20303020,
+    "deepseek-v4-flash": 1201777,
+    "doubao-1-5-pro": 1822,
+    "doubao-1-5-lite": 2857
   },
   "blacklist_expiry": {},
-  "stability_scores": {},
+  "stability_scores": {
+    "deepseek-v4-pro": 0.8,
+    "deepseek-v3-bailian": 0.0,
+    "doubao-pro-32k": 0.0
+  },
   "last_probe_date": "2026-05-21"
 }

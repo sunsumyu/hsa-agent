@@ -26,8 +26,8 @@ class TokenRoleTracker:
     def patch(self):
         # 拦截 _record_usage_with_budget 以获取 Role 信息
         import app.core.agent_graph
-        self._original_record_usage_with_budget = app.agent_graph._record_usage_with_budget
-        app.agent_graph._record_usage_with_budget = self._intercepted_record_budget
+        self._original_record_usage_with_budget = app.core.agent_graph._record_usage_with_budget
+        app.core.agent_graph._record_usage_with_budget = self._intercepted_record_budget
 
     def _intercepted_record_budget(self, role, response, model_id, prompt=""):
         # 获取内容

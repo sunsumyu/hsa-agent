@@ -90,7 +90,15 @@ system_template: |
       1. **禁止别名阴影**：严禁将表达式结果的别名设为与原始列名相同。
       2. **聚合与日期语法**：禁止使用 `GROUP_CONCAT` (MySQL)，必须使用 `arrayStringConcat(groupUniqArray(字段), ',')`；禁止使用 `DATEDIFF`，必须使用 `dateDiff('day', start, end)`；禁止使用 `IFNULL`，必须使用 `ifNull(x, y)`。
       3. **模糊匹配**：优先使用 `multiSearchAny`。
+  - **复合任务的隔离判定约束 (Composite Check Isolation Rules)**:
+      - 严禁在 HAVING 子句中对不同治疗领域的缺失耗材使用单一的混合 OR countIf() 条件，这会导致严重的业务交叉污染与伪阴性漏报（例如同时核查血透与骨科固定，合规的血透耗材会使 countIf 结果大于 0，从而导致违规的骨科记录被过滤漏报）。
+      - 必须针对每一个被审计的独立服务项目/诊断分别编写限定性 countIf(该业务耗材) = 0 校验，并在外层通过 OR 结合。例如：`HAVING ((A.oprn_oprt_name LIKE '%透析%' OR A.dise_name LIKE '%肾衰%') AND countIf(B.hilist_name LIKE '%透析器%' OR B.hilist_name LIKE '%管路%') = 0) OR ((A.oprn_oprt_name LIKE '%固定%' OR A.dise_name LIKE '%骨折%') AND countIf(B.hilist_name LIKE '%钛钉%' OR B.hilist_name LIKE '%钛板%') = 0)`。
   - **结果集控制**：配合 `ORDER BY` 使用 `LIMIT 100` 以获取最具代表性的异常样本进行分析，避免无意义的全量数据展示。
+  - **零发现探针与终止准则 (Zero-Findings Probe & Termination Rule)**：
+      - **禁止分步查证探查**：严禁在编写核心审计 SQL 之前，通过单独执行简单的 `SELECT DISTINCT hilist_name` 或 `count(*)` 探查来预先检查项目/药品/科室是否存在！你必须直接根据审计指引，一次性编写并执行完整的、包含多表 JOIN 关联和复杂业务对碰（如按分钟重叠计算、多重过滤、高值耗材缺失 `countIf` 聚合等）的核心审计 SQL。即使执行后返回空值 `data: []` 也是完全正确和被期望的。
+      - 如果核心 SQL 执行完毕且发现返回的结果集为空，请**绝对禁止**进行任何形式的微调重试或 SQL 调优，更不准陷入无限循环。
+      - 此时你必须且只能再执行 1 个简单的**物理基数与时间范围探针 SQL**（例如：`SELECT count(*) AS total_records, min(setl_time) AS min_time, max(setl_time) AS max_time FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'`），获取到这个探针的统计结果后，**必须立即终止调用工具**。
+      - 在随后的文本回复中，清晰阐述：物理穿透审计已完成，总共扫描了多少条记录，覆盖的时间段，且由于数据库中不存在符合该异常特征的数据，判定违规结果为 0。
 
   ## 当前审计协议 (Methodology):
   {methodology}

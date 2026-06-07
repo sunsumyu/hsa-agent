@@ -8,7 +8,7 @@ async def test_all_providers():
     for role in roles:
         print(f"\n--- Testing Role: {role} ---")
         try:
-            llm, model_name = model_manager.get_llm_by_role(role)
+            llm, model_name = await model_manager.get_llm_by_role(role)
             print(f"Selected Primary: {model_name}")
             
             # 尝试发送一个极简请求

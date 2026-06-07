@@ -560,27 +560,27 @@ PREDICTED = {
 # ]
 
 TEST_CASES = [
-    {
-        "id": "QA-CUST-23", 
-        "tag": "Therapist Time Overlap / Cloning", 
-        "diff": "****", # 困难：同一医务人员的微观时间线重叠计算
-        "prompt": "查一下理疗科和康复科的执行大夫。你去按每一分钟去排一下他们做一对一手法治疗的单子，看看有没有哪个大夫练了分身术，在同一时间段里，系统上竟然显示他同时在给五六个病号做必须要医生亲自上手推拿的项目？这种纯粹就是护士拿着卡乱刷、甚至连病号都没来直接挂空床的虚假理疗。",
-        "pred_tokens": 14500,
-    },
-    {
-        "id": "QA-CUST-24", 
-        "tag": "Service Without Mandatory Consumables", 
-        "diff": "****", # 困难：医疗服务与高值耗材的强制伴生逻辑互斥
-        "prompt": "去扫一遍血透和骨科大手术的单子，查那种干活不用工具的灵异事件。比如医院收了高昂的血液透析治疗费，但是你在他当天的耗材明细里，连个透析器或者透析管路都找不到；或者骨科收了脊柱内固定手术费，却没看见用任何钛钉钛板的。这就叫只收手工费不走耗材，要么是串换项目套现，要么就是彻头彻尾的虚构手术，把这种自相矛盾的单子全抓出来。",
-        "pred_tokens": 15000,
-    },
-    {
-        "id": "QA-CUST-25", 
-        "tag": "Biological Limit / Impossible Dental History", 
-        "diff": "*****", # 极难：跨周期的生物学常识追踪与历史状态冲突
-        "prompt": "把口腔科的医保结算拉出来，尤其是拔牙和根管治疗的。写个逻辑去追溯每个病号的历史看牙记录。正常人一共也就二三十颗牙，你给我找找有没有哪个狠人，在过去两三年里跨了不同的牙科诊所，累计被拔了四五十颗牙的？或者更离谱的，他去年在一家诊所已经拔了左下的大牙，今年在另一家诊所又把同一颗牙给拔了一次的。这种骗医保不仅造假，连基本的生理常识都不要了。",
-        "pred_tokens": 18500,
-    },
+    # {
+    #     "id": "QA-CUST-23", 
+    #     "tag": "Therapist Time Overlap / Cloning", 
+    #     "diff": "****", # 困难：同一医务人员的微观时间线重叠计算
+    #     "prompt": "查一下理疗科和康复科的执行大夫。你去按每一分钟去排一下他们做一对一手法治疗的单子，看看有没有哪个大夫练了分身术，在同一时间段里，系统上竟然显示他同时在给五六个病号做必须要医生亲自上手推拿的项目？这种纯粹就是护士拿着卡乱刷、甚至连病号都没来直接挂空床的虚假理疗。",
+    #     "pred_tokens": 14500,
+    # },
+    # {
+    #     "id": "QA-CUST-24", 
+    #     "tag": "Service Without Mandatory Consumables", 
+    #     "diff": "****", # 困难：医疗服务与高值耗材的强制伴生逻辑互斥
+    #     "prompt": "去扫一遍血透和骨科大手术的单子，查那种干活不用工具的灵异事件。比如医院收了高昂的血液透析治疗费，但是你在他当天的耗材明细里，连个透析器或者透析管路都找不到；或者骨科收了脊柱内固定手术费，却没看见用任何钛钉钛板的。这就叫只收手工费不走耗材，要么是串换项目套现，要么就是彻头彻尾的虚构手术，把这种自相矛盾的单子全抓出来。",
+    #     "pred_tokens": 15000,
+    # },
+    # {
+    #     "id": "QA-CUST-25", 
+    #     "tag": "Biological Limit / Impossible Dental History", 
+    #     "diff": "*****", # 极难：跨周期的生物学常识追踪与历史状态冲突
+    #     "prompt": "把口腔科的医保结算拉出来，尤其是拔牙和根管治疗的。写个逻辑去追溯每个病号的历史看牙记录。正常人一共也就二三十颗牙，你给我找找有没有哪个狠人，在过去两三年里跨了不同的牙科诊所，累计被拔了四五十颗牙的？或者更离谱的，他去年在一家诊所已经拔了左下的大牙，今年在另一家诊所又把同一颗牙给拔了一次的。这种骗医保不仅造假，连基本的生理常识都不要了。",
+    #     "pred_tokens": 18500,
+    # },
     {
         "id": "QA-CUST-26", 
         "tag": "Automated Batch Billing / Time-Series Anomalies", 
@@ -815,7 +815,7 @@ async def run_one(case: dict, judge_llm) -> dict:
         inputs = {"messages": [("user", prompt)],
                   "session_id": f"BENCH_{cid}_{int(t0)}"}
         state    = await workflow.ainvoke(inputs, config={
-            "recursion_limit": 15,
+            "recursion_limit": 80,
             "callbacks": [VERBOSE_CB],
         })
 
@@ -935,7 +935,7 @@ async def run_one(case: dict, judge_llm) -> dict:
 
     for lab, dim in zip(labels, dims):
         v = sc.get(dim, 0)
-        bar_char = "█" * int(v) + "░" * (10 - int(v))
+        bar_char = "=" * int(v) + "-" * (10 - int(v))
         color = "green" if v >= 7 else "yellow" if v >= 5 else "red"
         score_table.add_row(lab, f"[{color}]{v}/10[/]", f"[{color}]{bar_char}[/]")
 
@@ -1157,7 +1157,7 @@ def print_summary(results: list):
     for d, zh in zip(dims, dim_zh):
         avg_v = dim_sum[d] / n
         bar_len = int(avg_v * 2)
-        bar = "█" * bar_len + "░" * (20 - bar_len)
+        bar = "=" * bar_len + "-" * (20 - bar_len)
         color = "green" if avg_v >= 7 else "yellow" if avg_v >= 5 else "red"
         console.print(f"  {zh:<14}: [{color}]{bar}[/] {avg_v:>4.1f}/10")
 

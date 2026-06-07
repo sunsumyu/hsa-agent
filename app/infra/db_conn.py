@@ -139,6 +139,7 @@ def get_clickhouse_client():
 
     # ── [V110.6] 物理自愈：优先使用 Native 协议（Port 9000） ──────────────────
     client = None
+    readonly_val = 0 if _os.getenv("HSA_DB_READWRITE") == "true" else 1
     
     # 路径 1: Native 协议 (Port 9000) - 经测试在该环境最稳定，避开 8123 端口冲突
     try:
@@ -151,7 +152,7 @@ def get_clickhouse_client():
                 import clickhouse_driver
                 client = clickhouse_driver.Client(
                     host=host, port=9000, user=user, password=password, database=database,
-                    connect_timeout=3, send_receive_timeout=5, settings={"readonly": 1}
+                    connect_timeout=3, send_receive_timeout=5, settings={"readonly": readonly_val}
                 )
                 client.execute("SELECT 1")
                 logger.success("✅ [DB_CONN] 路径 1 (Native 9000) 连接成功！")
@@ -161,7 +162,7 @@ def get_clickhouse_client():
     except Exception as e1:
         logger.warning(f"⚠️ [DB_CONN] 路径 1 (Native) 失败: {e1}")
         client = None
-
+ 
     # 路径 2: 探测 WSL IP (HTTP 8123)
     if not client:
         try:
@@ -174,27 +175,27 @@ def get_clickhouse_client():
                     logger.info(f"🔗 [DB_CONN] 尝试连接 WSL IP: {wsl_ip}")
                     client = clickhouse_connect.get_client(
                         host=wsl_ip, port=8123, username=user, password=password, database=database,
-                        connect_timeout=3, settings={"readonly": 1}
+                        connect_timeout=3, settings={"readonly": readonly_val}
                     )
                     logger.success(f"✅ [DB_CONN] 路径 2 ({wsl_ip}) 连接成功！")
                     break
                 except Exception: continue
         except Exception as e_wsl:
             logger.warning(f"⚠️ [DB_CONN] 路径 2 (WSL IP) 探测失败: {e_wsl}")
-
+ 
     # 路径 3: 标准 localhost (HTTP 8123)
     if not client:
         try:
             logger.info(f"🔌 [DB_CONN] 路径 3: localhost:8123 (HTTP)...")
             client = clickhouse_connect.get_client(
                 host='localhost', port=8123, username=user, password=password, database=database,
-                connect_timeout=3, settings={"readonly": 1}
+                connect_timeout=3, settings={"readonly": readonly_val}
             )
             client.query("SELECT 1")
             logger.success("✅ [DB_CONN] 路径 3 连接成功！")
         except Exception as e3:
             logger.error(f"❌ [DB_CONN] 所有路径均告失败。最后报错: {e3}")
             raise RuntimeError(f"无法建立 ClickHouse 连接。请检查服务是否开启。")
-
+ 
     _CK_GLOBAL_CLIENT = CharsetProxy(client)
     return _CK_GLOBAL_CLIENT

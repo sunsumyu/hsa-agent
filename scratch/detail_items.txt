@@ -1,0 +1,5 @@
+=== Unique items in fqz_fymx_test ===
+Total unique item names: 3
+  - '阿莫西林胶囊': 18 times, sumamt: 558.0
+  - '牙齿拔除术': 1 times, sumamt: 1350.0
+  - '一级护理费': 1 times, sumamt: 200.0

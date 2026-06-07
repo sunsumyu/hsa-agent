@@ -122,10 +122,12 @@ def remove_noise(messages: List[Any]) -> List[Any]:
         msg_type = getattr(m, "type", m.__class__.__name__).lower()
         content = str(getattr(m, "content", "") or "").strip()
 
-        # 空内容 AI 且无 tool_calls → 丢弃
-        if msg_type == "ai":
-            has_tc = bool(getattr(m, "tool_calls", None))
-            if not content and not has_tc:
+        # 空内容 AI 且无 tool_calls → 丢弃；有 tool_calls ── 保留 (防止工具调用声明丢失)
+        if msg_type in ("ai", "assistant", "aimessagechunk"):
+            has_tc = bool(getattr(m, "tool_calls", None)) or bool((getattr(m, "additional_kwargs", {}) or {}).get("tool_calls", []))
+            if not content:
+                if has_tc:
+                    clean.append(m)
                 continue
 
         # ToolMessage 不按内容过滤（即使短内容也有协议意义）
@@ -194,13 +196,14 @@ def dedup_messages(messages: List[Any]) -> List[Any]:
         elif msg_type == "ai":
             tc = getattr(m, "tool_calls", None) or []
             if tc:
-                # 带 tool_calls 的 AI 按调用签名去重
-                key = str(sorted(c.get("name", "") for c in tc))
+                # [Fix] AIMessage with tool_calls represents execution steps and must not be deduplicated,
+                # otherwise subsequent ToolMessages will be orphaned and discarded, causing infinite loop.
+                pass
             else:
                 key = content[:300].strip()
-            if key in seen_ai:
-                continue
-            seen_ai.add(key)
+                if key in seen_ai:
+                    continue
+                seen_ai.add(key)
 
         elif msg_type == "tool":
             tid = getattr(m, "tool_call_id", None)
@@ -299,13 +302,13 @@ def ensure_tool_pairing(messages: List[Any]) -> List[Any]:
     本函数在所有裁剪/去重/降级之后执行，作为最终安全网：
         1. 收集所有 AIMessage 中声明的 tool_call_id
         2. 移除任何找不到对应 tool_call_id 的孤儿 ToolMessage
-        3. 移除所有 tool_calls 对应的 ToolMessage 都被移除的空壳 AIMessage
+        3. 移除/修正所有 tool_calls 对应的 ToolMessage 被移除的 AIMessage 中的 tool_calls 声明
     """
     # Pass 1: 收集所有 AI 消息声明的 tool_call_id → set
     declared_ids: set = set()
     for m in messages:
         msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type == "ai":
+        if msg_type in ("ai", "aimessagechunk", "assistant"):
             for tc in getattr(m, "tool_calls", []) or []:
                 tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
                 if tid:
@@ -316,7 +319,7 @@ def ensure_tool_pairing(messages: List[Any]) -> List[Any]:
     result = []
     for m in messages:
         msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type == "tool":
+        if msg_type in ("tool", "toolmessagechunk", "toolmessage"):
             tid = getattr(m, "tool_call_id", None)
             if tid and tid not in declared_ids:
                 # 孤儿 ToolMessage：前方无对应 AI tool_calls → 丢弃
@@ -325,20 +328,42 @@ def ensure_tool_pairing(messages: List[Any]) -> List[Any]:
                 present_tool_ids.add(tid)
         result.append(m)
 
-    # Pass 3: 清理空壳 AI — 如果 AI 只有 tool_calls 但所有对应 ToolMessage 都不存在
+    # Pass 3: 修正 AI 消息中的 tool_calls 声明并清理空壳 AI — 如果 AI tool_calls 的对应 ToolMessage 都不存在
     final = []
     for m in result:
         msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type == "ai":
+        if msg_type in ("ai", "aimessagechunk", "assistant"):
             tc_list = getattr(m, "tool_calls", []) or []
             if tc_list:
-                # 检查是否至少有一个 tool_call 的响应存在
-                has_any_response = any(
-                    (tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)) in present_tool_ids
-                    for tc in tc_list
-                )
+                # 仅保留对应的 ToolMessage 实际存在的 tool_calls
+                valid_tc = []
+                for tc in tc_list:
+                    tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                    if tid in present_tool_ids:
+                        valid_tc.append(tc)
+                
+                # 如果有 tool_calls 被丢弃（例如在 trim_overflow 中被裁剪），重新构造全新、干净的 AIMessage
+                if len(valid_tc) != len(tc_list):
+                    from langchain_core.messages import AIMessage as _AM
+                    new_additional_kwargs = m.additional_kwargs.copy() if hasattr(m, "additional_kwargs") and m.additional_kwargs else {}
+                    # 移除 additional_kwargs 中的 tool_calls 声明以防 API 混淆
+                    if "tool_calls" in new_additional_kwargs:
+                        new_additional_kwargs.pop("tool_calls")
+                    
+                    new_kwargs = {
+                        "content": m.content,
+                        "additional_kwargs": new_additional_kwargs,
+                        "response_metadata": m.response_metadata.copy() if hasattr(m, "response_metadata") and m.response_metadata else {},
+                        "tool_calls": valid_tc
+                    }
+                    if hasattr(m, "id"):
+                        new_kwargs["id"] = m.id
+                    
+                    # 重新构造为普通 AIMessage (抛弃所有 AIMessageChunk 的流式字段和 frozen 属性)
+                    m = _AM(**new_kwargs)
+
                 content = str(getattr(m, "content", "") or "").strip()
-                if not has_any_response and not content:
+                if not getattr(m, "tool_calls", []) and not content:
                     # 空壳 AI：只有 tool_calls 但无任何响应也无文本内容 → 丢弃
                     continue
         final.append(m)
@@ -383,7 +408,7 @@ def trim_and_sanitize(
 
     combined = remove_noise(combined)
     combined = dedup_messages(combined)
-    combined = compress_tool_content(combined, max_len=2000)
+    # [V134.0 Bypass] Skip compressing tool content to preserve tool_call_ids and raw evidence 100% intact.
     combined = sanitize_for_thinking_mode(combined, ai_label_prefix=ai_label_prefix)
     combined = trim_overflow(combined, max_total=max_total, keep_head=keep_head, keep_tail=keep_tail)
     combined = ensure_tool_pairing(combined)

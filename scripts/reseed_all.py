@@ -10,6 +10,8 @@ from app.infra.db_conn import get_clickhouse_client
 from scripts.sync_to_neo4j import sync_clickhouse_to_neo4j
 
 def reseed_all_databases():
+    import os
+    os.environ["HSA_DB_READWRITE"] = "true"
     logger.info("🎬 开始执行本地测试库图节点自愈与同步装载...")
     
     # 1. 读取 Schema 缓存
