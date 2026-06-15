@@ -587,6 +587,11 @@ TEST_CASES = [
         "diff": "*****", # 极难：微秒级时间戳分布探测与机器行为识别
         "prompt": "查查乡镇卫生院和村卫生室的门诊统筹刷单。你去把每天的结算流水按时间戳精细排个序，看有没有这种极端诡异的现象：连续十几个不同的病号，他们不仅开出来的药或者理疗项目一模一样，而且相互之间结算的时间精准地只隔了三五秒钟，就像是用机器脚本在批量扫码一样。这绝对是村医大半夜把全村的医保卡收集起来，放在刷卡机上集中流水线套现的团伙作案。",
         "pred_tokens": 19000,
+        "ground_truth": {
+            "expected_findings_min": 2,
+            "expected_tables": ["fqz_fymx_test"],
+            "expected_institutions": ["庙塘", "哲觉"],
+        },
     },
 ]
 
@@ -824,8 +829,13 @@ async def run_one(case: dict, judge_llm) -> dict:
         if msgs:
             last = msgs[-1]
             report_text = last[1] if isinstance(last, tuple) else getattr(last, "content", str(last))
+        # Extract SQL history and raw data for ground-truth validation
+        agent_sql_history = state.get("sql_history", [])
+        agent_raw_data = str(state.get("raw_data", ""))
     except Exception as ex:
         report_text = f"(Agent error: {ex})"
+        agent_sql_history = []
+        agent_raw_data = ""
         logger.error(f"[{cid}] Agent error: {ex}")
 
     # 真实墙钟总耗时（含工具调用、调度开销、SQL 执行等）
@@ -941,6 +951,47 @@ async def run_one(case: dict, judge_llm) -> dict:
 
     tot_score = eval_res.get('total', 'N/A')
     advice_text = str(eval_res.get('advice',''))
+
+    # ── Ground-Truth Gate: 硬性校验 agent 是否真正查到违规 ──
+    gt = case.get("ground_truth", {})
+    if gt:
+        gt_failures = []
+        all_sql = " ".join(agent_sql_history).lower() + " " + agent_raw_data.lower()
+        report_lower = report_text.lower()
+
+        # G1: 检查是否查询了正确的表
+        for req_table in gt.get("expected_tables", []):
+            if req_table.lower() not in all_sql:
+                gt_failures.append(f"核心SQL未查询必要表: {req_table}")
+
+        # G2: 检查报告是否包含预期的机构名（违规证据）
+        for inst in gt.get("expected_institutions", []):
+            if inst not in report_text:
+                gt_failures.append(f"报告未包含预期违规机构: {inst}")
+
+        # G3: 如果有最低发现数要求，检查 raw_data 是否非空
+        if gt.get("expected_findings_min", 0) > 0:
+            if not agent_raw_data or agent_raw_data.strip() in ("", "[]", "None"):
+                gt_failures.append("未检索到任何违规数据(raw_data为空)")
+
+        if gt_failures:
+            # Ground-truth 不通过时，强制降分
+            sc["success"] = min(sc.get("success", 0), 3)
+            sc["recall"] = min(sc.get("recall", 0), 2)
+            sc["faithfulness"] = min(sc.get("faithfulness", 0), 3)
+            advice_text += "\n\n[GROUND-TRUTH FAIL] " + "; ".join(gt_failures)
+            console.print(Panel(
+                f"[bold red]GROUND-TRUTH VALIDATION FAILED[/]\n" +
+                "\n".join(f"  - {f}" for f in gt_failures),
+                title=f"[bold red]Ground-Truth Gate [{cid}][/]",
+                border_style="red"
+            ))
+        else:
+            console.print(Panel(
+                "[bold green]All ground-truth checks passed[/]",
+                title=f"[bold green]Ground-Truth Gate [{cid}][/]",
+                border_style="green"
+            ))
 
     # 从 node_times 中提取各节点汇总时间用于展示
     _node_breakdown = "  ".join(

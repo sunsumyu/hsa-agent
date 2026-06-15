@@ -178,3 +178,32 @@ res2 = client2.query(sql2)
 print("列名:", res2.column_names)
 for r in res2.result_rows:
     print(" ", r)
+
+# ── 数据完整性硬校验 ──
+print("\n=== 数据完整性硬校验 ===")
+verify_sql = """
+SELECT count() FROM default.fqz_fymx_test
+WHERE fixmedins_name LIKE '%庙塘%' OR fixmedins_name LIKE '%哲觉%'
+"""
+verify_res = client2.query(verify_sql)
+mock_count = verify_res.result_rows[0][0]
+print(f"Mock rows found: {mock_count}")
+assert mock_count == 22, f"Expected 22 mock rows (12+10), got {mock_count}"
+print("PASS: 22 mock rows verified")
+
+# Verify both institutions have time-series patterns
+pattern_sql = f"""
+SELECT
+    trim(fixmedins_name) AS inst,
+    count(DISTINCT trim(psn_no)) AS patients,
+    dateDiff('second', min({FIX_DT}), max({FIX_DT})) AS span
+FROM default.fqz_fymx_test
+WHERE fixmedins_name LIKE '%庙塘%' OR fixmedins_name LIKE '%哲觉%'
+GROUP BY inst
+ORDER BY patients DESC
+"""
+pattern_res = client2.query(pattern_sql)
+for row in pattern_res.result_rows:
+    print(f"  {row[0].strip()}: {row[1]} patients in {row[2]}s")
+assert len(pattern_res.result_rows) == 2, "Expected exactly 2 violation groups"
+print("PASS: 2 violation groups verified")

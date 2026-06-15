@@ -116,8 +116,23 @@ async def _execute_audit_sql_logic(
                 result = await _run_sql(safe_sql)
             except SqlExecError as first_err:
                 err_str = str(first_err)
+                # [V1.0] Code 6 自愈：setl_time 带 \t 导致 toDateTime 解析失败
+                if "Code: 6" in err_str and "CANNOT_PARSE_TEXT" in err_str:
+                    healed = _heal_timestamp_tab(safe_sql)
+                    if healed != safe_sql:
+                        try:
+                            result = await _run_sql(healed)
+                            safe_sql = healed
+                            logger.info("[SQL_HEALER] 时间戳 \t 自愈成功，重试通过")
+                        except SqlExecError as retry_err:
+                            final_err = str(retry_err)
+                            logger.error(f"[SQL_EXEC_ERROR] 时间戳自愈后仍失败: {final_err}")
+                            return {"status": "ERROR", "error_message": final_err, "sql_logic": healed}
+                    else:
+                        logger.error(f"[SQL_EXEC_ERROR] {err_str}")
+                        return {"status": "ERROR", "error_message": err_str, "sql_logic": safe_sql}
                 # [V131.0] Code 215 自愈：一次自动修复 + 重试
-                if "Code: 215" in err_str:
+                elif "Code: 215" in err_str:
                     healed = _heal_group_by_215(safe_sql, err_str)
                     if healed != safe_sql:
                         try:
@@ -143,7 +158,6 @@ async def _execute_audit_sql_logic(
                         }
                     logger.error(f"[SQL_EXEC_ERROR] {err_str}")
                     return {"status": "ERROR", "error_message": err_str, "sql_logic": safe_sql}
-
             if return_raw:
                 return _sanitize_results(result, tolerance=tolerance)
             
@@ -197,6 +211,23 @@ def _heal_group_by_215(sql_text: str, err_str: str) -> str:
 
     logger.info(f"✅ [SQL_HEALER] SQL 已自愈，重试中…")
     return new_sql
+
+def _heal_timestamp_tab(sql_text: str) -> str:
+    """
+    Code 6 CANNOT_PARSE_TEXT 自愈器：
+    fqz_fymx_test 的 setl_time 是 String 类型且尾部带 \\t，
+    裸 toDateTime(col) 会报 CANNOT_PARSE_TEXT。
+    自动将 toDateTime(col) 替换为 toDateTime(substring(trim(col),1,19))。
+    """
+    pattern = r'toDateTime\(\s*((?!substring|trim\s*\()[A-Za-z_][\w.]*)\s*\)'
+    healed = re.sub(
+        pattern,
+        lambda m: f'toDateTime(substring(trim({m.group(1)}),1,19))',
+        sql_text, flags=re.IGNORECASE
+    )
+    if healed != sql_text:
+        logger.warning(f"🔧 [SQL_HEALER] 检测到裸 toDateTime(col)，注入 \\t 清洗包装")
+    return healed
 
 # ──────────────────────────────────────────────────────────
 # 暴露给 Agent 的工具集 (Decorated Tools)

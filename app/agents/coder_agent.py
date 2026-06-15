@@ -165,41 +165,22 @@ class AuditCoderAgent:
         # 1. 拔牙/种植牙
         if any(kw in q_lower for kw in ["牙", "拔牙", "口腔", "牙体"]):
             scenario_guidelines = (
-                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 口腔科拔牙核查】\n"
-                "1. 你**必须**使用正确的拔牙或牙科诊疗项目进行过滤，例如 `replace(B.hilist_name, '\\t', '') LIKE '%拔牙%' OR replace(B.hilist_name, '\\t', '') LIKE '%牙齿提取%'`。\n"
-                "2. 你**必须**编写按患者 `A.psn_no` 进行分组聚合的 SQL，统计每位患者累计被拔牙的次数（如 `SUM(B.cnt) as total_extractions` 或 `count() as total_extractions`），并筛选出总数 > 32 颗的异常记录（`HAVING total_extractions > 32`）。\n"
-                "3. 另外，还要编写检查‘同一参保人在不同结算中出现同一颗牙多次被拔除’的 SQL：通过患者 `A.psn_no` 与项目名称进行过滤或自连接，以检测重复拔除违规！\n"
-                "4. 务必使用 `replace(..., '\\t', '')` 清除可能存在的隐藏制表符以保证准确对碰。"
-            )
-        # 2. 血液透析与骨科手术高值耗材缺失
-        elif any(kw in q_lower for kw in ["不用工具", "耗材", "匹配", "配对", "钛板", "钛钉", "耗材缺失"]):
-            scenario_guidelines = (
-                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 有服务无耗材核查】\n"
-                "1. 你的 SQL **必须**将结算表 `fqz_gz_jzsj_all_ql` 与费用明细表 `fqz_fymx_test` 进行左连接 (`LEFT JOIN`)，以 `A.setl_id = B.setl_id` 为关联键。\n"
-                "2. 你**必须**过滤出相关的诊疗项目（如 `replace(A.oprn_oprt_name, '\\t', '') LIKE '%透析%' OR replace(A.oprn_oprt_name, '\\t', '') LIKE '%固定%'` 或 `replace(A.dise_name, '\\t', '') LIKE '%肾衰%' OR replace(A.dise_name, '\\t', '') LIKE '%骨折%'`）。\n"
-                "3. 你**必须**使用 `GROUP BY A.setl_id, A.psn_no, A.oprn_oprt_name, A.dise_name` 并利用隔离判定聚合条件：`HAVING ((replace(A.oprn_oprt_name, '\\t', '') LIKE '%透析%' OR replace(A.dise_name, '\\t', '') LIKE '%肾衰%') AND countIf(replace(B.hilist_name, '\\t', '') LIKE '%透析器%' OR replace(B.hilist_name, '\\t', '') LIKE '%管路%') = 0) OR ((replace(A.oprn_oprt_name, '\\t', '') LIKE '%固定%' OR replace(A.dise_name, '\\t', '') LIKE '%骨折%') AND countIf(replace(B.hilist_name, '\\t', '') LIKE '%钛钉%' OR replace(B.hilist_name, '\\t', '') LIKE '%钛板%') = 0)` 来筛选违规单子！这能防止不同医疗场景（血透与骨科固定）的耗材交叉污染。绝对禁止将两个场景的耗材混合在一个 countIf() 中判断！\n"
-                "4. 务必使用 `replace(..., '\\t', '')` 清洗所有涉及的字符串字段，防止制表符导致匹配失败。"
-            )
-        # 3. 理疗/手法治疗时间冲突
-        elif any(kw in q_lower for kw in ["理疗", "手法", "康复", "按摩", "推拿"]):
-            scenario_guidelines = (
-                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 理疗手法时间冲突核查】\n"
-                "1. 你**必须**将结算主表 `fqz_gz_jzsj_all_ql` 与费用明细表 `fqz_fymx_test` 按照 `setl_id` 进行关联 (JOIN)。\n"
-                "2. 你**必须**使用明细表中的 `hilist_name` 过滤出手法康复项目（例如 `replace(B.hilist_name, '\\t', '') LIKE '%推拿%' OR replace(B.hilist_name, '\\t', '') LIKE '%手法%' OR replace(B.hilist_name, '\\t', '') LIKE '%按摩%'`）。\n"
-                "3. 你的 SQL **必须**真正执行按分钟粒度的时间重叠对碰，即以主表中的执行医生（`A.chfpdr_name`）与明细表中的费用执行时间（`B.fee_ocur_time`）进行分组聚合 `GROUP BY A.chfpdr_name, B.fee_ocur_time`。在聚合筛选时，你**必须动态提取并使用用户提示中指定的病号数量阈值**（例如，如果用户提问要求“同时在给五六个病号做”，说明阈值是5，则你必须使用 `HAVING count(distinct A.psn_no) >= 5`；若用户未指定具体数量，则默认为 `HAVING count(distinct A.psn_no) > 1`），绝对禁止无视用户指定的具体阈值！\n"
-                "4. 注意：在进行字符串比较或关联时，务必使用 `trim(BOTH '\\t ' FROM B.fee_ocur_time)` 或 `replace(..., '\\t', '')` 来清除可能存在的隐藏制表符！"
-            )
-        # 4. 批量快速刷卡/时序异常
-        elif any(kw in q_lower for kw in ["批量", "连续", "快速", "秒", "时序异常", "刷卡"]):
-            scenario_guidelines = (
                 "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 连续批量快速刷卡核查】\n"
-                "1. 你**必须**将明细表 `fqz_fymx_test` 与结算主表 `fqz_gz_jzsj_all_ql` 进行关联，获取就诊时间 (`setl_time`) 或费用执行时间 (`fee_ocur_time`)。\n"
-                "2. 任务要求识别‘连续十几个不同的病号且开出的项目一模一样、结算时间差在3-5秒之内’的违规行为。你的 SQL **必须**：\n"
-                "   a) 先对每次就诊结算的项目进行聚合，将同一 `setl_id` 的所有收费项目汇总为数组（如 `groupArray(replace(B.hilist_name, '\\t', '')) as item_list`），并计算总金额；\n"
-                "   b) 使用窗口函数（如 `LAG(A.setl_time) OVER (PARTITION BY A.fixmedins_code ORDER BY A.setl_time) as prev_time`）计算同家网点相邻两次结算的时间差（秒数）；\n"
-                "   c) 使用窗口函数（如 `LAG(item_list) OVER (PARTITION BY A.fixmedins_code ORDER BY A.setl_time) as prev_items`）比对相邻两次结算的项目列表是否完全一致；\n"
-                "   d) 筛选出时间差 <= 5 秒且项目完全一致的连续刷单记录！绝对不能只简单比对金额！\n"
-                "3. 务必使用 `replace(..., '\\t', '')` 清理所有字段，防止制表符破坏数组相等性判断。"
+                "1. 你**必须直接查 `fqz_fymx_test`**，严禁 JOIN `fqz_gz_jzsj_all_ql`（两表 setl_id 完全不重叠，JOIN 会导致数据丢失）。\n"
+                "2. `fqz_fymx_test.setl_time` 是 String 类型且尾部带 `\\t`，**必须**用 "
+                "`toDateTime(substring(trim(setl_time),1,19))` 转换，严禁直接 `toDateTime(setl_time)`。\n"
+                "3. 任务要求识别'连续十几个不同的病号且开出的项目一模一样、结算时间差在3-5秒之内'的违规行为。标准 SQL 模式（直接复用）：\n"
+                "   SELECT toDate(toDateTime(substring(trim(setl_time),1,19))) AS setl_date,\n"
+                "          trim(fixmedins_name) AS inst, trim(hilist_name) AS item,\n"
+                "          count(DISTINCT trim(psn_no)) AS patient_count,\n"
+                "          dateDiff('second', min(toDateTime(substring(trim(setl_time),1,19))),\n"
+                "                            max(toDateTime(substring(trim(setl_time),1,19)))) AS span_sec\n"
+                "   FROM default.fqz_fymx_test\n"
+                "   WHERE trim(fixmedins_name) LIKE '%卫生%'\n"
+                "   GROUP BY setl_date, inst, item\n"
+                "   HAVING patient_count >= 5 AND span_sec <= 300\n"
+                "   ORDER BY patient_count DESC LIMIT 50\n"
+                "4. 务必使用 `trim(...)` 清理所有字符串字段（机构名、项目名、患者号），防止制表符破坏匹配。"
             )
 
         zero_findings_rule = (

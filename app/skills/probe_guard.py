@@ -10,6 +10,7 @@ The agent must bypass probes and go straight to the real audit SQL.
 
 from typing import List
 from loguru import logger
+import re
 
 # Statistical analysis whitelist: SQL containing these keywords is legitimate
 # business analysis and should NEVER be classified as a probe
@@ -59,8 +60,13 @@ def is_probe_query(sql: str) -> bool:
 
     # 3. Dictionary/DISTINCT lookups (item names, drug codes, etc.)
     if "DISTINCT" in sql_upper and "JOIN" not in sql_upper:
-        if any(x in sql_upper for x in ["HILIST_NAME", "HILIST_CODE", "OPRN_OPRT_NAME", "DISE_NAME", "MED_TYPE", "ADM_DEPT_NAME", "DSCG_DEPT_NAME", "CHFPDR_NAME"]):
-            return True
+        # Only classify as probe when DISTINCT is a standalone SELECT clause
+        # (dictionary lookup), not when inside count(DISTINCT ...) aggregates
+        has_groupby = "GROUP BY" in sql_upper or "HAVING" in sql_upper
+        is_distinct_aggregate = bool(re.search(r'count\s*\(\s*distinct', sql_upper))
+        if not has_groupby and not is_distinct_aggregate:
+            if any(x in sql_upper for x in ["HILIST_NAME", "HILIST_CODE", "OPRN_OPRT_NAME", "DISE_NAME", "MED_TYPE", "ADM_DEPT_NAME", "DSCG_DEPT_NAME", "CHFPDR_NAME"]):
+                return True
 
     # 4. Short, no-JOIN queries without analytical constructs
     if "JOIN" not in sql_upper and len(sql) < 500:
