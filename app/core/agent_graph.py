@@ -1,6 +1,6 @@
 import operator
 import re
-from typing import Annotated, Sequence, TypedDict, Dict, List, Any, Optional
+from typing import Annotated, Dict, List, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
@@ -9,15 +9,14 @@ import asyncio
 import sys
 
 from app.core.state import (
-    AuditState as _LayeredAuditState,
-    AuditFinding as _LayeredAuditFinding,
-    AuditReport as _LayeredAuditReport,
-    AuditFeedback as _LayeredAuditFeedback,
+    AuditState,
+    AuditFinding,
+    AuditReport,
+    AuditFeedback,
 )
 from app.core.registry.schema_registry import schema_registry
 from app.core.prompts import CODER_PROMPT
 from app.skills.security import SQLGuardian, SecurityViolationError
-from app.memory.message_sanitizer import trim_and_sanitize
 from app.reporting.report_renderer import report_renderer as _report_renderer
 from app.skills.fast_router import RouteType
 from app.skills.schema_injector import schema_injector as _schema_injector
@@ -41,40 +40,6 @@ def _record_usage_with_budget(role: str, response: Any, model_id: str, prompt: A
     out_t = usage.get("output_tokens", usage.get("completion_tokens", 0))
     
     usage_tracker.record_usage(model_id, in_t, out_t, prompt=prompt, response_text=str(getattr(response, "content", "")))
-
-def _trim_messages(left: List, right: List) -> List:
-    return trim_and_sanitize(left, right, max_total=40, keep_head=5, keep_tail=25)
-
-def _merge_dict(left: Dict, right: Dict) -> Dict:
-    new = (left or {}).copy()
-    new.update(right or {})
-    return new
-
-def _merge_list(left: List, right: List) -> List:
-    return (left or []) + (right or [])
-
-class AuditState(TypedDict):
-    messages: Annotated[Sequence[BaseMessage], _trim_messages]
-    tasks: List[str]
-    sql_query: str
-    sql_history: Annotated[List[str], _merge_list]  # [V178.9] 全量 SQL 证据链
-    raw_data: str
-    audit_findings: List[_LayeredAuditFinding]
-    structured_report: Optional[_LayeredAuditReport]
-    metadata: Annotated[Dict[str, Any], _merge_dict]
-    session_id: str
-    error_log: str
-    audit_feedback: Optional[_LayeredAuditFeedback]
-    retry_count: int
-    human_input: Optional[str]
-    is_awaiting_human: bool
-    sql_validated: bool
-    loop_count: int
-    next_step: str
-    schema_hint: Optional[str]
-    execution_trace: List[str]
-    methodology: str
-    temp_table: Optional[str]
 
 # ============================================================
 # 节点定义 (全量委托至各 Agent 模块)

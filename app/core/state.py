@@ -32,13 +32,18 @@ from pydantic import BaseModel, Field
 def _default_message_reducer(left: List, right: List) -> List:
     """[V90.4] 企业级消息合并：委托给 message_sanitizer 的去重+压缩+净化 pipeline。"""
     from app.memory.message_sanitizer import trim_and_sanitize
-    return trim_and_sanitize(left, right, max_total=10, keep_head=2, keep_tail=6)
+    return trim_and_sanitize(left, right, max_total=40, keep_head=5, keep_tail=25)
 
 
 def _merge_dict(left: Dict, right: Dict) -> Dict:
     new = (left or {}).copy()
     new.update(right or {})
     return new
+
+
+def _merge_list(left: List, right: List) -> List:
+    """列表追加合并 reducer，用于 sql_history 等需要全量保留的字段。"""
+    return (left or []) + (right or [])
 
 
 # ── Layer 1: 框架通用状态 ──────────────────────────────────────
@@ -61,6 +66,7 @@ class TaskArtifacts(TypedDict, total=False):
     """与 "执行某项数据任务" 相关的中间产物, 不依赖具体行业。"""
     tasks: List[str]
     sql_query: str
+    sql_history: Annotated[List[str], _merge_list]
     raw_data: str
     sql_validated: bool
     execution_trace: List[str]
