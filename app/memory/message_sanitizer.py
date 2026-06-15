@@ -448,7 +448,6 @@ def _apply_pii_masking(text: str) -> str:
     # 掩码姓名 (针对“姓名：张三”模式，强制要求有冒号或空格分隔符，防止“患者产生妇科”等学术词被误伤打码)
     text = _r.sub(r'(?<=患者|姓名)[：: ]+([\u4e00-\u9fa5]{2,3})', lambda m: m.group(1)[0] + "*" * (len(m.group(1)) - 1), text)
     return text
-    return text
 
 
 def sanitize_audit_content(messages: List[Any]) -> List[Any]:
