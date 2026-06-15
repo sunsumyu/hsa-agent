@@ -53,5 +53,9 @@ class TaskPoolManager:
             self._pending_tasks[thread_id]["completed_at"] = datetime.now().isoformat()
             logger.success(f"⚖️ [TaskPool] 人类专家已完成审计任务 [{thread_id}] 的审批: {action}")
 
-# 全局单例
-task_pool = TaskPoolManager()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+task_pool = _SP.try_resolve("task_pool") or TaskPoolManager()
+if not _SP.is_registered("task_pool"):
+    _SP.register_instance("task_pool", task_pool)

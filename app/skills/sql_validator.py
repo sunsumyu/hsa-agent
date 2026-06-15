@@ -88,4 +88,9 @@ class SQLLogicValidator:
             
         return True, ""
 
-sql_validator = SQLLogicValidator()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+sql_validator = _SP.try_resolve("sql_validator") or SQLLogicValidator()
+if not _SP.is_registered("sql_validator"):
+    _SP.register_instance("sql_validator", sql_validator)

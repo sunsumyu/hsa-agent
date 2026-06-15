@@ -102,4 +102,9 @@ class AuditRuleEngine:
         desc = self.rules.get(rule_id.upper(), {}).get("desc", rule_id)
         return f"【规则对撞】{desc} 命中 {count} 条违规线索。"
 
-rule_engine = AuditRuleEngine()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+rule_engine = _SP.try_resolve("rule_engine") or AuditRuleEngine()
+if not _SP.is_registered("rule_engine"):
+    _SP.register_instance("rule_engine", rule_engine)

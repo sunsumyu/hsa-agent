@@ -81,5 +81,9 @@ class SchemaManager:
     def get_metadata(self) -> List[Dict]:
         return self._field_metadata
 
-# 全局单例
-schema_manager = SchemaManager()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+schema_manager = _SP.try_resolve("schema_manager") or SchemaManager()
+if not _SP.is_registered("schema_manager"):
+    _SP.register_instance("schema_manager", schema_manager)

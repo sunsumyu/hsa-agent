@@ -114,6 +114,10 @@ class HistoryManager:
         except Exception as e:
             logger.error(f"生成调试转储失败: {e}")
 
-# 全局单例
-history_manager = HistoryManager()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+history_manager = _SP.try_resolve("history_manager") or HistoryManager()
+if not _SP.is_registered("history_manager"):
+    _SP.register_instance("history_manager", history_manager)
 from datetime import datetime

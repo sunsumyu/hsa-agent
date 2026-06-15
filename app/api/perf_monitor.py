@@ -55,4 +55,9 @@ class PerfMonitor:
         console.print(Panel(table, expand=False, border_style="cyan"))
         logger.info(f"PERF | {category} | {name} | {duration_ms:.2f}ms")
 
-perf_monitor = PerfMonitor()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+perf_monitor = _SP.try_resolve("perf_monitor") or PerfMonitor()
+if not _SP.is_registered("perf_monitor"):
+    _SP.register_instance("perf_monitor", perf_monitor)

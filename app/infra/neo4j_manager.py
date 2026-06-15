@@ -427,5 +427,13 @@ class Neo4jManager:
 # ──────────────────────────────────────────────────────────────
 # 模块级单例
 # ──────────────────────────────────────────────────────────────
-neo4j_manager = Neo4jManager()
-field_kg = FieldKnowledgeGraph()   # [Phase 3-B] 字段知识图谱单例，全局可用
+# Backward-compatible aliases, delegate to DI container
+from app.core.container import ServiceProvider as _SP
+
+neo4j_manager = _SP.try_resolve("neo4j_manager") or Neo4jManager()
+if not _SP.is_registered("neo4j_manager"):
+    _SP.register_instance("neo4j_manager", neo4j_manager)
+
+field_kg = _SP.try_resolve("field_kg") or FieldKnowledgeGraph()
+if not _SP.is_registered("field_kg"):
+    _SP.register_instance("field_kg", field_kg)

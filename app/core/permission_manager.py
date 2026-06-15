@@ -62,5 +62,9 @@ class PermissionManager:
             logger.info(f"🛡️ [Permissions] 为用户 {user_id} 过滤了 {len(all_skills) - len(filtered)} 个越权工具")
         return filtered
 
-# 单例导出
-permission_manager = PermissionManager()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+permission_manager = _SP.try_resolve("permission_manager") or PermissionManager()
+if not _SP.is_registered("permission_manager"):
+    _SP.register_instance("permission_manager", permission_manager)

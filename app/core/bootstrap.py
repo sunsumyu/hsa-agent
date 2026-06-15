@@ -30,6 +30,8 @@ def register_services():
         "app.infra.redis_client", fromlist=["RedisClient"]).RedisClient())
     ServiceProvider.register("neo4j_manager", lambda: __import__(
         "app.infra.neo4j_manager", fromlist=["Neo4jManager"]).Neo4jManager())
+    ServiceProvider.register("field_kg", lambda: __import__(
+        "app.infra.neo4j_manager", fromlist=["FieldKnowledgeGraph"]).FieldKnowledgeGraph())
     ServiceProvider.register("perf_monitor", lambda: __import__(
         "app.api.perf_monitor", fromlist=["PerfMonitor"]).PerfMonitor())
 
