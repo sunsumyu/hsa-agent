@@ -29,6 +29,8 @@ from app.skills.sql_validator import sql_validator
 from app.core.booster import booster
 from app.core.structured_tracer import StructuredTracer
 
+from app.skills.probe_guard import is_probe_query, ANALYSIS_WHITELIST
+
 class AuditCoderAgent:
     def __init__(self, max_retries: Optional[int] = None):
         self._max_retries = max_retries
@@ -38,51 +40,9 @@ class AuditCoderAgent:
         from app.core.config import settings
         return self._max_retries if self._max_retries is not None else settings.max_agent_retries
 
-# [V+1] 统计分析白名单：包含这些关键词的 SQL 属于合理的业务分析，永远不应被判定为探路探针
-    _ANALYSIS_WHITELIST = [
-        "QUANTILE",   # 分位数统计（P50/P90/P95 等阈值计算）
-        "PERCENTILE", # 百分位数
-        "STDDEV",     # 标准差
-        "VARIANCE",   # 方差
-        "MEDIAN",     # 中位数
-        "CORR(",      # 相关系数
-        "WITH ",      # CTE 通用表表达式（WITH ... AS ...）
-        "CASE WHEN",  # 条件分支逻辑，常用于多维判定
-        "UNION ALL",  # 多路合并结果集
-        "UNION ",     # 同上
-    ]
-
     def _is_probe_query(self, sql: str) -> bool:
-        if not sql: return True
-        sql_upper = sql.upper().strip()
-
-        # [V+1] 0. 统计分析白名单豁免：包含高级分析函数/CTE 的 SQL 绝不是探针，直接放行
-        if any(kw in sql_upper for kw in self._ANALYSIS_WHITELIST):
-            logger.debug(f"[ProbeGuard] 白名单豁免，统计分析 SQL 直接放行: {sql[:80]}...")
-            return False
-
-        # 1. 明显的表结构/元数据探测 (DESCRIBE, SHOW, etc.)
-        if any(sql_upper.startswith(x) for x in ["SHOW ", "DESC ", "DESCRIBE ", "EXPLAIN "]):
-            return True
-        # 2. 简单的计数/边界/总数探测 (无 GROUP BY 且包含 COUNT/MIN/MAX)
-        if "JOIN" not in sql_upper and "GROUP BY" not in sql_upper:
-            if any(x in sql_upper for x in ["COUNT(*)", "COUNT (", "MIN(SETL_TIME)", "MAX(SETL_TIME)", "MIN (SETL_TIME)", "MAX (SETL_TIME)"]):
-                return True
-            if sql_upper.startswith("SELECT COUNT"):
-                return True
-        # 3. 字典/项目/药品/科室的 DISTINCT 列表探测 (主要用于核查项目名称是否存在)
-        if "DISTINCT" in sql_upper and "JOIN" not in sql_upper:
-            if any(x in sql_upper for x in ["HILIST_NAME", "HILIST_CODE", "OPRN_OPRT_NAME", "DISE_NAME", "MED_TYPE", "ADM_DEPT_NAME", "DSCG_DEPT_NAME", "CHFPDR_NAME"]):
-                return True
-        # 4. 任何不含 JOIN，且长度较短，且没有特定业务过滤词的 SQL
-        if "JOIN" not in sql_upper and len(sql) < 500:
-            if not ("HAVING" in sql_upper or "WINDOW" in sql_upper or "OVER" in sql_upper):
-                if "GEND" not in sql_upper:
-                    return True
-        # 5. 明显的表结构/元数据探测
-        if "LIMIT " in sql_upper and "JOIN" not in sql_upper and "GROUP BY" not in sql_upper and len(sql) < 500:
-            return True
-        return False
+        """Delegate to extracted probe_guard module for backward compat."""
+        return is_probe_query(sql)
 
     async def execute(self, state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
         """执行审计代码生成与物理查询 [V171.2]"""
