@@ -62,8 +62,8 @@ _NODE_WORLDS = {
         "[[[SCHEMA:default.fqz_all_yy_yd_1:fixmedins_code,medfee_sumamt,setl_time,psn_no]]]",
     ),
     "auditor": (
-        "[[[MOVE:hsa_policy_kb]]]",
-        "[[[SCHEMA:hsa_policy_kb:rule_id,rule_name,legal_basis,risk_weight]]]",
+        "[[[MOVE:argus_policy_kb]]]",
+        "[[[SCHEMA:argus_policy_kb:rule_id,rule_name,legal_basis,risk_weight]]]",
     ),
     "financial_expert": (
         "[[[MOVE:t_audit_task]]]",
@@ -133,10 +133,10 @@ def emit_tool_start_events(name: str, inputs: Dict[str, Any]) -> list[str]:
                 pass
 
     elif name == "search_expert_knowledge":
-        out.append("[[[MOVE:hsa_policy_kb]]]")
+        out.append("[[[MOVE:argus_policy_kb]]]")
         out.append("[[[THOUGHT:正在检索核心政策库以比对违规特征...]]]")
         out.append("[[[LOGIC:输入诊断特征 -> 搜索高风险规则集...]]]")
-        out.append("[[[BOOKSHELF:hsa_policy_kb:rule_name,legal_basis]]]")
+        out.append("[[[BOOKSHELF:argus_policy_kb:rule_name,legal_basis]]]")
 
     elif name == "calculator":
         out.append("[[[MOVE:logic_core]]]")
