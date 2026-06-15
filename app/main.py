@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
         from app.core.observability import shutdown_observability
         shutdown_observability()
 
-app = FastAPI(title="HSA AI Agent (Python Edition)", lifespan=lifespan)
+app = FastAPI(title="Argus - Medical Audit Agent", lifespan=lifespan)
 
 # [重构 V10.0] 路由分组: palace / misc 端点已提取到 app/routes/
 from app.routes.palace import router as palace_router

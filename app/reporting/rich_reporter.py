@@ -13,7 +13,7 @@ class RichReportGenerator:
     <html lang="zh">
     <head>
         <meta charset="UTF-8">
-        <title>HSA 穿透式审计可视化控制台</title>
+<title>Argus 穿透式审计可视化控制台</title>
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&family=Noto+Sans+SC:wght@300;500;700&display=swap" rel="stylesheet">
         <style>
@@ -59,7 +59,7 @@ class RichReportGenerator:
             <div class="main-panel">
                 <div class="header">
                     <div class="title-group">
-                        <h1>🔍 HSA 穿透审计决策中心</h1>
+<h1>🔍 Argus 穿透审计决策中心</h1>
                         <p>端到端多模态稽核 - 工业级取证报告</p>
                     </div>
                     <div class="audit-tag">SESSION: {{ report_id }}</div>
@@ -183,7 +183,7 @@ class RichReportGenerator:
         # 2. 渲染 Jinja2 模板
         template = Template(cls.HTML_TEMPLATE)
         html_out = template.render(
-            report_id=report_data.get("report_id", "HSA-AUTO"),
+            report_id=report_data.get("report_id", "ARGUS-AUTO"),
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             total_amount=f"{report_data.get('total_amount', 0):,.2f}",
             finding_count=report_data.get("finding_count", 0),

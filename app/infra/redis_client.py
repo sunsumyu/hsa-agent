@@ -49,7 +49,7 @@ class RedisClient:
         if not self.is_connected: return
         try:
             val_str = json.dumps(value, ensure_ascii=False)
-            self.client.setex(f"hsa:cache:{key}", expire_hours * 3600, val_str)
+            self.client.setex(f"argus:cache:{key}", expire_hours * 3600, val_str)
         except Exception as e:
             logger.error(f"❌ [REDIS_SET] 写入异常: {e}")
 
@@ -57,7 +57,7 @@ class RedisClient:
         """读取缓存，自动反序列化。"""
         if not self.is_connected: return None
         try:
-            data = self.client.get(f"hsa:cache:{key}")
+            data = self.client.get(f"argus:cache:{key}")
             return json.loads(data) if data else None
         except Exception as e:
             logger.error(f"❌ [REDIS_GET] 读取异常: {e}")
@@ -68,7 +68,7 @@ class RedisClient:
         if not self.is_connected: return
         try:
             status = "UP" if is_healthy else "DOWN"
-            self.client.hset("hsa:nodes:health", node_id, json.dumps({
+            self.client.hset("argus:nodes:health", node_id, json.dumps({
                 "status": status,
                 "last_update": time.time()
             }))
@@ -86,7 +86,7 @@ class RedisClient:
         acquired = False
         try:
             # 尝试获取锁 (NX=True 表示不存在才设置, EX=timeout 设置过期防止死锁)
-            acquired = self.client.set(f"hsa:lock:{lock_key}", "LOCKED", nx=True, ex=timeout)
+            acquired = self.client.set(f"argus:lock:{lock_key}", "LOCKED", nx=True, ex=timeout)
             if acquired:
                 logger.debug(f"🔓 [REDIS] 成功获取分布式锁: {lock_key}")
                 yield True
@@ -95,7 +95,7 @@ class RedisClient:
                 yield False
         finally:
             if acquired:
-                self.client.delete(f"hsa:lock:{lock_key}")
+                self.client.delete(f"argus:lock:{lock_key}")
                 logger.debug(f"🔐 [REDIS] 已释放分布式锁: {lock_key}")
 
 redis_manager = RedisClient()

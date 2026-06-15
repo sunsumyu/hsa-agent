@@ -88,7 +88,7 @@ class HistoryManager:
         
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.write(f"=== HSA Session Deep Debug Dump ===\n")
+                f.write(f"=== Argus Session Deep Debug Dump ===\n")
                 f.write(f"Session ID: {session_id}\n")
                 f.write(f"Message Count: {len(messages)}\n")
                 if internal_steps:

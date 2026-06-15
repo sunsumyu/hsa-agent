@@ -26,10 +26,10 @@ from loguru import logger
 
 class GlobalSettings(BaseSettings):
     """
-    HSA-Agent 全局配置模型
+    Argus 全局配置模型
     """
     # --- 系统基础配置 ---
-    app_name: str = "HSA-Agent-Industrial"
+    app_name: str = "Argus"
     debug: bool = Field(default=False)
     log_level: str = Field(default="INFO")
     memory_mode: str = Field(default="LOCAL")  # [V4.5] 记忆模式：LOCAL | ENTERPRISE
@@ -50,9 +50,9 @@ class GlobalSettings(BaseSettings):
     clickhouse_host: str = "localhost"
     
     # --- 环境变量配置 (Pydantic 特性) ---
-    # 自动搜索以 HSA_ 开头的环境变量，例如 HSA_LOG_LEVEL -> log_level
+    # 自动搜索以 ARGUS_ 开头的环境变量，例如 ARGUS_LOG_LEVEL -> log_level
     model_config = SettingsConfigDict(
-        env_prefix="HSA_", 
+        env_prefix="ARGUS_",
         env_file=".env", 
         extra="ignore"
     )

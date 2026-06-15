@@ -1,12 +1,12 @@
-# HSA-Agent: 医疗审计智能体核心框架
+# Argus: 医疗审计智能体核心框架
 
-![HSA-Agent Banner](https://images.unsplash.com/photo-1576091160550-2173dad99901?auto=format&fit=crop&q=80&w=2000)
+![Argus Banner](https://images.unsplash.com/photo-1576091160550-2173dad99901?auto=format&fit=crop&q=80&w=2000)
 
 ## 🚀 项目概述
 
-**HSA-Agent** 是一款专为 **国家医保局 (HSA)** 审计场景设计的多智能体系统。它通过 LLM (大语言模型) 驱动的推理引擎，自动化完成从自然语言指令到复杂 SQL 查询执行、海量数据检索、违规行为判定以及专业审计报告生成的全流程。
+**Argus** 是一款专为 **国家医保局 (HSA)** 审计场景设计的多智能体系统。它通过 LLM (大语言模型) 驱动的推理引擎，自动化完成从自然语言指令到复杂 SQL 查询执行、海量数据检索、违规行为判定以及专业审计报告生成的全流程。
 
-本项目旨在解决传统医疗审计中“规则死板、覆盖面窄、误报率高”的痛点，通过 **物理真实对齐** 与 **AST 安全过滤** 等核心技术，将 LLM 的推理能力安全、精准地引入到真实的生产环境（18GB+ 结算数据量级）。
+本项目旨在解决传统医疗审计中"规则死板、覆盖面窄、误报率高"的痛点，通过 **物理真实对齐** 与 **AST 安全过滤** 等核心技术，将 LLM 的推理能力安全、精准地引入到真实的生产环境（18GB+ 结算数据量级）。
 
 ## 💎 技术核心创新
 
@@ -77,7 +77,7 @@ graph TD
 ## 📁 目录说明
 
 ```text
-hsa-agent/
+argus/
 ├── app/            # 应用入口与 API 服务
 ├── cores/          # Agent 核心逻辑 (Graph, Memory, Schema)
 ├── tools/          # 专用工具集 (SQLRunner, GraphQuerier, AuditReportGenerator)
@@ -92,8 +92,8 @@ hsa-agent/
 
 1. **环境克隆**:
    ```bash
-   git clone https://github.com/sunsumyu/hsa-agent.git
-   cd hsa-agent
+  git clone https://github.com/sunsumyu/argus.git
+  cd argus
    ```
 
 2. **依赖安装**:

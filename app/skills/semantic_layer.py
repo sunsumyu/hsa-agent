@@ -10,8 +10,11 @@ from typing import List, Dict, Any, Tuple, Union, Optional
 class _MetadataExtractor:
     """从百科文档中提取字段语义元数据的辅助类。"""
 
-    def __init__(self, schema_file="e:/chain/hsa-agent/docs/medical_audit_encyclopedia.md"):
-        self.schema_file = schema_file
+    _DOCS_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _DEFAULT_SCHEMA_FILE = os.path.join(_DOCS_ROOT, "docs", "medical_audit_encyclopedia.md")
+
+    def __init__(self, schema_file=None):
+        self.schema_file = schema_file or self._DEFAULT_SCHEMA_FILE
         self.model_name = "BAAI/bge-small-zh-v1.5"
 
     def extract_metadata(self):
@@ -159,7 +162,7 @@ def get_embedding_model():
 
 class SemanticRetriever(_MetadataExtractor):
     def __init__(self, data_dir="data/semantic_index",
-                 schema_file="e:/chain/hsa-agent/docs/medical_audit_encyclopedia.md"):
+                 schema_file=None):
         super().__init__(schema_file=schema_file)
         self.data_dir = data_dir
         self.index = None

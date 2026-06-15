@@ -712,7 +712,7 @@ def write_audit_note(category: str, content: str) -> str:
         
         with open(_NOTE_PATH, "a", encoding="utf-8") as f:
             if first_write:
-                f.write("# 🛡️ HSA-Agent 智能体审计外部便签簿 (Structured Audit Notes)\n")
+                f.write("# 🛡️ Argus 智能体审计外部便签簿 (Structured Audit Notes)\n")
                 f.write("> 本便签簿由智能体在多轮 ReAct 交互中自主维护，用于跨上下文窗口重建时固化关键状态与证据。\n\n")
             
             import datetime

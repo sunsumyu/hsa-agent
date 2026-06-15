@@ -18,7 +18,7 @@ class ExpertReviewBridge:
         # 构造专家审阅负载
         payload = {
             "ticket_id": report_data.get("report_id"),
-            "source": "HSA_COGNITIVE_AGENT",
+            "source": "ARGUS_COGNITIVE_AGENT",
             "pushed_at": datetime.now().isoformat(),
             "summary": report_data.get("summary"),
             "risk_level": report_data.get("risk_level"),

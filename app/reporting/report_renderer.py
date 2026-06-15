@@ -1061,10 +1061,10 @@ class AuditReportRenderer:
         import hashlib
         sign_base = f"{trace_id}-{model_id}-{timestamp}"
         signature = hashlib.md5(sign_base.encode()).hexdigest()[:16].upper()
-        lines.append(f"| 数字存证指纹 | `HSA-{signature}` |")
+        lines.append(f"| 数字存证指纹 | `ARGUS-{signature}` |")
         
         lines.append("")
-        lines.append("> ⚠️ **审计申明**：本报告由 HSA-Agent 自动生成，所有执行指令均已通过逻辑合规性校验并记录于证据库。")
+        lines.append("> ⚠️ **审计申明**：本报告由 Argus 自动生成，所有执行指令均已通过逻辑合规性校验并记录于证据库。")
         return "\n".join(lines)
 
     # ──────────────────────────────────────────────────────
@@ -1100,7 +1100,8 @@ class AuditReportRenderer:
 
     def _get_admin_name(self, tenant_id: Optional[str]) -> str:
         """[V162.2] 将租户 ID 转换为行政主体名称"""
-        if not tenant_id: return "HSA 智能审计中心"
+        if not tenant_id: return "Argus 智能审计中心"
+        if not tenant_id: return "Argus 智能审计中心"
         
         # 简单模拟映射逻辑 (生产环境应从数据库或配置读取)
         code = tenant_id.split('_')[1] if "_" in tenant_id else tenant_id

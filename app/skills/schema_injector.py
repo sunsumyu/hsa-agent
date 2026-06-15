@@ -327,5 +327,8 @@ class SchemaInjector:
 
 
 schema_injector = SchemaInjector(
-    external_schema_file="e:/chain/hsa-agent/docs/db_schema_clickhouse.md"
+    external_schema_file=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "docs", "db_schema_clickhouse.md"
+    )
 )

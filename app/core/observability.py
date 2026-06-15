@@ -89,7 +89,7 @@ def init_observability():
                 _phoenix_session = px.launch_app()
             
             resource = Resource(attributes={
-                SERVICE_NAME: "hsa-audit-agent",
+                SERVICE_NAME: "argus-audit-agent",
                 "version": "40.1-cloud-managed",
                 "environment": "production-hardened"
             })

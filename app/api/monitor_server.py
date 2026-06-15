@@ -10,7 +10,7 @@ from app.infra.usage_tracker import usage_tracker
 from app.infra.endpoint_pool_manager import endpoint_pool_manager
 from loguru import logger
 
-app = FastAPI(title="HSA Model Operations Center")
+app = FastAPI(title="Argus Operations Center")
 
 # --- 数据接口 ---
 

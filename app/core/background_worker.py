@@ -17,7 +17,7 @@ class BackgroundWorker:
     def __init__(self, max_workers: int = 4):
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers,
-            thread_name_prefix="HSA-BG-Worker"
+            thread_name_prefix="Argus-BG-Worker"
         )
         self.loop = asyncio.get_event_loop()
         logger.info(f"⚙️ [BackgroundWorker] 后台异步流水线已就绪 | Max Workers: {max_workers}")

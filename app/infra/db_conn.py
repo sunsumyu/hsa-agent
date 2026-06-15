@@ -139,7 +139,7 @@ def get_clickhouse_client():
 
     # ── [V110.6] 物理自愈：优先使用 Native 协议（Port 9000） ──────────────────
     client = None
-    readonly_val = 0 if _os.getenv("HSA_DB_READWRITE") == "true" else 1
+    readonly_val = 0 if _os.getenv("ARGUS_DB_READWRITE") == "true" else 1
     
     # 路径 1: Native 协议 (Port 9000) - 经测试在该环境最稳定，避开 8123 端口冲突
     try:

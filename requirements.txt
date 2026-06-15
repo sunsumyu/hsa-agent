@@ -1,5 +1,5 @@
 # =============================================================================
-# HSA Agent - Python dependencies
+# Argus - Python dependencies
 # =============================================================================
 # [Phase 7 V90.0] Synced with actually-installed versions (2026-05-11).
 # Previous pins were 1-2 years stale - new clones would install incompatible
