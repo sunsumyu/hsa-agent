@@ -142,7 +142,8 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 
     logger.info(">>> [REPORTER] 正在执行渲染任务...")
     raw_data_list = report_renderer.clean_and_parse_raw_data(state.get("raw_data"))
-    hard_sum = sum(float(r.get("det_item_fee_sumamt") or r.get("total_fee") or r.get("fee_b") or r.get("total_amt") or r.get("amount") or r.get("medfee_sumamt") or 0) for r in raw_data_list)
+    from app.reporting.fast_route_conclusion import _extract_amount
+    hard_sum = sum(_extract_amount(r) for r in raw_data_list)
     hard_count = len(raw_data_list)
     
     user_question = (state.get("metadata") or {}).get("user_question") or "医保专项审计"
@@ -160,34 +161,10 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     fast_route_id = metadata.get("fast_route_id")
     
     if fast_route_id:
-        logger.success(f"⚡ [Reporter Bypass] 智能体命中直通分支，跳过 Reporter LLM 生成，直接物理组装结论")
-        if hard_count == 0:
-            llm_conclusion = f"本次核查对底层表进行了全量扫描（扫描基数 > 0，发现违规记录 0 条），涉及金额 ¥{hard_sum:,.2f}。经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
-        else:
-            sample_details = []
-            for r in raw_data_list[:3]:
-                psn = r.get("psn_no") or r.get("PSN_NO") or "未明参保人"
-                hosp = r.get("hospital") or r.get("fixmedins_name") or r.get("hospital_a") or r.get("fixmedins_code") or "未知机构"
-                item = r.get("hilist_name") or r.get("item_name") or r.get("tel") or "限定性违规结算"
-                if r.get("tel"):
-                    item = f"共用联系人电话 {item}"
-                elif r.get("hospital_b"):
-                    item = f"跨机构住院重叠 ({hosp} 与 {r.get('hospital_b')})"
-                
-                amt_val = r.get("det_item_fee_sumamt") or r.get("total_fee") or r.get("fee_b") or r.get("total_amt") or r.get("amount") or r.get("medfee_sumamt") or 0
-                try:
-                    amt = float(amt_val)
-                except Exception:
-                    amt = 0.0
-                sample_details.append(f"参保人 {psn} 在 {hosp} 涉及「{item}」违规结算金额 ¥{amt:,.2f}")
-            
-            samples_str = "；".join(sample_details)
-            llm_conclusion = (
-                f"根据快速审计路由规则，本次专项核查针对「{user_question}」进行了物理穿透扫描。\n\n"
-                f"共穿透扫描相关违规明细记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}。详细核查发现：\n"
-                f"系统检测到存在明确的违规行为。典型违规样本包括：{samples_str}。\n"
-                f"这些记录的结算特征、项目限定约束以及临床时序均与审计方法论及医保监管政策冲突，判定为明确违规。建议立即启动定向现场审计，对相关病案流水及医保支付凭证进行追溯性核查。"
-            )
+        from app.reporting.fast_route_conclusion import generate_fast_route_conclusion
+        llm_conclusion = generate_fast_route_conclusion(
+            raw_data_list, hard_sum, hard_count, user_question
+        )
     else:
         semantic_align = (state.get("metadata") or {}).get("semantic_alignment") or {}
         rewritten_q = semantic_align.get("rewritten_question")
