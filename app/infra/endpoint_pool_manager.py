@@ -250,5 +250,9 @@ class EndpointPoolManager:
         except Exception as e:
             logger.warning(f"⚠️ [云端同步] 动态同步火山接入点失败: {e}")
 
-# 单例导出
-endpoint_pool_manager = EndpointPoolManager()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+endpoint_pool_manager = _SP.try_resolve("endpoint_pool_manager") or EndpointPoolManager()
+if not _SP.is_registered("endpoint_pool_manager"):
+    _SP.register_instance("endpoint_pool_manager", endpoint_pool_manager)

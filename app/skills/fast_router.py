@@ -323,5 +323,9 @@ class FastAuditRouter:
         return best[1] if best else None
 
 
-# 模块级单例（供 agent_graph 直接使用）
-fast_router = FastAuditRouter()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+fast_router = _SP.try_resolve("fast_router") or FastAuditRouter()
+if not _SP.is_registered("fast_router"):
+    _SP.register_instance("fast_router", fast_router)

@@ -1121,5 +1121,9 @@ class AuditReportRenderer:
         return base_name
 
 
-# 模块级单例（供 agent_graph 直接使用）
-report_renderer = AuditReportRenderer()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+report_renderer = _SP.try_resolve("report_renderer") or AuditReportRenderer()
+if not _SP.is_registered("report_renderer"):
+    _SP.register_instance("report_renderer", report_renderer)

@@ -586,4 +586,9 @@ class ModelManager:
             except Exception as e:
                 logger.warning(f"[HealthCheck] 巡检异常: {e}")
 
-model_manager = ModelManager()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+model_manager = _SP.try_resolve("model_manager") or ModelManager()
+if not _SP.is_registered("model_manager"):
+    _SP.register_instance("model_manager", model_manager)

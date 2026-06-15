@@ -195,5 +195,9 @@ class LLMProvider:
             latency_ms=latency_ms
         )
 
-# 单例导出
-llm_provider = LLMProvider()
+# Backward-compatible alias, delegates to DI container
+from app.core.container import ServiceProvider as _SP
+
+llm_provider = _SP.try_resolve("llm_provider") or LLMProvider()
+if not _SP.is_registered("llm_provider"):
+    _SP.register_instance("llm_provider", llm_provider)

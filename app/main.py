@@ -16,9 +16,13 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.infra.model_manager import model_manager
 from app.infra.usage_tracker import usage_tracker
 from app.core.observability import init_observability
+from app.core.bootstrap import register_services
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # [V211.0] Register all services into the DI container before anything else
+    register_services()
+
     # 针对 LangGraph 0.2.x 与 aiosqlite 的性能/兼容性修复
     async with AsyncSqliteSaver.from_conn_string("audit_checkpoints.db") as saver_instance:
         # 兼容性补丁：处理可能的属性缺失 (针对 aio-sqlite 连接对象)

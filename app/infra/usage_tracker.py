@@ -378,5 +378,12 @@ class UsageTracker:
             report.append(f"- {m_id}: {tokens} tokens | {reqs} requests")
         return "\n".join(report)
 
-# 全局单例
-usage_tracker = UsageTracker()
+# 全局单例 (backward-compatible alias, delegates to DI container)
+from app.core.container import ServiceProvider as _SP
+
+def _get_usage_tracker():
+    return _SP.try_resolve("usage_tracker") or UsageTracker()
+
+usage_tracker = _get_usage_tracker()
+if not _SP.is_registered("usage_tracker"):
+    _SP.register_instance("usage_tracker", usage_tracker)
