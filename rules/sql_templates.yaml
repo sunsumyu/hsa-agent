@@ -95,22 +95,25 @@ templates:
       LIMIT {limit}
 
   DECOMPOSITION_HOSPITALIZATION:
-    description: "分解住院检测 (短期内二次入院)"
+    description: "分解住院/短期高频结算检测 (短期内二次在同一机构结算)"
     category: rule
     default_table: fqz_gz_jzsj_all_ql
     default_limit: 50
     tolerance: 1000
     methodology: >
-      【审计方法论】分解住院侦测：通过窗口函数对比相邻住院记录。
-      判定标准：同一患者出院与下次入院间隔 <= 15天 且诊断高度相关。
-      合规依据：《基本医疗保险定点医疗机构服务协议》关于禁止恶意分解住院的条款。
-    policy_basis: "《基本医疗保险定点医疗机构服务协议》"
+      【审计方法论】分解住院侦测：通过窗口函数按参保人+机构分区，对比相邻结算记录的时间间隔。
+      判定标准：同一患者在同一机构的相邻两次结算间隔 <= 15天。
+      覆盖场景：①住院分解（出院后15天内再入院）②药店高频短间隔购药（同一患者同店反复刷卡）。
+      窗口函数按 psn_no+fixmedins_code 分区，天然将不同机构隔离，无需依赖 med_type 过滤。
+      合规依据：《基本医疗保险定点医疗机构服务协议》关于禁止恶意分解住院的条款；
+      《医疗保障基金使用监督管理条例》第十六条关于欺诈骗保的规定。
+    policy_basis: "《基本医疗保险定点医疗机构服务协议》;《医疗保障基金使用监督管理条例》第十六条"
     sql_template: |
-      SELECT psn_no, fixmedins_name,
-             prev_end_date AS discharge_a,
-             start_date AS admission_b,
+      SELECT psn_no, fixmedins_name, med_type,
+             prev_end_date AS last_setl_date,
+             start_date AS curr_setl_date,
              dateDiff('day', toDate(prev_end_date), toDate(start_date)) AS interval_days,
-             prev_fee AS fee_a, medfee_sumamt AS fee_b
+             prev_fee AS last_fee, medfee_sumamt AS curr_fee
       FROM (
           SELECT psn_no, fixmedins_name, fixmedins_code, start_date, end_date,
                  medfee_sumamt, med_type,
@@ -120,9 +123,8 @@ templates:
           WHERE toYear(toDateTime(start_date)) = 2024
       )
       WHERE prev_end_date IS NOT NULL
-        AND med_type NOT LIKE '%药%'
         AND dateDiff('day', toDate(prev_end_date), toDate(start_date)) BETWEEN 1 AND 15
-      ORDER BY interval_days ASC
+      ORDER BY interval_days ASC, curr_fee DESC
       LIMIT {limit}
 
   CROSS_HOSPITAL_OVERLAP:

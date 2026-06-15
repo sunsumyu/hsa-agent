@@ -1,12 +1,12 @@
 {
-  "today": "2026-06-08",
+  "today": "2026-06-15",
   "daily_usage": {
-    "doubao-1-5-pro": 1822,
-    "doubao-1-5-lite": 2857
+    "doubao-1-5-pro": 12543,
+    "doubao-1-5-lite": 12304
   },
   "daily_requests": {
-    "doubao-1-5-pro": 2,
-    "doubao-1-5-lite": 2
+    "doubao-1-5-pro": 21,
+    "doubao-1-5-lite": 10
   },
   "total_usage": {
     "doubao-pro-32k": 552555,
@@ -29,14 +29,10 @@
     "doubao-smart-router": 8860,
     "deepseek-v4-pro": 20303020,
     "deepseek-v4-flash": 1201777,
-    "doubao-1-5-pro": 1822,
-    "doubao-1-5-lite": 2857
+    "doubao-1-5-pro": 65413,
+    "doubao-1-5-lite": 64129
   },
   "blacklist_expiry": {},
-  "stability_scores": {
-    "deepseek-v4-pro": 0.8,
-    "deepseek-v3-bailian": 0.0,
-    "doubao-pro-32k": 0.0
-  },
-  "last_probe_date": "2026-05-21"
+  "stability_scores": {},
+  "last_probe_date": "2026-06-14"
 }

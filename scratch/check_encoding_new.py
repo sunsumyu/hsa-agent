@@ -1,32 +1,40 @@
-import os, sys
-sys.path.append(os.getcwd())
+import sys, os
+import io
+
+# Force stdout to be utf-8
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 import clickhouse_driver
 
-def check_encoding():
-    client = clickhouse_driver.Client(
-        host='localhost', port=9000, user='default', password='', database='fqz_hsa'
-    )
-    print(">>> Raw results from clickhouse_driver:")
-    res = client.execute("SELECT hilist_name, gend FROM fqz_fymx_test LIMIT 5")
-    for row in res:
-        name = row[0]
-        gend = row[1]
-        print("Raw name:", repr(name), "Type:", type(name), "Gender:", repr(gend))
-        if isinstance(name, str):
+client = clickhouse_driver.Client(host='localhost', port=9000)
+res = client.execute("SELECT med_type, dise_name, oprn_oprt_name, fixmedins_name, psn_name, start_date, end_date FROM default.fqz_gz_jzsj_all_ql LIMIT 10")
+for idx, row in enumerate(res):
+    print(f"--- Row {idx} ---")
+    for col_idx, val in enumerate(row):
+        val_str = str(val)
+        print(f"Col {col_idx}: {val_str!r}")
+        if isinstance(val, str):
+            # Let's inspect the Unicode code points of the characters
+            code_points = [ord(c) for c in val]
+            print(f"  code_points: {code_points}")
+            # Try to see if we can convert it to raw bytes by encoding to latin-1 or utf-8 or by treating code points as bytes
             try:
-                latin1_bytes = name.encode('latin1')
-                print("  - Latin1 bytes hex:", latin1_bytes.hex())
-                try:
-                    print("  - Decoded as GBK:", latin1_bytes.decode('gbk'))
-                except Exception as gbk_err:
-                    print("  - GBK decode failed:", str(gbk_err))
-                try:
-                    print("  - Decoded as UTF-8:", latin1_bytes.decode('utf-8'))
-                except Exception as utf8_err:
-                    print("  - UTF-8 decode failed:", str(utf8_err))
+                # If it's a decodable string stored incorrectly, maybe the code points are actually bytes
+                byte_list = []
+                for c in val:
+                    o = ord(c)
+                    if o < 256:
+                        byte_list.append(o)
+                    else:
+                        # Character code is larger than 255. Let's see if we can break it down or if it's utf-8 bytes read as something else
+                        pass
+                if len(byte_list) == len(val):
+                    raw_bytes = bytes(byte_list)
+                    print(f"  raw_bytes from code points < 256: {raw_bytes}")
+                    for enc in ['utf-8', 'gbk', 'gb18030']:
+                        try:
+                            print(f"    decoded as {enc}: {raw_bytes.decode(enc)}")
+                        except Exception:
+                            pass
             except Exception as e:
-                print("  - Encoding to latin1 failed:", str(e))
-
-if __name__ == "__main__":
-    check_encoding()
+                print(f"  failed treating code points as bytes: {e}")

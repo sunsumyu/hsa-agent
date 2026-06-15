@@ -23,6 +23,8 @@ class UsageTracker:
         self.stability_scores: Dict[str, float] = self.stats.stability_scores # {model_id: score}
         # [V155.0] 性能画像：记录最近 10 次请求的耗时
         self.latency_window: Dict[str, List[float]] = {} # {model_id: [ms, ms, ...]}
+        # [V180.1] 云端余额缓存
+        self.cloud_remaining_tokens: Dict[str, int] = {} # {model_id: tokens}
 
     def _ensure_dir(self):
         os.makedirs(os.path.dirname(self.stats_path), exist_ok=True)

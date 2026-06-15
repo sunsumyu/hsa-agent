@@ -25,7 +25,9 @@ async def get_models():
 @router.post("/agent/models/probe")
 @router.post("/ins-fqz/agent/models/probe")
 async def probe_models():
-    """[V5.3.0] 触发全量算力体检"""
+    """[V5.3.0] 触发全量算力体检与云端额度同步"""
+    from app.core.quota.manager import quota_manager
+    await quota_manager.sync_all()
     report = await model_manager.run_health_check()
     return report
 
@@ -87,7 +89,8 @@ async def get_metrics():
             "tpm_limit": cfg.tpm_limit,
             "usage_pct": round(current / max(quota, 1) * 100, 1),
             "estimated_cost": round(est_cost, 4),
-            "lifetime_tokens": total.get(model_id, 0)
+            "lifetime_tokens": total.get(model_id, 0),
+            "remaining_tokens": usage_tracker.cloud_remaining_tokens.get(model_id)
         })
 
     return {

@@ -38,9 +38,29 @@ class AuditCoderAgent:
         from app.core.config import settings
         return self._max_retries if self._max_retries is not None else settings.max_agent_retries
 
+# [V+1] 统计分析白名单：包含这些关键词的 SQL 属于合理的业务分析，永远不应被判定为探路探针
+    _ANALYSIS_WHITELIST = [
+        "QUANTILE",   # 分位数统计（P50/P90/P95 等阈值计算）
+        "PERCENTILE", # 百分位数
+        "STDDEV",     # 标准差
+        "VARIANCE",   # 方差
+        "MEDIAN",     # 中位数
+        "CORR(",      # 相关系数
+        "WITH ",      # CTE 通用表表达式（WITH ... AS ...）
+        "CASE WHEN",  # 条件分支逻辑，常用于多维判定
+        "UNION ALL",  # 多路合并结果集
+        "UNION ",     # 同上
+    ]
+
     def _is_probe_query(self, sql: str) -> bool:
         if not sql: return True
         sql_upper = sql.upper().strip()
+
+        # [V+1] 0. 统计分析白名单豁免：包含高级分析函数/CTE 的 SQL 绝不是探针，直接放行
+        if any(kw in sql_upper for kw in self._ANALYSIS_WHITELIST):
+            logger.debug(f"[ProbeGuard] 白名单豁免，统计分析 SQL 直接放行: {sql[:80]}...")
+            return False
+
         # 1. 明显的表结构/元数据探测 (DESCRIBE, SHOW, etc.)
         if any(sql_upper.startswith(x) for x in ["SHOW ", "DESC ", "DESCRIBE ", "EXPLAIN "]):
             return True
@@ -117,21 +137,41 @@ class AuditCoderAgent:
             with tracer.span("SQL_EXECUTION", node="CODER") as span:
                 results = await self._invoke_tools_parallel(tool_calls, tools, state)
                 span.set_result(f"物理执行完成，获取 {len(results)} 组结果集")
-                
+
             processed = self._process_tool_results(results, state)
-            
-            return {
-                "raw_data": processed["raw_data"],
-                "sql_query": processed["sql_query"],
-                "sql_history": processed["sql_history"],
-                "methodology": processed["methodology"],
-                "messages": [response] + processed["tool_msgs"],
-                "retry_count": retry,
-                "sql_validated": not processed["has_error"],
-                "error_log": processed["error_msg"] if processed["has_error"] else None,
-                "execution_trace": tracer.to_legacy_list(),
-                "temp_table": state.get("temp_table")
-            }
+
+            # [V+1] 零行兜底 (Fast Route Fallback)：
+            # 如果快速路由执行后 raw_data 为空（0 条命中），说明预定义 SQL 与当前数据集不匹配。
+            # 此时清除 fast_route_id 标记，让执行流继续往下走 LLM 推理路径，
+            # 由 LLM 动态生成适配当前数据集的 SQL，而不是直接输出空报告。
+            raw = processed.get("raw_data", "")
+            is_empty_result = not raw or raw.strip() in ("", "[]", "None")
+            if is_empty_result and not processed["has_error"]:
+                logger.warning(
+                    f"⚡ [Fast Route Fallback] 规则 {fast_route_id} 物理执行返回 0 行，"
+                    f"数据集与模板不匹配，自动降级到 LLM 推理路径以动态适配。"
+                )
+                # 清除 fast_route_id，继续执行后续 LLM 推理逻辑（不 return）
+                metadata.pop("fast_route_id", None)
+                state["metadata"] = metadata
+                # 将已执行的 SQL 注入 sql_history，让 LLM 知道已尝试过什么
+                state.setdefault("sql_history", [])
+                if processed["sql_query"]:
+                    state["sql_history"].append(processed["sql_query"])
+                # fallthrough: 继续走下方的 LLM 推理逻辑
+            else:
+                return {
+                    "raw_data": processed["raw_data"],
+                    "sql_query": processed["sql_query"],
+                    "sql_history": processed["sql_history"],
+                    "methodology": processed["methodology"],
+                    "messages": [response] + processed["tool_msgs"],
+                    "retry_count": retry,
+                    "sql_validated": not processed["has_error"],
+                    "error_log": processed["error_msg"] if processed["has_error"] else None,
+                    "execution_trace": tracer.to_legacy_list(),
+                    "temp_table": state.get("temp_table")
+                }
 
         # 2. 上下文准备
         tasks_list = state.get("tasks", [])
@@ -377,11 +417,17 @@ class AuditCoderAgent:
                     has_error = True
                     error_msg = parsed_res.get("error_message") or "Tool execution failed"
                 
-                # 证据链提取
-                if "data" in parsed_res and parsed_res["data"]:
-                    raw_data_list.append(str(parsed_res["data"]))
-                elif "records_sample" in parsed_res: raw_data_list.append(str(parsed_res["records_sample"]))
-                elif "raw_evidence" in parsed_res: raw_data_list.append(str(parsed_res["raw_evidence"]))
+                # 证据链提取：排除探针查询的数据，避免其污染真实的审计证据链数据
+                sql_logic = parsed_res.get("sql_logic", "")
+                is_probe = sql_logic and self._is_probe_query(sql_logic)
+                
+                if not is_probe:
+                    if "data" in parsed_res and parsed_res["data"]:
+                        raw_data_list.append(str(parsed_res["data"]))
+                    elif "records_sample" in parsed_res: 
+                        raw_data_list.append(str(parsed_res["records_sample"]))
+                    elif "raw_evidence" in parsed_res: 
+                        raw_data_list.append(str(parsed_res["raw_evidence"]))
         
         # 启发式筛选核心审计 SQL，避免被最后一步的边界探针 SQL 覆盖
         core_sql = ""
@@ -401,9 +447,20 @@ class AuditCoderAgent:
                 core_sql = combined_sql_logics[-1]
         logger.info(f"🔮 [DEBUG_SQL] selected core_sql: {core_sql[:100]}...")
 
+        # 判断本轮是否执行了新的核心审计 SQL
+        has_new_core_query = False
+        for sql in sql_logics:
+            if not self._is_probe_query(sql):
+                has_new_core_query = True
+                break
+
+        new_raw_data = "\n---\n".join(raw_data_list)
+        if not has_new_core_query and not new_raw_data:
+            new_raw_data = state.get("raw_data", "")
+
         return {
             "tool_msgs": tool_msgs,
-            "raw_data": "\n---\n".join(raw_data_list),
+            "raw_data": new_raw_data,
             "sql_query": core_sql,
             "sql_history": sql_logics, # [V178.9] 仅返回增量部分，由 LangGraph 的 Reducer 在 state 追加，防重复
             "methodology": "\n\n".join(methodologies),

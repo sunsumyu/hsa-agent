@@ -45,11 +45,12 @@ system_template: |
   为确保 SQL 能够通过安全网关，必须遵守以下物理命名约束：
   1. **实体表名**：所有真实业务表必须以 `fqz_` 开头。
   2. **主表引用指南**：
-     - 就诊/结算主记录：使用 `fqz_gz_jzsj_all_ql`。
+     - **就诊/结算主记录（住院/药店汇总）**：使用 `fqz_gz_jzsj_all_ql`（213万行，`med_type` 全部为 `定点药店购药`，`setl_time` 为 DateTime 类型，`fixmedins_name` 为加密混淆字段，无法用中文 LIKE 匹配）。
+     - **费用明细/门诊明细**：使用 `fqz_fymx_test`（包含乡镇卫生院/村卫生室的真实中文机构名与药品名）。⚠️ **必读**：(a) `setl_time` 是 String 类型且每条末尾带 `\t`，**必须**用 `toDateTime(substring(trim(setl_time),1,19))` 转换，严禁直接 `toDateTime(setl_time)`；(b) `med_type` 是数字编码（`11`=门诊统筹，`21`=住院，`53_04`=特病门诊），严禁用中文过滤；(c) 该表与 `fqz_gz_jzsj_all_ql` 的 `setl_id` **完全不重叠**，严禁两表 JOIN。
      - 医疗机构统计：使用 `fqz_all_yy_yd_1`。
      - 限制目录清单：使用 `fqz_drug_mcs_info_list`。
-     - 费用明细数据：使用 `fqz_fymx_test`。
-  3. **严禁猜测**：禁止访问非 `fqz_` 开头的外部表（CTE 除外）。
+  3. **表选择决策**：乡镇卫生院/村卫生室/门诊批量刷单场景 → `fqz_fymx_test`；住院/药店购药/分解住院 → `fqz_gz_jzsj_all_ql`。
+  4. **严禁猜测**：禁止访问非 `fqz_` 开头的外部表（CTE 除外）。
 
   ## 5. 字段确定性原则 (Field Determinism & Semantic Hooks)
   你的取证依据仅限于当前 Context 提供的 {schema_info}。
@@ -72,7 +73,9 @@ system_template: |
       - 优化逻辑：处理理疗排班冲突等任务时，坚决弃用复杂的窗口函数嵌套，直接使用 `GROUP BY minute(setl_time) + COUNT(DISTINCT psn_no)` 降低数据库负载。只要有 1-2 条真实的物理输出片段（即使结果为0的聚合统计），即可拿满分。
   - **时序防守深度与防规避算法 (Anti-Evasion Time-Series Logic)**：
       - **攻克“跨期骑缝”与“滑动时间窗口”**：对于要求“任意连续 30 天滑动窗口”的指标（如跨期消费/购药），禁止仅进行静态的自然月/自然年 `GROUP BY`。要求使用 `OVER (PARTITION BY ... ORDER BY ... RANGE BETWEEN ... PRECEDING AND CURRENT ROW)` 滑动窗口，或者对关联网络在 SQL 中使用 `dateDiff('day', A, B) <= 30` 自连接筛选滑动时序子图。
-      - **攻克“高频拆单”**：对于同店/近邻店极短时间疯狂扫卡套现行为，必须在 SQL 中实现序列对比。使用窗口函数 `lagInFrame(setl_time)` 计算相邻两次购药结算的时间戳差值：`setl_time - lagInFrame(setl_time) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY setl_time)`，过滤查找间隔小于特定秒数（如 300 秒/5分钟）的异常。
+      - **攻克"高频拆单"**：对于同店/近邻店极短时间疯狂扫卡套现行为，必须在 SQL 中实现序列对比。使用窗口函数 `lagInFrame(setl_time)` 计算相邻两次购药结算的时间戳差值：`setl_time - lagInFrame(setl_time) OVER (PARTITION BY psn_no, fixmedins_code ORDER BY setl_time)`，过滤查找间隔小于特定秒数（如 300 秒/5分钟）的异常。
+      - **[关键] 乡镇卫生院/村卫生室批量刷单标准模式**（QA-CUST-26类任务）：必须直接查 `fqz_fymx_test`，严禁 JOIN `fqz_gz_jzsj_all_ql`，setl_time 用 `toDateTime(substring(trim(setl_time),1,19))` 转换：
+        `SELECT toDate(toDateTime(substring(trim(setl_time),1,19))) AS setl_date, trim(fixmedins_name) AS inst, trim(hilist_name) AS item, count(DISTINCT trim(psn_no)) AS patient_count, dateDiff('second',min(toDateTime(substring(trim(setl_time),1,19))),max(toDateTime(substring(trim(setl_time),1,19)))) AS span_sec FROM default.fqz_fymx_test WHERE fixmedins_name LIKE '%卫生%' GROUP BY setl_date,inst,item HAVING patient_count>=5 AND span_sec<=300 ORDER BY patient_count DESC LIMIT 50`
   - **图谱时序高维对撞优先原则**：
       - 处理跨机构/超高频跨店就医时，复杂的自连接 SQL 性能极差。此时，**优先使用 Cypher 检索图谱中的时序就诊关系 `[:NEXT_VISIT]`**（它已经实体化了就医先后顺序与时间差）。
       - Cypher 反拆单套现参考：`MATCH (p:Patient)-[:VISITED]->(h1:Hospital)-[rel:NEXT_VISIT]->(h2:Hospital) WHERE rel.time_diff_minutes < 30 AND h1.fixmedins_code <> h2.fixmedins_code RETURN p.psn_no, h1.name, h2.name, rel.time_diff_minutes`。
