@@ -5,12 +5,8 @@ import sys
 import importlib.util
 from loguru import logger
 
-# 1. 物理位置转移后的核心元素向上兼容导出
-from app.core.state import WorkflowState, TaskArtifacts, AuditDomainContext
-from app.core.registry.prompt_registry import prompt_registry
-from app.core.registry.schema_registry import schema_registry
-from app.core.registry.rule_registry import rule_registry
-
+# 1. 向上兼容导出 — 使用 __getattr__ 延迟加载，避免 app.core.__init__
+#    在包导入时拉起整个 registry → tools → clickhouse/neo4j 重依赖链
 __all__ = [
     "WorkflowState",
     "TaskArtifacts",
@@ -19,6 +15,27 @@ __all__ = [
     "schema_registry",
     "rule_registry",
 ]
+
+def __getattr__(name):
+    if name == "WorkflowState":
+        from app.core.state import WorkflowState
+        return WorkflowState
+    if name == "TaskArtifacts":
+        from app.core.state import TaskArtifacts
+        return TaskArtifacts
+    if name == "AuditDomainContext":
+        from app.core.state import AuditDomainContext
+        return AuditDomainContext
+    if name == "prompt_registry":
+        from app.core.registry.prompt_registry import prompt_registry
+        return prompt_registry
+    if name == "schema_registry":
+        from app.core.registry.schema_registry import schema_registry
+        return schema_registry
+    if name == "rule_registry":
+        from app.core.registry.rule_registry import rule_registry
+        return rule_registry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 # 2. 🏛️ [Core Architecture Safeguard] Core Backward Compatibility Layer
 # ─────────────────────────────────────────────────────────────────────────────

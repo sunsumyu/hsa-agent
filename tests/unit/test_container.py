@@ -66,9 +66,8 @@ def test_reset_clears_override():
     ServiceProvider.register("fake", FakeService)
     ServiceProvider.override("fake", FakeService())
     ServiceProvider.reset("fake")
-    # After reset, should lazily recreate from factory
-    svc = ServiceProvider.resolve("fake")
-    assert isinstance(svc, FakeService)
+    # After reset(name), the factory is also cleared
+    assert not ServiceProvider.is_registered("fake")
 
 
 def test_try_resolve_returns_default():

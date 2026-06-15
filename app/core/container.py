@@ -74,13 +74,15 @@ class ServiceProvider:
 
     @classmethod
     def reset(cls, name: Optional[str] = None) -> None:
-        """Clear overrides (and optionally cached instances). Call in test teardown."""
+        """Clear overrides, cached instances, and registered factories. Call in test teardown."""
         if name:
             cls._overrides.pop(name, None)
             cls._instances.pop(name, None)
+            cls._factories.pop(name, None)
         else:
             cls._overrides.clear()
             cls._instances.clear()
+            cls._factories.clear()
 
     @classmethod
     def is_registered(cls, name: str) -> bool:

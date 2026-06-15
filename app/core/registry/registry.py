@@ -13,6 +13,13 @@ from loguru import logger
 class SkillRegistry:
     def __init__(self):
         self._skills: Dict[str, BaseTool] = {}
+        self._defaults_loaded = False
+
+    def _ensure_defaults_loaded(self):
+        """Lazily load default skills on first access."""
+        if self._defaults_loaded:
+            return
+        self._defaults_loaded = True
         self.register_default_skills()
 
     def register(self, skill: BaseTool):
@@ -41,14 +48,17 @@ class SkillRegistry:
 
     def get_skill(self, name: str) -> Optional[BaseTool]:
         """根据名称获取工具实例"""
+        self._ensure_defaults_loaded()
         return self._skills.get(name)
 
     def get_all_skills(self) -> List[BaseTool]:
         """获取所有已注册的工具"""
+        self._ensure_defaults_loaded()
         return list(self._skills.values())
 
     def get_tool_map(self) -> Dict[str, BaseTool]:
         """返回工具字典 (适配 LangGraph/LangChain)"""
+        self._ensure_defaults_loaded()
         return self._skills
 
 # 全局单例
