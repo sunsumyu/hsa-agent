@@ -25,9 +25,14 @@ class SQLGuardian:
     ]
     
     @staticmethod
-    def validate_sql(sql: str, tenant_id: str = None) -> str:
+    def validate_sql(sql: str, tenant_id: str = None, expected_table: str = None) -> str:
         """
-        [V172.0] 物理校验并执行行政区划隔离 (Administrative Isolation)。
+        [V173.0] 物理校验并执行行政区划隔离 + 场景-表映射强制验证。
+
+        Args:
+            sql: 待校验的 SQL
+            tenant_id: 租户 ID（用于行政区划隔离）
+            expected_table: 预期的目标表名（由 SceneTableSelector 提供）
         """
         if not sql:
             raise SecurityViolationError("SQL 内容不能为空")
@@ -90,6 +95,22 @@ class SQLGuardian:
                 logger.error(f"[SECURITY] 发现物理不存在的幻觉表: {table_name}")
                 raise SecurityViolationError(f"物理拦截：表 `{table_name}` 是虚假幻觉表！请务必使用物理主表。")
 
+        # ── [V173.0 NEW] 场景-表映射强制验证 ────
+        if expected_table:
+            used_tables = SQLGuardian._extract_tables_from_ast(expression)
+            expected_lower = expected_table.lower()
+            if expected_lower not in used_tables and len(used_tables) > 0:
+                # 检测到使用了错误的表
+                wrong_tables = [t for t in used_tables if t != expected_lower]
+                logger.error(f"[SECURITY] 场景-表映射违规! 预期: {expected_table}, 实际: {wrong_tables}")
+                raise SecurityViolationError(
+                    f"【表选择强制拦截】检测到场景-表映射违规！\n"
+                    f"预期表: `{expected_table}`\n"
+                    f"实际使用的表: `{wrong_tables}`\n"
+                    f"根据场景关键词分析，当前查询**必须使用 `{expected_table}`**。\n"
+                    f"请修改 SQL 中的 FROM/JOIN 子句，将 `{wrong_tables[0]}` 替换为 `{expected_table}`。"
+                )
+
         # 3. 结构化指令审计
         allowed_keys = ("select", "with", "show", "describe", "explain")
         if expression.key not in allowed_keys:
@@ -142,18 +163,33 @@ class SQLGuardian:
         # 1. 查找 WHERE 子句
         where_clause = expression.find(exp.Where)
         where_str = str(where_clause).upper() if where_clause else ""
-        
+
         # 2. 如果已经存在 AAA027 或 ADMIN_DIVISION 过滤，则跳过注入 (避免冗余)
         if "AAA027" in where_str or "ADMIN_DIVISION" in where_str:
             return expression
-            
+
         # 3. 构造隔离条件 (aaa027 是医保结算表标准分区字段)
         # 针对所有的 SELECT 查询注入隔离条件
         if isinstance(expression, exp.Select):
              # 自动追加 AND 逻辑
              return expression.where(f"aaa027 = '{tenant_id}'", append=True)
-             
+
         return expression
+
+    @staticmethod
+    def _extract_tables_from_ast(expression: exp.Expression) -> list:
+        """
+        [V173.0] 从 AST 中提取所有 fqz_ 开头的物理表名
+
+        Returns:
+            list: 表名列表（小写）
+        """
+        tables = []
+        for table_node in expression.find_all(exp.Table):
+            table_name = table_node.name.lower()
+            if table_name.startswith('fqz_'):
+                tables.append(table_name)
+        return tables
 
     @staticmethod
     def _validate_column_existence(expression):

@@ -74,14 +74,53 @@ class TestAnalysisWhitelist:
         assert is_probe_query("SELECT 1 UNION ALL SELECT 2") is False
 
 
+class TestCust27BaselineProbe:
+    """QA-CUST-27: Two-phase baseline SQL must NOT be classified as probe."""
+
+    def test_avg_baseline_not_probe(self):
+        """Phase 1 baseline calculation with avg() must not be a probe."""
+        sql = "SELECT avg(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= subtractYears(toDate(now()), 5) GROUP BY setl_id LIMIT 100"
+        assert is_probe_query(sql) is False
+
+    def test_sum_aggregation_not_probe(self):
+        """SUM() aggregation is legitimate business analysis."""
+        sql = "SELECT sum(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'"
+        assert is_probe_query(sql) is False
+
+    def test_quantile_baseline_not_probe(self):
+        """quantile() baseline calculation must not be a probe."""
+        sql = "SELECT quantile(0.95)(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2021-01-01'"
+        assert is_probe_query(sql) is False
+
+    def test_short_groupby_with_avg_not_probe(self):
+        """Short GROUP BY with avg() is whitelisted, not a probe."""
+        sql = "SELECT avg(medfee_sumamt) FROM fqz_gz_jzsj_all_ql GROUP BY setl_id"
+        assert is_probe_query(sql) is False
+
+    def test_phase2_detail_query_not_probe(self):
+        """Phase 2: SELECT ... WHERE medfee_sumamt > threshold ORDER BY ... LIMIT 100 is NOT a probe."""
+        sql = "SELECT psn_no, fixmedins_code, medfee_sumamt, setl_id FROM fqz_gz_jzsj_all_ql WHERE setl_time >= subtractYears(today(), 5) AND medfee_sumamt > 213.6 ORDER BY medfee_sumamt DESC LIMIT 100"
+        assert is_probe_query(sql) is False
+
+    def test_where_orderby_no_limit_not_probe(self):
+        """WHERE + ORDER BY without LIMIT is still a business query, not probe."""
+        sql = "SELECT psn_no, medfee_sumamt FROM fqz_gz_jzsj_all_ql WHERE medfee_sumamt > 500 ORDER BY medfee_sumamt DESC"
+        assert is_probe_query(sql) is False
+
+    def test_where_only_not_probe(self):
+        """WHERE without ORDER BY or LIMIT is still a business query."""
+        sql = "SELECT psn_no, medfee_sumamt FROM fqz_gz_jzsj_all_ql WHERE medfee_sumamt > 500"
+        assert is_probe_query(sql) is False
+
+
 class TestRealAuditQueries:
     def test_join_query_not_probe(self):
         sql = "SELECT a.*, b.medfee FROM a JOIN b ON a.id = b.id"
         assert is_probe_query(sql) is False
 
     def test_group_by_not_probe(self):
-        # GROUP BY with COUNT(*) but no JOIN is still caught by rule 4 (short no-JOIN)
-        assert is_probe_query("SELECT dept, COUNT(*) FROM table GROUP BY dept") is True
+        # QA-CUST-27 fix: GROUP BY with no JOIN is now NOT a probe (rule 4 updated)
+        assert is_probe_query("SELECT dept, COUNT(*) FROM table GROUP BY dept") is False
 
     def test_having_not_probe(self):
         # HAVING with COUNT(*) but no JOIN/GROUP BY is caught by rule 2 (count probe)
@@ -141,9 +180,9 @@ class TestCust26BatchBilling:
         assert is_probe_query(sql) is False
 
     def test_short_groupby_no_having_is_probe(self):
-        """A short GROUP BY without HAVING/JOIN is still a probe (rule 4)."""
+        """QA-CUST-27 fix: Short GROUP BY is now NOT a probe (rule 4 updated)."""
         sql = "SELECT dept, count(*) FROM fqz_fymx_test GROUP BY dept"
-        assert is_probe_query(sql) is True
+        assert is_probe_query(sql) is False
 
     def test_timestamp_heal_function(self):
         """The _heal_timestamp_tab function correctly wraps bare toDateTime."""

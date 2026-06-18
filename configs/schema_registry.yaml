@@ -10,6 +10,17 @@ main_table: fqz_gz_jzsj_all_ql
 drug_catalog_table: fqz_drug_mcs_info_list
 hospital_stats_table: fqz_all_yy_yd_1
 
+# ── [V2.0] 场景-表映射规则 (Scene-Table Mapping) ───────────────
+# 根据用户查询关键词自动选择正确的物理表
+scene_table_mapping:
+  - scenes: ["乡镇卫生院", "村卫生室", "门诊统筹", "批量刷单", "连续刷卡", "QA-CUST-26", "门诊费用", "牙", "拔牙", "口腔", "理疗", "康复", "卫生室", "卫生院", "门诊明细"]
+    table: "fqz_fymx_test"
+    reason: "门诊费用明细表，包含真实中文机构名、药品名及 med_type 数字编码。setl_time 是 String 类型需转换。"
+
+  - scenes: ["住院", "药店购药", "分解住院", "出院", "入院", "重叠住院", "压床", "住院天数", "药店", "定点药店"]
+    table: "fqz_gz_jzsj_all_ql"
+    reason: "结算主记录表，包含住院/药店汇总数据。fixmedins_name 是加密字段。"
+
 # SQLGuardian 白名单
 valid_table_prefixes:
   - "fqz_"
@@ -98,15 +109,25 @@ tables:
 
   - name: fqz_fymx_test
     alias: 费用明细表
-    description: 就诊费用明细，包含具体的药品、耗材、诊疗项目编码及名称
+    description: 就诊费用明细，包含具体的药品、耗材、诊疗项目编码及名称。⚠️ setl_time 是 String 且尾部带 \t，必须用 toDateTime(substring(trim(setl_time),1,19)) 转换。该表与 fqz_gz_jzsj_all_ql 的 setl_id 完全不重叠，严禁两表 JOIN。
+    critical_notes:
+      - "setl_time 是 String 类型且尾部带 \\t，必须用 toDateTime(substring(trim(setl_time),1,19)) 转换，严禁直接 toDateTime(setl_time)"
+      - "med_type 是数字编码：11=门诊统筹，21=住院，53_04=特病门诊，严禁用中文过滤"
+      - "该表与 fqz_gz_jzsj_all_ql 的 setl_id 完全不重叠，严禁两表 JOIN"
+      - "fixmedins_name 是真实中文机构名，可 LIKE 匹配（与主表的加密混淆字段不同）"
+    partition_field: setl_time
     fields:
-      - { name: setl_id,          type: String,   desc: "结算ID (与主表关联)" }
-      - { name: hilist_code,      type: String,   desc: "医保目录编码" }
-      - { name: hilist_name,      type: String,   desc: "医保目录名称" }
-      - { name: cnt,              type: Float64,  desc: "数量" }
-      - { name: pric,             type: Float64,  desc: "单价" }
-      - { name: det_item_fee_sumamt, type: Float64, desc: "明细费用总额" }
-      - { name: psn_no,           type: String,   desc: "参保人唯一ID" }
-      - { name: fixmedins_name,   type: String,   desc: "医疗机构名称" }
-      - { name: fee_ocur_time,    type: String,   desc: "费用发生时间 / 费用执行时间 (String, 例如 '2024-03-15 10:30:00')" }
-      - { name: setl_time,        type: String,   desc: "就诊费用结算时间" }
+      - { name: setl_id,              type: String,   desc: "结算ID (与主表完全不重叠，严禁跨表 JOIN)" }
+      - { name: hilist_code,          type: String,   desc: "医保目录编码" }
+      - { name: hilist_name,          type: String,   desc: "医保目录名称/药品名" }
+      - { name: cnt,                  type: Float64,  desc: "数量" }
+      - { name: pric,                 type: Float64,  desc: "单价" }
+      - { name: det_item_fee_sumamt,  type: Float64,  desc: "明细费用总额" }
+      - { name: psn_no,               type: String,   desc: "参保人唯一ID" }
+      - { name: fixmedins_code,       type: String,   desc: "医疗机构编码" }
+      - { name: fixmedins_name,       type: String,   desc: "医疗机构名称 (真实中文，可 LIKE 匹配)" }
+      - { name: med_type,             type: String,   desc: "医疗类型编码 (11=门诊统筹, 21=住院, 53_04=特病门诊)" }
+      - { name: fee_ocur_time,        type: String,   desc: "费用发生时间 (String)" }
+      - { name: setl_time,            type: String,   desc: "结算时间 (String, 尾部带 \\t, 必须用 toDateTime(substring(trim(setl_time),1,19)) 转换)" }
+      - { name: chfpdr_name,          type: String,   desc: "医生姓名" }
+      - { name: dise_name,            type: String,   desc: "诊断名称" }

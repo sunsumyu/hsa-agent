@@ -125,6 +125,29 @@ class AuditReportRenderer:
         else:
             clean_data = str(raw_data_str)
 
+        # [V211.0] 修复 datetime.datetime(...) 无法被 ast.literal_eval 解析的问题
+        # 将 Python repr 中的 datetime.datetime(2024, 3, 15, 12, 7, 45) 替换为 "2024-03-15 12:07:45"
+        def _convert_datetime_repr(match):
+            groups = match.groups()
+            year, month, day = int(groups[0]), int(groups[1]), int(groups[2])
+            if groups[3] is not None:  # has time component
+                hour, minute, second = int(groups[3]), int(groups[4]), int(groups[5])
+                return f'"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"'
+            return f'"{year:04d}-{month:02d}-{day:02d}"'
+
+        # Handle datetime.datetime(...)
+        clean_data = re.sub(
+            r'datetime\.datetime\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+),\s*(\d+),\s*(\d+))?\)',
+            _convert_datetime_repr,
+            clean_data
+        )
+        # Handle datetime.date(...)
+        clean_data = re.sub(
+            r'datetime\.date\((\d+),\s*(\d+),\s*(\d+)\)',
+            lambda m: f'"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"',
+            clean_data
+        )
+
         # 2. 多轨解析 (按 --- 分片解析，支持多步骤/多工具链数据拼装)
         raw_data_list = []
         chunks = [c.strip() for c in clean_data.split("---") if c.strip()]

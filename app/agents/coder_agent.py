@@ -135,7 +135,10 @@ class AuditCoderAgent:
 
         # 2. 上下文准备
         tasks_list = state.get("tasks", [])
-        
+
+        # [V2.0 NEW] 检查 metadata 中是否有场景强制提示（由 ContextBuilder 注入）
+        scene_enforcement = metadata.get("scene_enforcement")
+
         # 已启用统一 GSSC 上下文引擎，真实 Schema 信息、审计经验及便签线索将由 ContextBuilder 在 LLMProvider 自动挂载至消息链尾部！
         # 传入优雅的定位语，指导模型注意尾部事实载荷
         schema_hint = "【已启用 GSSC 统一上下文引擎：本角色所需的真实 ClickHouse DDL 物理表结构与主表规范，已安全挂载于当前消息流最尾部。请滚动至最尾部，在 <database_schema_context> 标签中查阅，以确保取得最新最准的 DDL 元数据进行 SQL 编写】"
@@ -158,18 +161,21 @@ class AuditCoderAgent:
                 user_q += " " + str(getattr(m, "content", ""))
         user_q = user_q.strip()[:200]
 
-        # ──【企业级 v1.5】场景化 SQL 刚性防漂移指引注入 ──
+            # ──【企业级 v2.0】场景化 SQL 刚性防漂移指引注入 ──
         q_lower = user_q.lower()
         scenario_guidelines = ""
-        
-        # 1. 拔牙/种植牙
-        if any(kw in q_lower for kw in ["牙", "拔牙", "口腔", "牙体"]):
+
+        # [V2.0 NEW] 优先使用 SceneTableSelector 的强制提示
+        if scene_enforcement:
+            scenario_guidelines = scene_enforcement
+        elif any(kw in q_lower for kw in ["牙", "拔牙", "口腔", "牙体", "卫生", "卫生院", "村卫生室", "门诊统筹", "刷单", "QA-CUST", "门诊明细", "乡镇", "费用明细"]):
+            # 扩展场景检测关键词
             scenario_guidelines = (
-                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 连续批量快速刷卡核查】\n"
+                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 乡镇卫生院/门诊统筹批量刷卡核查】\n"
                 "1. 你**必须直接查 `fqz_fymx_test`**，严禁 JOIN `fqz_gz_jzsj_all_ql`（两表 setl_id 完全不重叠，JOIN 会导致数据丢失）。\n"
                 "2. `fqz_fymx_test.setl_time` 是 String 类型且尾部带 `\\t`，**必须**用 "
                 "`toDateTime(substring(trim(setl_time),1,19))` 转换，严禁直接 `toDateTime(setl_time)`。\n"
-                "3. 任务要求识别'连续十几个不同的病号且开出的项目一模一样、结算时间差在3-5秒之内'的违规行为。标准 SQL 模式（直接复用）：\n"
+                "3. 任务要求识别'连续多个不同病号且开出项目相同、结算时间差极短'的违规行为。标准 SQL 模板：\n"
                 "   SELECT toDate(toDateTime(substring(trim(setl_time),1,19))) AS setl_date,\n"
                 "          trim(fixmedins_name) AS inst, trim(hilist_name) AS item,\n"
                 "          count(DISTINCT trim(psn_no)) AS patient_count,\n"
@@ -180,7 +186,9 @@ class AuditCoderAgent:
                 "   GROUP BY setl_date, inst, item\n"
                 "   HAVING patient_count >= 5 AND span_sec <= 300\n"
                 "   ORDER BY patient_count DESC LIMIT 50\n"
-                "4. 务必使用 `trim(...)` 清理所有字符串字段（机构名、项目名、患者号），防止制表符破坏匹配。"
+                "4. 务必使用 `trim(...)` 清理所有字符串字段（机构名、项目名、患者号），防止制表符破坏匹配。\n"
+                "5. med_type 编码：11=门诊统筹，21=住院，53_04=特病门诊。严禁用中文过滤 med_type！\n"
+                "6. 严禁使用 `fqz_gz_jzsj_all_ql` 表，该表 fixmedins_name 是加密字段无法 LIKE 匹配！"
             )
 
         zero_findings_rule = (

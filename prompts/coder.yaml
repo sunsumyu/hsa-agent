@@ -80,9 +80,15 @@ system_template: |
       - 处理跨机构/超高频跨店就医时，复杂的自连接 SQL 性能极差。此时，**优先使用 Cypher 检索图谱中的时序就诊关系 `[:NEXT_VISIT]`**（它已经实体化了就医先后顺序与时间差）。
       - Cypher 反拆单套现参考：`MATCH (p:Patient)-[:VISITED]->(h1:Hospital)-[rel:NEXT_VISIT]->(h2:Hospital) WHERE rel.time_diff_minutes < 30 AND h1.fixmedins_code <> h2.fixmedins_code RETURN p.psn_no, h1.name, h2.name, rel.time_diff_minutes`。
       - **[重要] 联邦图谱多约束穿透验证**：凡是涉及“共享手机号/地址”等图谱挖掘，在调用图谱检索出群组之后，在 Phase 2 SQL 中必须强制穿透验证原始问题中要求的所有业务细节（如：结算时间差小于24小时、就诊同一个大夫、在同一个医院等），防止多重条件遗漏导致的召回缺陷。
-  - **两阶段基线探测 (Two-Phase Baseline Pattern)**：在处理“额度异常”任务时，必须分步操作：
-      - **Phase 1**: 先执行聚合查询计算基线（如 `avg(medfee_sumamt)` 或 `quantile(0.95)`）。
-      - **Phase 2**: 将 Phase 1 得到的真实数值注入到后续 SQL 的 `WHERE` 或 `HAVING` 子句中（如 `HAVING sum(...) > 1523.5`）。
+  - **两阶段基线探测 (Two-Phase Baseline Pattern)**：在处理”额度异常”任务时，必须分步操作：
+      - **Phase 1**: 先执行聚合查询计算基线（如 `quantile(0.95)(medfee_sumamt)` 或 `avg(medfee_sumamt)`），**必须返回单一标量值**。⚠️ 严禁在 CTE 中使用 `GROUP BY` 再在子查询中引用，这会导致 `Scalar subquery returned more than one row` 错误。正确写法示例：
+        ```sql
+        -- ✅ 正确：直接计算全局统计量，返回单行
+        SELECT quantile(0.95)(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2021-01-01'
+        -- ❌ 错误：CTE 内 GROUP BY setl_id 导致多行，子查询报错
+        WITH baseline AS (SELECT avg(medfee_sumamt) FROM ... GROUP BY setl_id) SELECT ... WHERE medfee_sumamt > (SELECT avg FROM baseline)
+        ```
+      - **Phase 2**: 将 Phase 1 得到的**具体数值**（如 1523.5）直接硬编码到后续 SQL 的 `WHERE` 或 `HAVING` 子句中（如 `WHERE medfee_sumamt > 1523.5`），**禁止使用子查询引用 Phase 1 结果**。
       - **警告**: 严禁在未计算基线的情况下盲目使用 `HAVING count(*) > 20` 这种幻觉逻辑。
   - **时间重叠与同日边界算法**：
       - 核查重复住院必须使用区间重叠公式：`(start_A <= end_B) AND (end_A >= start_B)`。

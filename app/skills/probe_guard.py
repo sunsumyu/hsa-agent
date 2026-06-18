@@ -25,6 +25,11 @@ ANALYSIS_WHITELIST: List[str] = [
     "CASE WHEN",
     "UNION ALL",
     "UNION ",
+    "AVG(",          # QA-CUST-27: avg() is statistical baseline calculation
+    "SUM(",          # QA-CUST-27: sum() aggregation is legitimate
+    "AVERAGE(",
+    "QUANTILE(",
+    "QUANTILEEXACT",
 ]
 
 
@@ -69,13 +74,17 @@ def is_probe_query(sql: str) -> bool:
                 return True
 
     # 4. Short, no-JOIN queries without analytical constructs
-    if "JOIN" not in sql_upper and len(sql) < 500:
-        if not ("HAVING" in sql_upper or "WINDOW" in sql_upper or "OVER" in sql_upper):
+    # QA-CUST-27: GROUP BY indicates aggregation, not probe
+    # QA-CUST-27: WHERE/ORDER BY indicates business query, not probe
+    if "JOIN" not in sql_upper and "GROUP BY" not in sql_upper and len(sql) < 500:
+        if not ("HAVING" in sql_upper or "WINDOW" in sql_upper or "OVER" in sql_upper or "WHERE " in sql_upper or "ORDER BY" in sql_upper):
             if "GEND" not in sql_upper:
                 return True
 
     # 5. Simple LIMIT probes without JOIN/GROUP BY
+    # QA-CUST-27: WHERE/ORDER BY with LIMIT is legitimate business query
     if "LIMIT " in sql_upper and "JOIN" not in sql_upper and "GROUP BY" not in sql_upper and len(sql) < 500:
-        return True
+        if "WHERE " not in sql_upper and "ORDER BY" not in sql_upper:
+            return True
 
     return False

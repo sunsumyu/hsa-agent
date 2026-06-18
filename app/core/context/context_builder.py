@@ -129,6 +129,19 @@ class ContextBuilder:
         # 1. Gather ClickHouse Schemas
         try:
             from app.core.registry.schema_registry import schema_registry
+            # [V2.0 NEW] 使用场景感知表选择器
+            from app.core.scene_table_selector import scene_table_selector
+
+            # 如果没有指定 target_tables，使用场景感知选择
+            if not target_tables:
+                primary_table, all_tables = scene_table_selector.select_tables(query)
+                target_tables = all_tables
+                # [V2.0 NEW] 将场景强制提示注入 metadata
+                enforcement_hint = scene_table_selector.get_enforcement_hint(query)
+                if enforcement_hint:
+                    metadata["scene_enforcement"] = enforcement_hint
+                    metadata["expected_table"] = primary_table
+
             tables = target_tables if target_tables else [schema_registry.get_main_table()]
             for table in tables:
                 entry = schema_registry.get_table(table)
@@ -136,7 +149,7 @@ class ContextBuilder:
                     detail_xml = self.selector.schema_to_xml(entry)
                     packets.append(ContextPacket(
                         content=detail_xml,
-                        relevance_score=0.8,
+                        relevance_score=0.9,  # 提高相关性评分
                         metadata={"type": "clickhouse_schema", "table_name": table}
                     ))
         except Exception as e:

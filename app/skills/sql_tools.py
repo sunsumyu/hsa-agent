@@ -69,17 +69,19 @@ def _sanitize_results(records: List[Dict], tolerance: int = 1000) -> List[Dict]:
 
 @perf_monitor.time_it("AUDIT_ENGINE")
 async def _execute_audit_sql_logic(
-    sql: str, 
-    db_type: str = "clickhouse", 
-    return_raw: bool = False, 
+    sql: str,
+    db_type: str = "clickhouse",
+    return_raw: bool = False,
     tolerance: int = 1000,
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = None,
+    expected_table: Optional[str] = None
 ) -> Any:
-    """内部物理执行逻辑 [V172.1] 增加 tenant_id 隔离"""
-    if db_type == "clickhouse":
+    """内部物理执行逻辑 [V179.0] 增加 tenant_id 隔离 + expected_table 场景验证"""
+    # [V179.0] 修复大小写不匹配：LLM 传递 'ClickHouse' (大写) 导致 SQL 无法执行
+    if db_type.lower() == "clickhouse":
         try:
-            # 1. 物理拦截与行政区划隔离注入
-            safe_sql = SQLGuardian.validate_sql(sql, tenant_id=tenant_id)
+            # 1. 物理拦截与行政区划隔离注入 + 场景-表映射验证
+            safe_sql = SQLGuardian.validate_sql(sql, tenant_id=tenant_id, expected_table=expected_table)
             
             # [V176.0] 物理防御：防止 safe_sql 为空导致 upper() 崩溃
             safe_sql_upper = (safe_sql or "").upper()
@@ -235,17 +237,19 @@ def _heal_timestamp_tab(sql_text: str) -> str:
 
 @tool
 async def execute_audit_sql(
-    sql: Union[str, Dict], 
+    sql: Union[str, Dict],
     state: Annotated[dict, InjectedState], # [V172.1] 自动注入状态
     db_type: str = "clickhouse"
 ) -> Any:
-    """执行医疗相关 SQL 查询。自动执行行政区划隔离。"""
-    # 提取租户信息
-    tenant_id = state.get("metadata", {}).get("tenant_id") or state.get("metadata", {}).get("admin_division")
-    
+    """执行医疗相关 SQL 查询。自动执行行政区划隔离和场景-表映射验证。"""
+    # 提取租户信息和预期表
+    metadata = state.get("metadata", {})
+    tenant_id = metadata.get("tenant_id") or metadata.get("admin_division")
+    expected_table = metadata.get("expected_table")  # [V173.0 NEW] 由 SceneTableSelector 提供
+
     # [V163.1] 鲁棒性参数解析
     params = smart_parse_tool_params(sql)
     actual_sql = params.get("sql", sql if isinstance(sql, str) else "")
     actual_db = params.get("db_type", db_type)
-    
-    return await _execute_audit_sql_logic(actual_sql, actual_db, tenant_id=tenant_id)
+
+    return await _execute_audit_sql_logic(actual_sql, actual_db, tenant_id=tenant_id, expected_table=expected_table)

@@ -581,18 +581,32 @@ TEST_CASES = [
     #     "prompt": "把口腔科的医保结算拉出来，尤其是拔牙和根管治疗的。写个逻辑去追溯每个病号的历史看牙记录。正常人一共也就二三十颗牙，你给我找找有没有哪个狠人，在过去两三年里跨了不同的牙科诊所，累计被拔了四五十颗牙的？或者更离谱的，他去年在一家诊所已经拔了左下的大牙，今年在另一家诊所又把同一颗牙给拔了一次的。这种骗医保不仅造假，连基本的生理常识都不要了。",
     #     "pred_tokens": 18500,
     # },
+    # {
+    #     "id": "QA-CUST-26", 
+    #     "tag": "Automated Batch Billing / Time-Series Anomalies", 
+    #     "diff": "*****", # 极难：微秒级时间戳分布探测与机器行为识别
+    #     "prompt": "查查乡镇卫生院和村卫生室的门诊统筹刷单。你去把每天的结算流水按时间戳精细排个序，看有没有这种极端诡异的现象：连续十几个不同的病号，他们不仅开出来的药或者理疗项目一模一样，而且相互之间结算的时间精准地只隔了三五秒钟，就像是用机器脚本在批量扫码一样。这绝对是村医大半夜把全村的医保卡收集起来，放在刷卡机上集中流水线套现的团伙作案。",
+    #     "pred_tokens": 19000,
+    #     "ground_truth": {
+    #         "expected_findings_min": 2,
+    #         "expected_tables": ["fqz_fymx_test"],
+    #         "expected_institutions": ["庙塘", "哲觉"],
+    #     },
+    # },
     {
-        "id": "QA-CUST-26", 
-        "tag": "Automated Batch Billing / Time-Series Anomalies", 
-        "diff": "*****", # 极难：微秒级时间戳分布探测与机器行为识别
-        "prompt": "查查乡镇卫生院和村卫生室的门诊统筹刷单。你去把每天的结算流水按时间戳精细排个序，看有没有这种极端诡异的现象：连续十几个不同的病号，他们不仅开出来的药或者理疗项目一模一样，而且相互之间结算的时间精准地只隔了三五秒钟，就像是用机器脚本在批量扫码一样。这绝对是村医大半夜把全村的医保卡收集起来，放在刷卡机上集中流水线套现的团伙作案。",
-        "pred_tokens": 19000,
+        "id": "QA-CUST-27",
+        "tag": "High-Value / High-Frequency Anomaly Detection",
+        "diff": "***",
+        "prompt": "查最近5年单次结算金额排名最高的异常案件，把大额的都找出来，看看哪些医院和患者频繁出现大额结算，按金额从高到低列出来。",
+        "pred_tokens": 15000,
         "ground_truth": {
-            "expected_findings_min": 2,
-            "expected_tables": ["fqz_fymx_test"],
-            "expected_institutions": ["庙塘", "哲觉"],
-        },
+            "expected_findings_min": 5,
+            "expected_tables": ["fqz_gz_jzsj_all_ql"],
+            "expected_institutions": [],
+        }
     },
+    
+
 ]
 
 # ── Judge Prompt ──────────────────────────────────────────────────────
