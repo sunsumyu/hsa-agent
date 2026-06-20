@@ -2,10 +2,10 @@
 Unit tests for app/skills/probe_guard.py.
 """
 import pytest
-from app.skills.probe_guard import is_probe_query, ANALYSIS_WHITELIST
+from app.skills.probe_guard import is_probe_query, STRUCTURAL_WHITELIST, AGGREGATE_WHITELIST
 
 
-# ── QA-CUST-26 batch-billing detection SQL patterns ──
+# -- QA-CUST-26 batch-billing detection SQL patterns --
 FYMX_BATCH_SQL = """SELECT toDate(toDateTime(substring(trim(setl_time),1,19))) AS setl_date,
        trim(fixmedins_name) AS inst, trim(hilist_name) AS item,
        count(DISTINCT trim(psn_no)) AS patient_count,
@@ -58,38 +58,64 @@ class TestDistinctDictionaryProbes:
 
 
 class TestAnalysisWhitelist:
-    def test_quantile_exempt(self):
-        assert is_probe_query("SELECT quantile(0.95)(medfee) FROM table") is False
+    """[V178.10] Structural constructs (WITH/CTE, CASE WHEN, UNION) always exempt;
+    aggregate baselines (quantile/avg without GROUP BY) are probes."""
 
-    def test_stddev_exempt(self):
-        assert is_probe_query("SELECT stddevPop(medfee) FROM table") is False
+    def test_quantile_with_groupby_exempt(self):
+        """quantile() WITH GROUP BY is whitelisted, not a probe."""
+        assert is_probe_query("SELECT dept, quantile(0.95)(medfee) FROM table GROUP BY dept") is False
+
+    def test_quantile_pure_baseline_is_probe(self):
+        """[V178.10] Pure quantile() baseline without GROUP BY is a probe."""
+        assert is_probe_query("SELECT quantile(0.95)(medfee) FROM table") is True
+
+    def test_stddev_with_groupby_exempt(self):
+        """stddevPop() WITH GROUP BY is whitelisted, not a probe."""
+        assert is_probe_query("SELECT dept, stddevPop(medfee) FROM table GROUP BY dept") is False
+
+    def test_stddev_pure_baseline_is_probe(self):
+        """[V178.10] Pure stddevPop() baseline without GROUP BY is a probe."""
+        assert is_probe_query("SELECT stddevPop(medfee) FROM table") is True
 
     def test_cte_with_exempt(self):
+        """[V178.10] CTE (WITH) queries are structural - always exempt."""
         assert is_probe_query("WITH cte AS (SELECT 1) SELECT * FROM cte") is False
 
     def test_case_when_exempt(self):
+        """[V178.10] CASE WHEN is structural - always exempt."""
         assert is_probe_query("SELECT CASE WHEN x THEN 1 ELSE 0 END FROM t") is False
 
     def test_union_all_exempt(self):
+        """[V178.10] UNION ALL is structural - always exempt."""
         assert is_probe_query("SELECT 1 UNION ALL SELECT 2") is False
 
 
 class TestCust27BaselineProbe:
-    """QA-CUST-27: Two-phase baseline SQL must NOT be classified as probe."""
+    """QA-CUST-27: Baseline SQL classification with V178.10 baseline detection."""
 
-    def test_avg_baseline_not_probe(self):
-        """Phase 1 baseline calculation with avg() must not be a probe."""
+    def test_avg_baseline_with_groupby_not_probe(self):
+        """Phase 1 baseline with avg() AND GROUP BY must not be a probe."""
         sql = "SELECT avg(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= subtractYears(toDate(now()), 5) GROUP BY setl_id LIMIT 100"
         assert is_probe_query(sql) is False
 
-    def test_sum_aggregation_not_probe(self):
-        """SUM() aggregation is legitimate business analysis."""
-        sql = "SELECT sum(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'"
+    def test_sum_aggregation_with_groupby_not_probe(self):
+        """SUM() aggregation WITH GROUP BY is legitimate business analysis."""
+        sql = "SELECT dept, sum(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01' GROUP BY dept"
         assert is_probe_query(sql) is False
 
-    def test_quantile_baseline_not_probe(self):
-        """quantile() baseline calculation must not be a probe."""
+    def test_sum_pure_baseline_is_probe(self):
+        """[V178.10] Pure SUM() baseline without GROUP BY is a probe."""
+        sql = "SELECT sum(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'"
+        assert is_probe_query(sql) is True
+
+    def test_quantile_pure_baseline_is_probe(self):
+        """[V178.10] Pure quantile() baseline without GROUP BY is a probe."""
         sql = "SELECT quantile(0.95)(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2021-01-01'"
+        assert is_probe_query(sql) is True
+
+    def test_quantile_with_groupby_not_probe(self):
+        """quantile() WITH GROUP BY is whitelisted, not a probe."""
+        sql = "SELECT dept, quantile(0.95)(medfee_sumamt) FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2021-01-01' GROUP BY dept"
         assert is_probe_query(sql) is False
 
     def test_short_groupby_with_avg_not_probe(self):

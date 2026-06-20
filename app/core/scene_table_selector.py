@@ -87,22 +87,23 @@ class SceneTableSelector:
 
     def get_enforcement_hint(self, user_query: str) -> Optional[str]:
         """
-        生成强制性表选择提示语，用于 Prompt 注入
+        生成表选择提示语，用于 Prompt 注入
 
-        当检测到 fqz_fymx_test 场景时，返回强制性的 SQL 编写指引
+        只提供表选择指引和字段注意事项，不强制 SQL 模板。
+        SQL 模式由 LLM 根据方法论和 Schema 自行决定。
 
         Args:
             user_query: 用户原始查询
 
         Returns:
-            强制性提示语，如果不需要强制则返回 None
+            表选择提示语，如果不需要强制则返回 None
         """
         primary, _ = self.select_tables(user_query)
 
         if primary == "fqz_fymx_test":
             return """
-【⚠️ 物理表强制选择红线 (ENFORCEMENT LAYER)】
-根据场景关键词检测，你**必须直接查 `fqz_fymx_test`**，严禁使用其他表！
+【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
+根据场景关键词检测，建议使用 `fqz_fymx_test` 表。
 
 理由：
 1. 乡镇卫生院/村卫生室/门诊统筹场景的费用数据存储在 `fqz_fymx_test`
@@ -110,28 +111,12 @@ class SceneTableSelector:
 3. `fqz_gz_jzsj_all_ql.fixmedins_name` 是加密混淆字段，无法中文匹配
 4. 两表 setl_id 完全不重叠，JOIN 会导致数据丢失
 
-强制 SQL 模板：
-```sql
-SELECT
-    toDate(toDateTime(substring(trim(setl_time),1,19))) AS setl_date,
-    trim(fixmedins_name) AS inst,
-    trim(hilist_name) AS item,
-    count(DISTINCT trim(psn_no)) AS patient_count,
-    dateDiff('second',
-             min(toDateTime(substring(trim(setl_time),1,19))),
-             max(toDateTime(substring(trim(setl_time),1,19)))) AS span_sec
-FROM default.fqz_fymx_test
-WHERE trim(fixmedins_name) LIKE '%卫生%'
-GROUP BY setl_date, inst, item
-HAVING patient_count >= 5 AND span_sec <= 300
-ORDER BY patient_count DESC LIMIT 50
-```
-
-注意事项：
-- 必须用 `toDateTime(substring(trim(setl_time),1,19))` 转换时间戳
+字段注意事项：
+- `fqz_fymx_test.setl_time` 是 String 类型且尾部带 `\\t`，必须用 `toDateTime(substring(trim(setl_time),1,19))` 转换
 - 必须用 `trim(...)` 清理字符串字段
 - med_type 编码：11=门诊统筹，21=住院，53_04=特病门诊
-- 严禁使用 `fqz_gz_jzsj_all_ql`
+
+注意：以上仅为表选择指引，SQL 查询模式请根据审计方法论和用户原始问题自行决定，不要照搬历史 SQL 模板。
 """
 
         return None

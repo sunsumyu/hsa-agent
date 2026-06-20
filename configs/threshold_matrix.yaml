@@ -1,0 +1,252 @@
+# ============================================================
+# 阈值矩阵配置 - 企业级动态阈值策略核心配置
+# ============================================================
+# 解决问题：
+# 1. 固定阈值不适配不同业务场景（药店/门诊/住院）
+# 2. 用户自然语言"大额/异常"无法精确映射阈值
+# 3. Phase1基线计算未自动化执行
+# ============================================================
+
+# ── 业务场景定义 (Business Scenarios) ───────────────────────
+business_scenarios:
+  PHARMACY:
+    name: "药店购药"
+    med_type_patterns: ["定点药店购药", "药店", "购药", "药品"]
+    description: "定点零售药店购药场景，金额通常较低，单笔几百元常见"
+    threshold_strategy: "DYNAMIC_QUANTILE"  # 强制使用动态分位数
+    hard_threshold_recommended: false       # 不推荐固定阈值
+    reason: "药店金额分布偏左（低金额），固定阈值易导致零召回或误报"
+
+  OUTPATIENT:
+    name: "门诊就医"
+    med_type_patterns: ["门诊统筹", "门诊", "11", "普通门诊", "门诊慢病"]
+    description: "门诊就医场景，金额中等，单笔几千元常见"
+    threshold_strategy: "DYNAMIC_QUANTILE_OR_HARD"
+    hard_threshold_recommended: true
+    default_hard_threshold: 5000
+    reason: "门诊金额分布适中，可使用固定阈值或动态分位数"
+
+  INPATIENT:
+    name: "住院就医"
+    med_type_patterns: ["住院", "21", "普通住院", "住院治疗"]
+    description: "住院就医场景，金额较高，单笔万元以上常见"
+    threshold_strategy: "HARD_THRESHOLD_OR_DYNAMIC"
+    hard_threshold_recommended: true
+    default_hard_threshold: 10000
+    reason: "住院金额分布较宽，优先使用固定阈值，可降级动态分位数"
+
+  SPECIAL_DISEASE:
+    name: "特病门诊"
+    med_type_patterns: ["特病门诊", "53_04", "慢性病", "慢病", "门慢"]
+    description: "特殊病种门诊，长期治疗，需要特殊关注"
+    threshold_strategy: "DYNAMIC_QUANTILE"
+    hard_threshold_recommended: false
+    reason: "特病门诊因病情不同金额差异大，应使用动态分位数"
+
+# ── 异常程度映射 (Anomaly Degree Mapping) ────────────────────
+anomaly_degree_mapping:
+  # 用户语言中的关键词 → 异常程度等级 → 分位数策略
+  keywords_to_degree:
+    HIGH:
+      keywords: ["排名最高", "最大", "极端", "异常大", "巨额", "特大", "最大额", "最高额", "排在前面"]
+      quantile: 0.99
+      multiplier: 1.5  # 高异常程度时，阈值放大1.5倍
+      description: "用户关注极端异常，使用P99捕获最顶部异常值"
+
+    MEDIUM:
+      keywords: ["大额", "高额", "异常", "偏高", "超出正常", "不正常", "疑似", "较高", "偏大"]
+      quantile: 0.95
+      multiplier: 1.0
+      description: "用户关注一般异常，使用P95捕获显著异常值"
+
+    LOW:
+      keywords: ["偏高", "较高", "略高", "稍微", "一点"]
+      quantile: 0.90
+      multiplier: 0.8
+      description: "用户关注轻微异常，使用P90捕获边界异常值"
+
+    USER_SPECIFIED:
+      keywords: []  # 无关键词，通过数值提取识别
+      quantile: null  # 使用用户指定的值
+      multiplier: 1.0
+      description: "用户明确指定了阈值数值，直接使用"
+
+# ── 统计方法偏好映射 (Statistical Preference) ────────────────
+statistical_preference_mapping:
+  RANKING:
+    keywords: ["排名", "排前", "前几", "列出", "TOP", "排行", "从高到低", "从低到高", "排序"]
+    description: "排名类查询，直接按金额排序，不强制阈值"
+    threshold_optional: true
+    sql_pattern: "ORDER BY {metric} DESC LIMIT {limit}"
+
+  COUNT_BASED:
+    keywords: ["多少", "几个", "数量", "频次", "次数", "统计"]
+    description: "计数类查询，需要阈值来定义异常"
+    threshold_optional: false
+
+  AGGREGATION:
+    keywords: ["汇总", "总计", "累计", "总额", "合计", "一共"]
+    description: "聚合类查询，按分组统计"
+    threshold_optional: false
+
+  COMPARISON:
+    keywords: ["高于", "超过", "大于", "比...高", "以上", "至少", "不少于"]
+    description: "比较类查询，用户可能指定阈值"
+    threshold_optional: false
+
+  TOP_N:
+    keywords: ["前10", "前20", "前50", "前100", "TOP10", "TOP20", "TOP50", "TOP100"]
+    description: "Top-N 查询，取前N条记录"
+    threshold_optional: true
+    sql_pattern: "ORDER BY {metric} DESC LIMIT {n}"
+
+# ── 分位数策略配置 (Quantile Strategy) ────────────────────────
+quantile_strategies:
+  # 不同业务场景的分位数推荐值
+  by_business_scenario:
+    PHARMACY:
+      default: 0.95
+      alternatives: [0.90, 0.99]
+      reason: "药店金额分布偏左（低金额），P95即可捕获异常，P99捕获极端值"
+      baseline_sql_template: "SELECT quantile({quantile})(medfee_sumamt) AS baseline FROM {table} WHERE med_type = '定点药店购药'"
+
+    OUTPATIENT:
+      default: 0.95
+      alternatives: [0.90, 0.99]
+      reason: "门诊金额分布适中，P95平衡召回率和精确度"
+      baseline_sql_template: "SELECT quantile({quantile})(medfee_sumamt) AS baseline FROM {table} WHERE med_type LIKE '%门诊%'"
+
+    INPATIENT:
+      default: 0.90
+      alternatives: [0.95, 0.99]
+      reason: "住院金额分布较宽，P90已足够捕获明显异常"
+      baseline_sql_template: "SELECT quantile({quantile})(medfee_sumamt) AS baseline FROM {table} WHERE med_type LIKE '%住院%'"
+
+    SPECIAL_DISEASE:
+      default: 0.95
+      alternatives: [0.90, 0.99]
+      reason: "特病门诊金额因病情差异大，P95平衡召回和精确"
+      baseline_sql_template: "SELECT quantile({quantile})(medfee_sumamt) AS baseline FROM {table}"
+
+  # 不同时间粒度的分位数推荐值
+  by_time_granularity:
+    SINGLE_SETL:    # 单次结算
+      default: 0.95
+      reason: "单次结算粒度细，使用P95捕获显著异常"
+
+    MONTHLY:        # 月度汇总
+      default: 0.90
+      reason: "月度汇总粒度较粗，使用P90即可"
+
+    YEARLY:         # 年度汇总
+      default: 0.85
+      reason: "年度汇总粒度最粗，使用P85"
+
+  # 默认分位数配置（无业务场景信息时）
+  default:
+    quantile: 0.95
+    baseline_sql_template: "SELECT quantile({quantile})(medfee_sumamt) AS baseline FROM {table}"
+
+# ── 阈值安全边界 (Threshold Safety Bounds) ───────────────────
+safety_bounds:
+  # 防止分位数计算得到过低或过高的阈值
+  min_threshold_by_scenario:
+    PHARMACY: 50        # 药店最低阈值50元（防止P95过低导致过多召回）
+    OUTPATIENT: 200     # 门诊最低阈值200元
+    INPATIENT: 2000     # 住院最低阈值2000元
+    SPECIAL_DISEASE: 100 # 特病最低阈值100元
+
+  max_threshold_by_scenario:
+    PHARMACY: 30000     # 药店最高阈值3万元（防止P99过高导致零召回）
+    OUTPATIENT: 80000   # 门诊最高阈值8万元
+    INPATIENT: 300000   # 住院最高阈值30万元
+    SPECIAL_DISEASE: 50000 # 特病最高阈值5万元
+
+  # 全局安全边界
+  global_min: 10        # 全局最低阈值10元
+  global_max: 1000000   # 全局最高阈值100万元
+
+# ── 降级策略 (Fallback Strategy) ────────────────────────────
+fallback:
+  # Phase 1 基线计算失败时的降级策略
+  baseline_calculation_failure:
+    strategy: "USE_CONFIG_DEFAULT"
+    defaults:
+      PHARMACY: 300       # 药店默认阈值300元
+      OUTPATIENT: 2000    # 门诊默认阈值2000元
+      INPATIENT: 8000     # 住院默认阈值8000元
+      SPECIAL_DISEASE: 500 # 特病默认阈值500元
+    reason: "基线计算失败时，使用预设的经验阈值"
+
+  # 无数据时的降级策略
+  empty_data:
+    strategy: "RETURN_ZERO_FINDINGS_WITH_CONTEXT"
+    report_template: |
+      物理穿透审计已完成，总共扫描了 {total_records} 条记录，
+      覆盖时间段 {min_time} 至 {max_time}，
+      数据库中不存在符合该异常特征的数据，
+      判定违规结果为 0 条。
+
+  # 表不存在时的降级策略
+  table_not_found:
+    strategy: "USE_DEFAULT_TABLE"
+    default_table: "fqz_gz_jzsj_all_ql"
+    reason: "指定的表不存在，使用默认主表"
+
+# ── 业务规则阈值 (Business Rule Thresholds) ──────────────────
+# 继承自 audit_thresholds.yaml，这里补充动态阈值相关
+business_thresholds:
+  # 批量刷单检测
+  batch_billing:
+    patient_count: 5           # 批量开药：distinct patients >= 5
+    time_span_sec: 300         # 批量开药：时间跨度 <= 300 秒（5分钟）
+    limit: 50                  # 批量开药：结果限制
+
+  # 高频购药
+  high_freq_drug_purchase:
+    monthly_count: 10          # 高频购药：月度 >10 次
+    cross_pharmacy: true       # 跨多药店购药视为异常
+
+  # 分解住院
+  decomposition_hospitalization:
+    readmission_window_days: 15  # 分解住院：同机构 15 天内再入院
+
+  # 跨店消费
+  cross_store_high_spend:
+    store_count: 5             # 跨店高消费：机构数 >= 5
+    fund_payment: 5000         # 跨店高消费：基金支付 > 5,000 CNY
+
+# ── 可观测性配置 (Observability) ────────────────────────────
+observability:
+  enable_decision_logging: true
+  log_threshold_decisions: true
+  log_baseline_calculations: true
+  log_fallback_events: true
+  metrics_prefix: "hsa.threshold"
+
+  # 决策日志格式
+  decision_log_format: |
+    [ThresholdDecision] query={query_hash}
+    | business_type={business_type}
+    | anomaly_degree={anomaly_degree}
+    | strategy={strategy}
+    | threshold={threshold}
+    | quantile={quantile}
+    | confidence={confidence}
+    | reason={reason}
+
+# ── 测试用例预期值 (Test Case Expectations) ──────────────────
+test_expectations:
+  # QA-CUST-27: 药店大额查询
+  QA-CUST-27:
+    expected_business_type: "PHARMACY"
+    expected_strategy: "DYNAMIC_QUANTILE_P99"  # 或 RANKING_NO_THRESHOLD
+    expected_threshold_range: [100, 1000]  # 预期阈值在100-1000元之间
+    reason: "药店购药场景，金额分布低，应使用动态分位数"
+
+  # QA-CUST-26: 乡镇卫生院批量刷单
+  QA-CUST-26:
+    expected_business_type: "OUTPATIENT"
+    expected_strategy: "HARD_THRESHOLD"  # 使用固定阈值（患者数>=5）
+    expected_threshold_range: null  # 不适用金额阈值
+    reason: "批量刷单检测使用固定规则阈值"

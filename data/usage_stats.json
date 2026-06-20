@@ -1,12 +1,12 @@
 {
-  "today": "2026-06-18",
+  "today": "2026-06-20",
   "daily_usage": {
-    "doubao-1-5-pro": 20657,
-    "doubao-1-5-lite": 10993
+    "doubao-1-5-pro": 6697,
+    "doubao-1-5-lite": 1548
   },
   "daily_requests": {
-    "doubao-1-5-pro": 29,
-    "doubao-1-5-lite": 12
+    "doubao-1-5-pro": 5,
+    "doubao-1-5-lite": 3
   },
   "total_usage": {
     "doubao-pro-32k": 552555,
@@ -29,8 +29,8 @@
     "doubao-smart-router": 8860,
     "deepseek-v4-pro": 20303020,
     "deepseek-v4-flash": 1201777,
-    "doubao-1-5-pro": 96664,
-    "doubao-1-5-lite": 82687
+    "doubao-1-5-pro": 103361,
+    "doubao-1-5-lite": 84235
   },
   "blacklist_expiry": {},
   "stability_scores": {},

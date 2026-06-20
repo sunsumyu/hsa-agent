@@ -161,35 +161,13 @@ class AuditCoderAgent:
                 user_q += " " + str(getattr(m, "content", ""))
         user_q = user_q.strip()[:200]
 
-            # ──【企业级 v2.0】场景化 SQL 刚性防漂移指引注入 ──
+        # ──【企业级 v2.0】场景化 SQL 刚性防漂移指引注入 ──
         q_lower = user_q.lower()
         scenario_guidelines = ""
 
-        # [V2.0 NEW] 优先使用 SceneTableSelector 的强制提示
+        # [V2.0 NEW] 优先使用 SceneTableSelector 的强制提示（仅用于表选择，不强制 SQL 模板）
         if scene_enforcement:
             scenario_guidelines = scene_enforcement
-        elif any(kw in q_lower for kw in ["牙", "拔牙", "口腔", "牙体", "卫生", "卫生院", "村卫生室", "门诊统筹", "刷单", "QA-CUST", "门诊明细", "乡镇", "费用明细"]):
-            # 扩展场景检测关键词
-            scenario_guidelines = (
-                "\n\n【⚠️ 物理 CLICKHOUSE SQL 刚性编写红线 - 乡镇卫生院/门诊统筹批量刷卡核查】\n"
-                "1. 你**必须直接查 `fqz_fymx_test`**，严禁 JOIN `fqz_gz_jzsj_all_ql`（两表 setl_id 完全不重叠，JOIN 会导致数据丢失）。\n"
-                "2. `fqz_fymx_test.setl_time` 是 String 类型且尾部带 `\\t`，**必须**用 "
-                "`toDateTime(substring(trim(setl_time),1,19))` 转换，严禁直接 `toDateTime(setl_time)`。\n"
-                "3. 任务要求识别'连续多个不同病号且开出项目相同、结算时间差极短'的违规行为。标准 SQL 模板：\n"
-                "   SELECT toDate(toDateTime(substring(trim(setl_time),1,19))) AS setl_date,\n"
-                "          trim(fixmedins_name) AS inst, trim(hilist_name) AS item,\n"
-                "          count(DISTINCT trim(psn_no)) AS patient_count,\n"
-                "          dateDiff('second', min(toDateTime(substring(trim(setl_time),1,19))),\n"
-                "                            max(toDateTime(substring(trim(setl_time),1,19)))) AS span_sec\n"
-                "   FROM default.fqz_fymx_test\n"
-                "   WHERE trim(fixmedins_name) LIKE '%卫生%'\n"
-                "   GROUP BY setl_date, inst, item\n"
-                "   HAVING patient_count >= 5 AND span_sec <= 300\n"
-                "   ORDER BY patient_count DESC LIMIT 50\n"
-                "4. 务必使用 `trim(...)` 清理所有字符串字段（机构名、项目名、患者号），防止制表符破坏匹配。\n"
-                "5. med_type 编码：11=门诊统筹，21=住院，53_04=特病门诊。严禁用中文过滤 med_type！\n"
-                "6. 严禁使用 `fqz_gz_jzsj_all_ql` 表，该表 fixmedins_name 是加密字段无法 LIKE 匹配！"
-            )
 
         zero_findings_rule = (
             "\n\n【⚠️ 零发现与终止准则 (Zero-Findings & Termination Rule)】\n"
@@ -226,9 +204,11 @@ class AuditCoderAgent:
             
             if not getattr(response, "tool_calls", None):
                  span.set_result("未触发工具调用，直接回复")
-                 # 确保即使直接回复，也从历史中提取核心 SQL，防止丢失
+                 # [V178.10] 使用 state 中已累加的全量 sql_history，确保不丢失任何轮次的 SQL
                  history_sql = state.get("sql_history", [])
+                 preserved_raw_data = state.get("raw_data", "")
                  logger.info(f"🔮 [DEBUG_SQL_DIRECT] history_sql from state: {history_sql}")
+                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] preserved_raw_data: {preserved_raw_data[:200]}...")
                  core_sql = ""
                  if history_sql:
                      audit_queries = []
@@ -240,10 +220,12 @@ class AuditCoderAgent:
                      core_sql = audit_queries[-1] if audit_queries else history_sql[-1]
                  logger.info(f"🔮 [DEBUG_SQL_DIRECT] selected core_sql: {core_sql[:100]}...")
                  return {
-                     "messages": [response], 
-                     "error_log": None, 
+                     "messages": [response],
+                     "error_log": None,
                      "execution_trace": tracer.to_legacy_list(),
-                     "sql_query": core_sql
+                     "sql_query": core_sql,
+                     "sql_history": history_sql,  # [V178.10] 返回全量 sql_history，确保不丢失
+                     "raw_data": preserved_raw_data  # [V178.10] 显式返回 raw_data，确保前序轮次的审计证据不丢失
                  }
             
             span.set_result(f"生成了 {len(response.tool_calls)} 个工具调用指令")
@@ -380,12 +362,14 @@ class AuditCoderAgent:
         
         # 启发式筛选核心审计 SQL，避免被最后一步的边界探针 SQL 覆盖
         core_sql = ""
-        combined_sql_logics = state.get("sql_history", []) + sql_logics
+        # [V178.10] 手动累加 sql_history，不依赖 LangGraph reducer（node 内部多次调用不会触发 reducer）
+        accumulated_sql_history = state.get("sql_history", []) + sql_logics
         logger.info(f"🔮 [DEBUG_SQL] state.sql_history: {state.get('sql_history')}")
         logger.info(f"🔮 [DEBUG_SQL] current sql_logics: {sql_logics}")
-        if combined_sql_logics:
+        logger.info(f"🔮 [DEBUG_SQL] accumulated_sql_history: {accumulated_sql_history}")
+        if accumulated_sql_history:
             audit_queries = []
-            for sql in combined_sql_logics:
+            for sql in accumulated_sql_history:
                 is_probe = self._is_probe_query(sql)
                 logger.info(f"🔮 [DEBUG_SQL] checking query: is_probe={is_probe} for {sql[:100]}...")
                 if not is_probe:
@@ -393,7 +377,7 @@ class AuditCoderAgent:
             if audit_queries:
                 core_sql = audit_queries[-1]
             else:
-                core_sql = combined_sql_logics[-1]
+                core_sql = accumulated_sql_history[-1]
         logger.info(f"🔮 [DEBUG_SQL] selected core_sql: {core_sql[:100]}...")
 
         # 判断本轮是否执行了新的核心审计 SQL
@@ -411,7 +395,7 @@ class AuditCoderAgent:
             "tool_msgs": tool_msgs,
             "raw_data": new_raw_data,
             "sql_query": core_sql,
-            "sql_history": sql_logics, # [V178.9] 仅返回增量部分，由 LangGraph 的 Reducer 在 state 追加，防重复
+            "sql_history": accumulated_sql_history, # [V178.10] 返回全量累加 sql_history，不依赖 LangGraph reducer
             "methodology": "\n\n".join(methodologies),
             "execution_trace": state.get("execution_trace", []) + tool_traces,
             "has_error": has_error,

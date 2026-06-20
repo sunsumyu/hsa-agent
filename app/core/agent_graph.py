@@ -21,6 +21,7 @@ from app.reporting.report_renderer import report_renderer as _report_renderer
 from app.skills.fast_router import RouteType
 from app.skills.schema_injector import schema_injector as _schema_injector
 from app.core.structured_tracer import StructuredTracer
+from app.core.pipeline_tracker import pipeline_tracker  # [V178.10] 管线追踪
 from app.core.context.gates import QualityGate
 from app.core.config import settings
 from app.core.task_pool import task_pool
@@ -50,6 +51,8 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     from app.agents.planner_agent import planner_agent
     from app.skills.fast_router import fast_router
 
+    pipeline_tracker.on_node_start("PLANNER", state)  # [V178.10]
+
     # 1. 获取基础信息
     metadata = state.get("metadata") or {}
     user_question = metadata.get("user_question")
@@ -60,76 +63,92 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     if not manual_model and user_question:
         route = fast_router.classify(user_question)
         logger.info(f"🚦 [SmartRouter] 任务分流决策: {route.model_tier} (原因: {route.reason})")
-        
+
         # 将路由决策持久化到 Metadata 中，llm_provider.chat 将自动读取
         if "metadata" not in state or state["metadata"] is None:
             state["metadata"] = {}
         state["metadata"]["model_id"] = route.model_tier
         state["metadata"]["routing_info"] = route.reason
 
-    return await planner_agent.plan(state, config)
+    result = await planner_agent.plan(state, config)
+    pipeline_tracker.on_node_end("PLANNER", state, result)  # [V178.10]
+    return result
 
 async def aligner_node(state: AuditState, config: RunnableConfig):
     """[V210.0] 前置白盒语义对齐节点 AlignerNode"""
     from app.core.context.funnel import semantic_funnel
     from langchain_core.messages import HumanMessage
-    
+
+    pipeline_tracker.on_node_start("ALIGNER", state)  # [V178.10]
+
     # 1. 提取用户审计提问
     user_input = ""
     for msg in state.get("messages", []):
         if isinstance(msg, (HumanMessage, tuple)) or (hasattr(msg, "type") and msg.type in ("human", "user")):
             user_input = msg[1] if isinstance(msg, tuple) else str(msg.content)
             break
-            
+
     if not user_input:
         logger.warning("[AlignerNode] 未能从状态中提取到有效的用户提问，跳过对齐流")
-        return {}
-        
+        result = {}
+        pipeline_tracker.on_node_end("ALIGNER", state, result)
+        return result
+
     # 2. 执行穿透四层语义漏斗流程
     try:
         metadata = state.get("metadata") or {}
         fast_route_id = metadata.get("fast_route_id")
-        
+
         if fast_route_id:
             logger.success(f"⚡ [Aligner Bypass] 智能体命中直通分支，跳过语义对齐漏斗")
-            return {
+            result = {
                 "metadata": {
                     "user_question": user_input
                 }
             }
-            
+            pipeline_tracker.on_node_end("ALIGNER", state, result)
+            return result
+
         alignment_report = await semantic_funnel.execute_alignment_flow(user_input, config)
-        
+
         # 3. 构造状态更新
         metadata_update = {
             "semantic_alignment": alignment_report,
             "user_question": user_input
         }
-        
+
         # 提取临时表，写入 state
         temp_table = alignment_report.get("temp_table")
-        
+
         logger.success(f"🎯 [AlignerNode] 语义白盒漏斗对齐成功，临时表: {temp_table}")
-        return {
+        result = {
             "metadata": metadata_update,
             "temp_table": temp_table,
             "schema_hint": alignment_report.get("explanation")
         }
+        pipeline_tracker.on_node_end("ALIGNER", state, result)
+        return result
     except Exception as e:
         logger.error(f"❌ [AlignerNode] 对齐流执行异常: {e}")
+        pipeline_tracker.on_node_end("ALIGNER", state, {"error_log": str(e)})
         return {}
 
 async def sqlexec_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 CoderAgent 执行工具调用与验证"""
     from app.agents.coder_agent import coder_agent
+    pipeline_tracker.on_node_start("SQLEXEC", state)  # [V178.10]
     res = await coder_agent.execute(state, config)
     logger.info(f"🔍 [DEBUG Graph] sqlexec_node returned: sql_query = {repr(res.get('sql_query'))}")
+    pipeline_tracker.on_node_end("SQLEXEC", state, res)  # [V178.10]
     return res
 
 async def critic_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ReflectionAgent 执行自愈诊断"""
     from app.agents.reflection_agent import reflection_agent
-    return await reflection_agent.reflect(state, config)
+    pipeline_tracker.on_node_start("CRITIC", state)  # [V178.10]
+    result = await reflection_agent.reflect(state, config)
+    pipeline_tracker.on_node_end("CRITIC", state, result)  # [V178.10]
+    return result
 
 async def reporter_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ReportRenderer 执行报告渲染与事实对齐"""
@@ -213,7 +232,10 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 async def consolidator_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ConsolidatorAgent 执行经验固化"""
     from app.agents.consolidator_agent import consolidator_agent
-    return await consolidator_agent.consolidate(state)
+    pipeline_tracker.on_node_start("CONSOLIDATOR", state)  # [V178.10]
+    result = await consolidator_agent.consolidate(state)
+    pipeline_tracker.on_node_end("CONSOLIDATOR", state, result)  # [V178.10]
+    return result
 
 async def human_approval_node(state: AuditState, config: RunnableConfig):
     """[V173.1] 人机协作拦截点：将任务提交至动态任务池并挂起"""

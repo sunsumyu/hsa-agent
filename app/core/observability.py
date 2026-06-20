@@ -17,7 +17,12 @@ from opentelemetry.sdk.resources import Resource, SERVICE_NAME
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from openinference.instrumentation.langchain import LangChainInstrumentor
+try:
+    from openinference.instrumentation.langchain import LangChainInstrumentor
+    _HAS_OPENINFERENCE = True
+except ImportError:
+    _HAS_OPENINFERENCE = False
+    logger.warning("⚠️ [Observability] openinference 未安装，LangChain 自动插桩已禁用")
 from langchain_core.runnables import RunnableConfig
 
 # 全局观测句柄容器 (V40.0 增强)
@@ -113,10 +118,13 @@ def init_observability():
             _tracer_provider = provider
             trace.set_tracer_provider(provider)
             
-            LangChainInstrumentor().instrument(
-                tracer_provider=provider,
-                excluded_urls="172.25.128.80,127.0.0.1:4517,127.0.0.1:6006"
-            )
+            if _HAS_OPENINFERENCE:
+                LangChainInstrumentor().instrument(
+                    tracer_provider=provider,
+                    excluded_urls="172.25.128.80,127.0.0.1:4517,127.0.0.1:6006"
+                )
+            else:
+                logger.debug(">>> [Observability] openinference 不可用，跳过 LangChain 自动插桩")
             
             logger.info(">>> [Observability] OTel 异步加固插桩已就绪")
             

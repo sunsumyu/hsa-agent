@@ -42,8 +42,19 @@ def _merge_dict(left: Dict, right: Dict) -> Dict:
 
 
 def _merge_list(left: List, right: List) -> List:
-    """列表追加合并 reducer，用于 sql_history 等需要全量保留的字段。"""
+    """列表追加合并 reducer，用于 messages 等需要全量保留的字段。"""
     return (left or []) + (right or [])
+
+
+def _overwrite_list(left: List, right: List) -> List:
+    """列表覆盖 reducer，用于 sql_history 等由 coder_agent 内部维护全量的字段。
+
+    如果 right 非空，直接用 right 覆盖 left（coder_agent 内部已累加全量）。
+    如果 right 为空，保留 left（避免循环间覆盖丢失）。
+    """
+    if right is not None and len(right) > 0:
+        return right
+    return left or []
 
 
 # ── Layer 1: 框架通用状态 ──────────────────────────────────────
@@ -66,7 +77,7 @@ class TaskArtifacts(TypedDict, total=False):
     """与 "执行某项数据任务" 相关的中间产物, 不依赖具体行业。"""
     tasks: List[str]
     sql_query: str
-    sql_history: Annotated[List[str], _merge_list]
+    sql_history: Annotated[List[str], _overwrite_list]
     raw_data: str
     sql_validated: bool
     execution_trace: List[str]
