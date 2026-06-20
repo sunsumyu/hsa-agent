@@ -19,6 +19,8 @@ STRUCTURAL_WHITELIST: List[str] = [
     "CASE WHEN",
     "UNION ALL",
     "UNION ",
+    "OVER ",
+    "OVER(",
 ]
 
 # Aggregate whitelist: these statistical keywords are only exempt when

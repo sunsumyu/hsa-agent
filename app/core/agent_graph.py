@@ -71,6 +71,20 @@ async def planner_node(state: AuditState, config: RunnableConfig):
         state["metadata"]["routing_info"] = route.reason
 
     result = await planner_agent.plan(state, config)
+    
+    # [V2.0 NEW] Gate 1: 校验意图与方法论的一致性
+    temp_state = state.copy()
+    temp_state.update(result)
+    from app.core.context.gates import QualityGate
+    validation_res = QualityGate.validate_intent(temp_state)
+    if not validation_res.get("passed", True):
+        gate_error = validation_res.get("error") or "意图校验失败"
+        logger.warning(f"🚨 [Gate 1 Intent Intercept] {gate_error}")
+        result["error_log"] = gate_error
+        result["retry_count"] = state.get("retry_count", 0) + 1
+    else:
+        result["error_log"] = None
+
     pipeline_tracker.on_node_end("PLANNER", state, result)  # [V178.10]
     return result
 
@@ -138,6 +152,19 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
     from app.agents.coder_agent import coder_agent
     pipeline_tracker.on_node_start("SQLEXEC", state)  # [V178.10]
     res = await coder_agent.execute(state, config)
+    
+    # [V2.0 NEW] Gate 3: 执行结果与原始意图的一致性校验
+    if not res.get("error_log"):
+        temp_state = state.copy()
+        temp_state.update(res)
+        from app.core.context.gates import QualityGate
+        validation_res = QualityGate.validate_result_matching(temp_state)
+        if not validation_res.get("passed", True):
+            gate_error = validation_res.get("error") or "结果与意图对齐校验失败"
+            logger.warning(f"🚨 [Gate 3 Result Intercept] {gate_error}")
+            res["error_log"] = gate_error
+            res["retry_count"] = state.get("retry_count", 0) + 1
+
     logger.info(f"🔍 [DEBUG Graph] sqlexec_node returned: sql_query = {repr(res.get('sql_query'))}")
     pipeline_tracker.on_node_end("SQLEXEC", state, res)  # [V178.10]
     return res
@@ -165,9 +192,21 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     hard_sum = sum(_extract_amount(r) for r in raw_data_list)
     hard_count = len(raw_data_list)
     
+    # [V2.1] 识别执行是否受限/逃生舱激活
+    error_log = state.get("error_log") or ""
+    is_restricted = False
+    if (
+        state.get("retry_count", 0) >= MAX_RETRIES 
+        or "降级报告模式" in error_log 
+        or "REACHED_MAX_RETRIES" in error_log
+        or (not state.get("sql_validated") and not raw_data_list)
+    ):
+        is_restricted = True
+        logger.warning("🚨 [REPORTER] 检测到执行受限/逃生舱触发，开启受限核查渲染模式。")
+
     user_question = (state.get("metadata") or {}).get("user_question") or "医保专项审计"
     
-    # [V156.0] 提取最后一条 AI 消息的元数据作为溯源证据
+    # [V156.0] 提取最后一条 AI 消息 of 元数据作为溯源证据
     messages = state.get("messages", [])
     last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
     audit_meta = getattr(last_ai, "additional_kwargs", {}) if last_ai else {}
@@ -193,7 +232,8 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
             execution_trace, 
             hard_count, 
             hard_sum, 
-            rewritten_question=rewritten_q
+            rewritten_question=rewritten_q,
+            is_restricted=is_restricted
         )
         try:
             response = await llm_provider.chat(
@@ -206,7 +246,7 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
             llm_conclusion = str(response.content).strip()
         except Exception as e:
             logger.error(f"结论生成失败: {e}")
-            llm_conclusion = f"本次核查扫描 {hard_count} 条记录，涉及金额 ¥{hard_sum:,.2f}。"
+            llm_conclusion = f"本次核查由于逻辑受限未产出确切违规结论。" if is_restricted else f"本次核查扫描 {hard_count} 条记录，涉及金额 ¥{hard_sum:,.2f}。"
 
     rendered = report_renderer.render(
         user_question=user_question,
@@ -221,11 +261,13 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
         execution_trace=execution_trace,
         audit_metadata=audit_meta, # [V156.0]
         semantic_alignment=(state.get("metadata") or {}).get("semantic_alignment"), # [NEW]
-        raw_data_str=state.get("raw_data") # [NEW]
+        raw_data_str=state.get("raw_data"), # [NEW]
+        is_restricted=is_restricted # [NEW V2.1]
     )
 
-    is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), llm_conclusion)
-    if not is_aligned: logger.warning("🚨 [SEMANTIC_MISMATCH] 报告语义偏离")
+    if not is_restricted:
+        is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), llm_conclusion)
+        if not is_aligned: logger.warning("🚨 [SEMANTIC_MISMATCH] 报告语义偏离")
 
     return {"structured_report": rendered, "messages": [AIMessage(content=rendered.markdown)]}
 
@@ -255,11 +297,32 @@ async def human_approval_node(state: AuditState, config: RunnableConfig):
 # 路由逻辑与工作流构建
 # ============================================================
 
+def _route_planner_post(state: AuditState) -> str:
+    """[V2.0 NEW] Planner 后的条件路由：若 Gate 1 校验失败则自愈，否则走向执行"""
+    if state.get("error_log"):
+        logger.info("🔄 [Graph Route] Gate 1 意图校验失败，走向 CRITIC 自愈。")
+        return "CRITIC"
+    return "SQLEXEC"
+
+def _route_critic_post(state: AuditState) -> str:
+    """[V2.0 NEW] CRITIC 后的条件路由：区分意图错误与执行错误"""
+    err = state.get("error_log", "")
+    if err and ("方法论" in err or "意图" in err or "Gate 1" in err or "RANKING" in err or "SQL 语义错误" in err and "RANKING" in state.get("metadata", {}).get("semantic_alignment", {}).get("query_type", "")):
+        logger.info("🔄 [Graph Route] CRITIC 诊断为意图方法论错误，重新进入 PLANNER。")
+        return "PLANNER"
+    logger.info("🔄 [Graph Route] CRITIC 诊断为执行错误，重新进入 SQLEXEC。")
+    return "SQLEXEC"
+
 def _route_sqlexec_post(state: AuditState) -> str:
     # 0. 快速路由物理直通分流：直接走向 Consolidator，避免二次 LLM 工具综合与循环
     metadata = state.get("metadata") or {}
     if metadata.get("fast_route_id"):
         return "CONSOLIDATOR"
+
+    # [FIX] 如果执行阶段发生错误（包括 Gate 2 拦截或执行报错），且未超限，优先走向 CRITIC 纠偏
+    if (state.get("error_log") or state.get("has_error")) and state.get("retry_count", 0) < MAX_RETRIES:
+        logger.info("🔄 [Graph Route] SQLEXEC 校验/执行失败，走向 CRITIC 纠偏。")
+        return "CRITIC"
 
     messages = state.get("messages", [])
     last_msg = messages[-1] if messages else None
@@ -288,9 +351,17 @@ def _build_workflow_skeleton() -> StateGraph:
     wf.add_node("CONSOLIDATOR", consolidator_node)
     wf.add_node("HUMAN_APPROVAL", human_approval_node)
 
-    wf.set_entry_point("PLANNER")
-    wf.add_edge("PLANNER", "ALIGNER")
-    wf.add_edge("ALIGNER", "SQLEXEC")
+    wf.set_entry_point("ALIGNER")
+    wf.add_edge("ALIGNER", "PLANNER")
+    # [V2.0 NEW] 使用条件路由连接 PLANNER 与下一跳
+    wf.add_conditional_edges(
+        "PLANNER",
+        _route_planner_post,
+        {
+            "CRITIC": "CRITIC",
+            "SQLEXEC": "SQLEXEC"
+        }
+    )
     wf.add_conditional_edges(
         "SQLEXEC", 
         _route_sqlexec_post, 
@@ -302,7 +373,15 @@ def _build_workflow_skeleton() -> StateGraph:
         }
     )
     wf.add_edge("HUMAN_APPROVAL", END) # 审批节点是自动流程的终点
-    wf.add_edge("CRITIC", "SQLEXEC")
+    # [V2.0 NEW] 使用条件路由决定 CRITIC 纠偏后的下一跳
+    wf.add_conditional_edges(
+        "CRITIC",
+        _route_critic_post,
+        {
+            "PLANNER": "PLANNER",
+            "SQLEXEC": "SQLEXEC"
+        }
+    )
     wf.add_edge("CONSOLIDATOR", "REPORTER")
     wf.add_edge("REPORTER", END)
     return wf

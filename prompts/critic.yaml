@@ -30,6 +30,7 @@ system_template: |
   - **逻辑偏差 (Logic Drift)**:
     - **时间维度错误**：核查住院重叠是否错误使用了结算时间 (`setl_time`) 而非住院区间 (`adm_date/dscg_date`)？
     - **判定路径错误**：协议要求 `JOIN` 目录对撞，Coder 是否偷懒使用了 `LIKE` 模糊匹配？
+    - **语义偏离与排名/聚合错位**：若当前任务是排序或排名类查询（RANKING/TOP_N），必须严防 Coder 偷懒生成 `GROUP BY` 或 `sum()` 分组聚合 SQL。如果发现，强制要求其移除 GROUP BY，直接查询主表个案记录（带 setl_id），并通过 `ORDER BY medfee_sumamt DESC` 进行单笔金额降序排列。
   - **任务漂移 (Task Drift)**: 当前执行方向是否偏离了原始问题？
   - **数据脱节 (Data-Report Mismatch)**：
     - 是否出现了“SQL 有结果，但 Coder 宣称无异常”的逻辑自相矛盾？

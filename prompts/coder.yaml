@@ -97,7 +97,7 @@ system_template: |
       - 核查重复结算/收费时，**必须明确编写按 `psn_no`, `fixmedins_code`, 结算日期（如 `toDate(setl_time)`）进行 `GROUP BY`** 的去重和分组计数逻辑，并附加 `HAVING count(*) > 1`，以此获取确凿的去重依据并避免漏报。
   - **避坑准则**：
       1. **禁止别名阴影**：严禁将表达式结果的别名设为与原始列名相同。
-      2. **聚合与日期语法**：禁止使用 `GROUP_CONCAT` (MySQL)，必须使用 `arrayStringConcat(groupUniqArray(字段), ',')`；禁止使用 `DATEDIFF`，必须使用 `dateDiff('day', start, end)`；禁止使用 `IFNULL`，必须使用 `ifNull(x, y)`。
+      2. **聚合与日期语法**：禁止使用 `GROUP_CONCAT` (MySQL)，必须使用 `arrayStringConcat(groupUniqArray(字段), ',')`；禁止使用 `DATEDIFF`，必须使用 `dateDiff('day', start, end)`；禁止使用 `IFNULL`，必须使用 `ifNull(x, y)`。对于日期时间过滤（特别是“最近5年”等时间跨度），**必须优先使用天级别/日期级别的 ClickHouse 时间函数**，如 `subtractYears(today(), 5)` 或 `today() - INTERVAL 5 YEAR`，**严禁使用精确到小时/分秒的 `now() - INTERVAL 5 YEAR` 比较**，以防止临界的违规就诊记录被分秒级别的过滤条件过滤掉。
       3. **模糊匹配**：优先使用 `multiSearchAny`。
   - **复合任务的隔离判定约束 (Composite Check Isolation Rules)**:
       - 严禁在 HAVING 子句中对不同治疗领域的缺失耗材使用单一的混合 OR countIf() 条件，这会导致严重的业务交叉污染与伪阴性漏报（例如同时核查血透与骨科固定，合规的血透耗材会使 countIf 结果大于 0，从而导致违规的骨科记录被过滤漏报）。

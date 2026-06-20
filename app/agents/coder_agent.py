@@ -228,6 +228,25 @@ class AuditCoderAgent:
                      "raw_data": preserved_raw_data  # [V178.10] 显式返回 raw_data，确保前序轮次的审计证据不丢失
                  }
             
+            # [V2.0 NEW] SQL物理执行前的语义拦截校验 [Gate 2]
+            for tc in response.tool_calls:
+                if tc.get("name") == "execute_audit_sql":
+                    sql_arg = tc.get("args", {}).get("sql", "")
+                    if sql_arg:
+                        from app.core.context.gates import QualityGate
+                        validation_res = QualityGate.validate_sql_semantics(state, sql_arg)
+                        if not validation_res.get("passed", True):
+                            gate_error = validation_res.get("error") or "SQL 语义审查校验失败"
+                            logger.warning(f"🚨 [Gate 2 SQL Semantics Intercept] {gate_error}")
+                            span.fail(gate_error)
+                            return {
+                                "error_log": gate_error,
+                                "sql_query": sql_arg,
+                                "messages": [response],
+                                "retry_count": retry + 1,
+                                "execution_trace": tracer.to_legacy_list()
+                            }
+            
             span.set_result(f"生成了 {len(response.tool_calls)} 个工具调用指令")
 
         # 4. 物理工具执行 (SQL 执行)
@@ -391,12 +410,15 @@ class AuditCoderAgent:
         if not has_new_core_query and not new_raw_data:
             new_raw_data = state.get("raw_data", "")
 
+        # [V2.1] 避免在工具未返回 methodology 时将 state 中的 methodology 覆盖为空字符串
+        final_methodology = "\n\n".join(methodologies) if methodologies else state.get("methodology", "")
+
         return {
             "tool_msgs": tool_msgs,
             "raw_data": new_raw_data,
             "sql_query": core_sql,
             "sql_history": accumulated_sql_history, # [V178.10] 返回全量累加 sql_history，不依赖 LangGraph reducer
-            "methodology": "\n\n".join(methodologies),
+            "methodology": final_methodology,
             "execution_trace": state.get("execution_trace", []) + tool_traces,
             "has_error": has_error,
             "error_msg": error_msg
