@@ -29,7 +29,7 @@ from app.skills.sql_validator import sql_validator
 from app.core.booster import booster
 from app.core.structured_tracer import StructuredTracer
 
-from app.skills.probe_guard import is_probe_query, ANALYSIS_WHITELIST
+from app.skills.probe_guard import is_probe_query
 
 class AuditCoderAgent:
     def __init__(self, max_retries: Optional[int] = None):
