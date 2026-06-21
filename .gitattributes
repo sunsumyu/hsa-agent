@@ -1,7 +1,0 @@
-# 强制 GitHub Linguist 忽略特定目录和文件类型
-data/* linguist-vendored
-app/static/* linguist-vendored
-*.html linguist-vendored
-*.json linguist-documentation
-docs-log/* linguist-documentation
-tests/* linguist-documentation
