@@ -1,0 +1,82 @@
+# ============================================================
+# Routing Rules — 快速路由规则配置
+# ============================================================
+# 新增规则只需在此文件添加条目, 无需修改 Python 源码。
+# route_type: KNOWN_RULE (确定性审计规则) | KNOWN_ALGO (异常检测算法)
+# ============================================================
+
+rules:
+  - target_id: GENDER_CONFLICT
+    route_type: KNOWN_RULE
+    exact_keywords: ["性别冲突", "性别不符", "男性妇科", "女性男科"]
+    fuzzy_groups:
+      - ["性别", "诊断"]
+      - ["男", "妇科"]
+      - ["女", "前列腺"]
+      - ["男", "子宫"]
+      - ["男", "乳腺"]
+    description: "性别与诊断不符检测"
+
+  - target_id: CROSS_HOSPITAL_OVERLAP
+    route_type: KNOWN_RULE
+    exact_keywords: ["重复住院", "跨院重复", "同时住院", "双院住院"]
+    fuzzy_groups:
+      - ["同一患者", "两家医院"]
+      - ["重复", "住院"]
+      - ["跨机构", "住院"]
+      - ["同期", "住院"]
+    description: "跨机构重复住院检测"
+
+  - target_id: DECOMPOSITION_HOSPITALIZATION
+    route_type: KNOWN_RULE
+    exact_keywords: ["分解住院", "住院分解", "短期再入院"]
+    fuzzy_groups:
+      - ["出院", "再次入院", "短期"]
+      - ["分解", "住院"]
+      - ["间隔", "天", "再住院"]
+    description: "分解住院检测 (短期内二次入院)"
+
+  - target_id: HIGH_FREQ_DRUG_PURCHASE
+    route_type: KNOWN_RULE
+    exact_keywords: ["高频购药", "频繁购药", "大量购药"]
+    fuzzy_groups:
+      - ["购药", "频率"]
+      - ["药店", "多次"]
+      - ["购药", "异常"]
+    description: "高频购药异常检测"
+
+  - target_id: REPEAT_BILLING_DETECTOR
+    route_type: KNOWN_RULE
+    exact_keywords: ["重复收费", "重复结算", "多次收取"]
+    fuzzy_groups:
+      - ["同一天", "同一患者", "多次"]
+      - ["同一医院", "重复", "费用"]
+      - ["重复", "结算", "同一"]
+      - ["同一天", "重复", "收费"]
+    description: "同日同院重复收费检测"
+
+  - target_id: CONTACT_SHARING
+    route_type: KNOWN_RULE
+    exact_keywords: ["联系方式共用", "共用电话", "电话相同", "共用手机号"]
+    fuzzy_groups:
+      - ["患者", "职工", "共用"]
+      - ["手机号", "相同"]
+      - ["联系电话", "共用"]
+    description: "患者与职工共用联系方式检测"
+
+  - target_id: VIX_ANOMALY_SCAN
+    route_type: KNOWN_ALGO
+    exact_keywords: ["变异指数", "VIX", "机构变异"]
+    fuzzy_groups:
+      - ["机构", "异常", "费用"]
+      - ["医院", "变异"]
+    description: "医疗机构费用变异指数扫描"
+
+  - target_id: STATISTICAL_OUTLIER_DETECTOR
+    route_type: KNOWN_ALGO
+    exact_keywords: ["离群", "异常高消费", "统计异常"]
+    fuzzy_groups:
+      - ["消费", "异常", "偏高"]
+      - ["统计", "离群"]
+      - ["报销", "异常偏高"]
+    description: "统计学离群点检测"

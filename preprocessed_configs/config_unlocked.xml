@@ -1,0 +1,48 @@
+<!-- This file was generated automatically.
+     Do not edit it: it is likely to be discarded and generated again before it's read next time.
+     Files used to generate this file:
+       /root/clickhouse/config_unlocked.xml      -->
+
+<!-- This file was generated automatically.
+     Do not edit it: it is likely to be discarded and generated again before it's read next time.
+     Files used to generate this file:
+       config.xml      -->
+<clickhouse>
+    <logger>
+        <level>trace</level>
+        <console>true</console>
+    </logger>
+
+    <listen_host>0.0.0.0</listen_host>
+
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+
+    <path>./</path>
+    <tmp_path>./tmp/</tmp_path>
+    <user_files_path>./user_files/</user_files_path>
+    <format_schema_path>./format_schemas/</format_schema_path>
+
+    <mlock_executable>false</mlock_executable>
+
+    <users>
+        <default>
+            <password/>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
+
+    <profiles>
+        <default/>
+    </profiles>
+
+    <quotas>
+        <default/>
+    </quotas>
+    <listen_host>0.0.0.0</listen_host>
+</clickhouse>

@@ -1,0 +1,68 @@
+1. Checking non-empty chfpdr_name in fqz_gz_jzsj_all_ql:
+Found 41 unique non-empty doctor names:
+  - '王大夫': 6
+  - '普通医生_22': 1
+  - '普通医生_47': 1
+  - '普通医生_53': 1
+  - '普通医生_44': 1
+  - '普通医生_29': 1
+  - '普通医生_55': 1
+  - '普通医生_38': 1
+  - '普通医生_33': 1
+  - '普通医生_49': 1
+  - '普通医生_24': 1
+  - '普通医生_42': 1
+  - '普通医生_35': 1
+  - '普通医生_25': 1
+  - '普通医生_48': 1
+  - '普通医生_34': 1
+  - '普通医生_59': 1
+  - '普通医生_28': 1
+  - '普通医生_45': 1
+  - '普通医生_39': 1
+  - '普通医生_54': 1
+  - '普通医生_43': 1
+  - '普通医生_52': 1
+  - '普通医生_23': 1
+  - '普通医生_32': 1
+  - '普通医生_50': 1
+  - '普通医生_41': 1
+  - '普通医生_30': 1
+  - '普通医生_21': 1
+  - '普通医生_36': 1
+  - '普通医生_27': 1
+  - '普通医生_56': 1
+  - '普通医生_40': 1
+  - '普通医生_57': 1
+  - '普通医生_46': 1
+  - '普通医生_37': 1
+  - '普通医生_26': 1
+  - '普通医生_31': 1
+  - '普通医生_20': 1
+  - '普通医生_51': 1
+  - '普通医生_58': 1
+
+2. Checking non-empty adm_dept_name in fqz_gz_jzsj_all_ql:
+Found 0 unique non-empty department names:
+
+3. Sample rows where chfpdr_name != '' in fqz_gz_jzsj_all_ql:
+  - {'psn_name': '回流参保人_1', 'gend': '2', 'adm_dept_name': '', 'chfpdr_name': '王大夫', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 3, 9, 30)}
+  - {'psn_name': '回流参保人_2', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '王大夫', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 4, 9, 30)}
+  - {'psn_name': '回流参保人_3', 'gend': '2', 'adm_dept_name': '', 'chfpdr_name': '王大夫', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 5, 9, 30)}
+  - {'psn_name': '回流参保人_4', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '王大夫', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 6, 9, 30)}
+  - {'psn_name': '回流参保人_5', 'gend': '2', 'adm_dept_name': '', 'chfpdr_name': '王大夫', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 7, 9, 30)}
+  - {'psn_name': '回流参保人_6', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '王大夫', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 8, 9, 30)}
+  - {'psn_name': '大宽表普通患者_20', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_20', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 15, 0, 0)}
+  - {'psn_name': '大宽表普通患者_21', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_21', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 14, 0, 0)}
+  - {'psn_name': '大宽表普通患者_22', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_22', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 13, 0, 0)}
+  - {'psn_name': '大宽表普通患者_23', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_23', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 12, 0, 0)}
+  - {'psn_name': '大宽表普通患者_24', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_24', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 11, 0, 0)}
+  - {'psn_name': '大宽表普通患者_25', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_25', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 10, 0, 0)}
+  - {'psn_name': '大宽表普通患者_26', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_26', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 9, 0, 0)}
+  - {'psn_name': '大宽表普通患者_27', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_27', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 8, 0, 0)}
+  - {'psn_name': '大宽表普通患者_28', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_28', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 7, 0, 0)}
+  - {'psn_name': '大宽表普通患者_29', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_29', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 6, 0, 0)}
+  - {'psn_name': '大宽表普通患者_30', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_30', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 5, 0, 0)}
+  - {'psn_name': '大宽表普通患者_31', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_31', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 4, 0, 0)}
+  - {'psn_name': '大宽表普通患者_32', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_32', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 3, 0, 0)}
+  - {'psn_name': '大宽表普通患者_33', 'gend': '1', 'adm_dept_name': '', 'chfpdr_name': '普通医生_33', 'chfpdr_code': '', 'dise_name': '', 'setl_time': datetime.datetime(2026, 4, 2, 0, 0)}

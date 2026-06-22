@@ -1,0 +1,24 @@
+# 通用审计治理红线配置
+# 可根据不同项目（医保、金融、供应链）进行切换
+
+audit_domain: "healthcare"
+
+# 拦截规则定义
+interception_rules:
+  - id: "no_fuzzy_matching"
+    name: "禁止模糊匹配代替目录对撞"
+    description: "涉及目录、性别、分类核查时，禁止使用 LIKE，强制使用 JOIN"
+    keywords: ["性别", "限制", "目录", "CATALOG", "GENDER"]
+    severity: "CRITICAL"
+    
+  - id: "temporal_dimension_check"
+    name: "时间维度准确性校验"
+    description: "核查重叠、并发类任务时，禁止使用结算/交易时间，强制使用业务发生区间"
+    trigger_keywords: ["重复住院", "同时住院", "跨院", "OVERLAP", "并发现象"]
+    forbidden_fields: ["SETL_TIME", "TRANSACT_TIME"]
+    mandatory_fields: ["ADM_DATE", "DSCG_DATE", "START_DATE", "END_DATE"]
+    
+  - id: "aggregation_logic_guard"
+    name: "逻辑自杀拦截"
+    description: "聚合查询中禁止按唯一主键分组"
+    forbidden_pk_patterns: ["_ID", "ID$", "MSG_ID", "REC_ID"]

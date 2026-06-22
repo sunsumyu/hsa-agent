@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+.env
+
+# Logs
+*.log
+agent_start_log.txt
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ── JSON 规则: 默认忽略, 白名单显式追踪 ───────────────────
+*.json
+!llm_registry.json
+!llm_providers.json
+# configs/ 目录下的关键配置文件（必须追踪，另一台电脑启动需要）
+!configs/endpoint_pools.json
+!configs/llm_providers.json
+!configs/role_configs.json
+!configs/semantic_config.json
+!configs/audit_knowledge_base.json
+# app/ 下的旧路径保留兼容
+!app/role_configs.json
+!app/endpoint_pools.json
+!app/semantic_config.json
+!tests/eval/golden_dataset.json
+!tests/eval/golden_dataset_*.json
+!requirements.txt
+
+# ── 配置文件目录 (必须追踪) ───────────────────────────────
+# configs/ prompts/ rules/ 目录下所有 yaml/yml/json 都应追踪
+
+# ── 数据库和运行时产物 ────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+data/reports/
+data/phoenix/
+data/semantic_index/
+# 故意不忽略 usage_stats.json 以便跨电脑同步黑名单状态
+!data/usage_stats.json
+
+# ── 备份和临时文件 ────────────────────────────────────────
+*.bak
+*.tmp
+*.swp
+
+# ── 根目录运行时产物 (不应追踪) ─────────────────────────────
+=
+bench_out.txt
+db_dump.txt
+status
+uuid
+*_debug.txt
+*_dump.txt
+*.log
+
+
+# ── 参考资料 / 大文件 (不应追踪) ────────────────────────────
+*.pdf
+anthropic_agents_text.txt
+
+# ── 大仓库内脏文件 ────────────────────────────────────────
+
+docs-log/
+docs/
+tools/_history_chunk.md
+data/

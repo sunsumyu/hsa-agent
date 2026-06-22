@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSA-Agent 面试全攻略 V4.0 (RAG 专项加强版)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --bg-dark: #0a0b14;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --accent-primary: #8b5cf6;
+            --accent-secondary: #d946ef;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        .blob {
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+            border-radius: 50%;
+            z-index: -1;
+            filter: blur(80px);
+        }
+        .blob-1 { top: -200px; right: -200px; }
+        .blob-2 { bottom: -200px; left: -200px; }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            background: linear-gradient(to right, #fff, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 16px;
+        }
+
+        .subtitle { color: var(--text-muted); font-size: 1.1rem; }
+
+        .tabs {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 30px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+            scrollbar-width: none;
+        }
+
+        .tab {
+            padding: 8px 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 99px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .tab.active {
+            background: var(--accent-primary);
+            color: white;
+            border-color: var(--accent-primary);
+            box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+        }
+
+        .question-list { display: grid; gap: 24px; }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 28px;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            backdrop-filter: blur(10px);
+        }
+
+        .card:hover {
+            border-color: rgba(139, 92, 246, 0.4);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            cursor: pointer;
+            gap: 16px;
+        }
+
+        .q-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .probability-badge {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 6px;
+            background: rgba(139, 92, 246, 0.1);
+            color: var(--accent-primary);
+        }
+
+        .q-title { font-size: 1.3rem; font-weight: 700; color: #fff; }
+
+        .toggle-icon { color: var(--text-muted); transition: transform 0.3s; }
+        .card.open .toggle-icon { transform: rotate(180deg); }
+
+        .answer-content {
+            display: none;
+            margin-top: 24px;
+            animation: fadeIn 0.4s ease-out;
+        }
+        .card.open .answer-content { display: block; }
+
+        .inner-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            background: rgba(0,0,0,0.2);
+            padding: 4px;
+            border-radius: 10px;
+            width: fit-content;
+        }
+
+        .inner-tab {
+            padding: 6px 16px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            color: var(--text-muted);
+            transition: all 0.2s;
+        }
+
+        .inner-tab.active {
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .content-pane {
+            background: rgba(255,255,255,0.02);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+            min-height: 120px;
+        }
+
+        .content-pane h4 {
+            color: var(--accent-primary);
+            margin-bottom: 12px;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .pane-text { font-size: 1rem; white-space: pre-line; color: var(--text-main); }
+        
+        .code-block {
+            background: #000;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            margin-top: 12px;
+            color: #a78bfa;
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .lucide { width: 18px; height: 18px; }
+    </style>
+</head>
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+
+    <div class="container">
+        <header>
+            <h1>HSA-Agent 面试全攻略 V4.0</h1>
+            <p class="subtitle">RAG 专项加强版：深度解析长短期记忆、数据清洗与多路召回</p>
+        </header>
+
+        <div class="tabs" id="categoryTabs">
+            <div class="tab active" onclick="filterCategory('ALL')">全部问题</div>
+            <div class="tab" onclick="filterCategory('RAG')">RAG & 记忆</div>
+            <div class="tab" onclick="filterCategory('ARCH')">架构流程</div>
+            <div class="tab" onclick="filterCategory('SQL')">SQL 安全</div>
+            <div class="tab" onclick="filterCategory('BIZ')">医保业务</div>
+        </div>
+
+        <div class="question-list" id="questionList"></div>
+    </div>
+
+    <script>
+        const questions = [
+            // ================= RAG & MEMORY (核心关注) =================
+            {
+                id: 51, cat: 'RAG', prob: 100,
+                q: "请详细描述你项目中的 RAG 架构设计，它与普通 RAG 有什么区别？",
+                interview: "我们采用的是“混合多路检索 RAG”。它不仅包含传统文档的向量检索，还集成了“物理 Schema 检索”和“专家经验库检索”。最大的区别在于我们将检索结果作为一种“铁幕约束”注入 Agent，而非简单的上下文补充。",
+                study: "设计要点：\n1. **多源数据**：包含 `audit_knowledge_base` (审计法规)、`schema_registry` (数据库元数据) 和 `experience_manager` (历史成功 SQL)。\n2. **三路召回**：关键词 (BM25) 找法规，向量 (Embedding) 找经验，图谱 (Neo4j) 找关联。\n3. **动态注入**：在 `Planner` 阶段召回方法论，在 `Coder` 阶段召回物理字段，形成闭环。",
+                example: "【案例】用户问：某个药品的报销比例。RAG 管道首先通过关键词检索法规库确定该药属于甲类；同时通过语义检索在经验库发现类似的 SQL 模版；最后将“甲类药判定逻辑”和“标准 SQL 模版”一起喂给 Coder，确保生成结果既符合政策又技术正确。",
+                code: "context = semantic_retriever.retrieve(query, top_k=3)\nprompt = prompt.format(context=context)"
+            },
+            {
+                id: 52, cat: 'RAG', prob: 98,
+                q: "长短期记忆（Memory）是如何设计的？分别存储在什么位置？",
+                interview: "短期记忆基于 LangGraph 的 `AuditState` 存储在内存或 SQLite 中，包含当前会话的消息流和执行轨迹；长期记忆存储在向量库或关系数据库中，用于跨 Session 的经验复用。",
+                study: "1. **短期记忆 (Short-term)**：存储在 `audit_checkpoints.db`。它记录了当前任务的 Plan -> Execute -> Critic 的全过程。目的是实现失败重试和状态回滚。\n2. **长期记忆 (Long-term)**：由 `ExperienceManager` 管理。当一次审计任务被判定为“成功”时，其问题 Embedding 和对应的正确 SQL 会被存入持久化存储。未来相似问题进入时可直接“照抄答案”。",
+                example: "【案例】用户在第一轮问了“查 A 药”，第二轮问“那 B 药呢”。短期记忆让 Agent 知道 B 药也要执行和 A 药相同的审计逻辑；而长期记忆则让 Agent 记住了上个月审计 A 药时曾被人工修正过的一个复杂 JOIN 技巧，本次直接应用。",
+                code: "checkpoint_config = {'configurable': {'thread_id': session_id}}"
+            },
+            {
+                id: 53, cat: 'RAG', prob: 95,
+                q: "在 RAG 管道中，数据清洗（Cleaning）和预处理是怎么做的？",
+                interview: "我们实现了一套“降噪管道”：利用 `MessageSanitizer` 进行编码矫正（处理 BOM）和敏感信息脱敏；利用 `Booster` 对海量取证结果进行统计采样，防止上下文爆炸。",
+                study: "清洗步骤：\n1. **编码修复**：统一 `utf-8-sig` 读取，剔除不可见字符。\n2. **思维链净化**：过滤掉 `thinking` 模式产生的中间碎语。\n3. **物理采样**：如果 ClickHouse 返回了 10 万行，RAG 不会全塞进去，而是通过 `Booster` 提取 P95/P5 边界值和前 50 条样本数据，将“海量数据”转化为“关键特征”。",
+                example: "【案例】审计工具返回了 50MB 的 JSON 记录。如果直接喂给 LLM 肯定会报错。我们的 `MessageSanitizer` 会将其截断并总结为：‘共发现 1 万条违规，前 3 条如下... 整体统计特征为...’。这样 Agent 既拿到了结论，又不会耗光 Token。",
+                code: "clean_data = sanitize_for_thinking_mode(raw_data)"
+            },
+            {
+                id: 54, cat: 'RAG', prob: 92,
+                q: "RAG 中如何解决“检索不相关”导致的幻觉问题？",
+                interview: "引入了“双重门控机制”：首先是检索得分阈值过滤（Score Threshold），其次是 `Critic` 节点的后置一致性校验。如果检索到的 Schema 与用户问题完全不符，会强制触发 `lookup_medical_schema` 进行物理核实。",
+                study: "1. **前置过滤**：Embedding 相似度低于 0.75 的结果直接丢弃。\n2. **语义对齐**：使用 `llm_judge` 节点判断检索内容是否真的能支撑用户问题。\n3. **降级策略**：如果 RAG 召回的所有信息都不可信，Agent 会切换到“冷启动模式”，通过调用数据库元数据工具自行探索表结构。",
+                example: "【案例】用户问“查询 A 药品的报销限制”，但 RAG 召回的是“B 药品的包装规格”。`llm_judge` 发现语义不对齐，立即拦截该上下文，并指令 Agent：‘检索信息不足，请直接查询 A 药品的政策表字段’，从而避免了 Agent 拿 B 的信息去回复 A。",
+                code: "if score < MIN_THRESHOLD: return 'NEED_REFRESH_KNOWLEDGE'"
+            },
+            {
+                id: 55, cat: 'RAG', prob: 90,
+                q: "项目中分了哪些类型的数据？你是如何根据数据类型选择存储的？",
+                interview: "分为三类：结构化数据（ClickHouse）、半结构化规则（YAML/JSON）和关系图谱数据（Neo4j）。",
+                study: "1. **ClickHouse (结构化)**：存储医保结算明细，利用 OLAP 引擎处理亿级聚合。用于“取证”。\n2. **Vector DB (半结构化)**：存储审计案例和法规。用于“语义召回”。\n3. **Neo4j (关系型)**：存储医师、患者、药店的关联网络。用于“路径发现”和“团伙挖掘”。\n通过 `SemanticRetriever` 将这三种数据统一路由到 Agent 的上下文中。",
+                example: "【案例】分析一个“虚假住院”任务。系统先从 Neo4j 查到该患者和医生有亲属关系（关系数据），再从 Vector DB 查到“虚假住院”的判定标准（法规数据），最后在 ClickHouse 统计该患者的住院频次（明细数据）。",
+                code: "ontology = neo4j_manager.get_ontology()"
+            },
+
+            // ================= 之前的高频问题 (保持 Triple 结构) =================
+            {
+                id: 1, cat: 'ARCH', prob: 100,
+                q: "为什么选择 LangGraph 而不是简单的 Chain？",
+                interview: "LangGraph 支持循环 (Cycles) 和细粒度的状态管理。在审计中，Coder 节点的 SQL 可能报错或返回空，我们需要 Critic 节点诊断并“打回重试”，这是 Chain 的线性结构无法高效处理的。",
+                study: "LangGraph 的核心优势在于它是一个**有向有环图 (DAG with cycles)**。它的 `AuditState` 采用 Reducer 模式，可以在节点跳转间保留并精简上下文。此外，它天然支持 `interrupt`，方便我们在渲染最终报告前引入人工审核 (Human-in-the-loop)。",
+                example: "【案例】用户问：查 A 药品的异常处方。Coder 生成了 SQL，但由于字段名写错报错。在 Chain 中，流程可能直接中断报错给用户；但在 LangGraph 中，错误被推送到 Critic 节点，Critic 发现是物理字段幻觉，自动生成重试指令返回给 Coder，系统在后台悄悄完成了自愈并输出了正确答案。",
+                code: "workflow.add_edge('critic', 'coder') # 建立循环边"
+            },
+            {
+                id: 11, cat: 'SQL', prob: 98,
+                q: "如何治理生成 SQL 时的“幻觉字段”问题？",
+                interview: "我们实施了“物理铁幕政策”：包括运行时动态 Schema 注入（强制对齐物理元数据）和 SQLGuardian 拦截器（基于 AST 的字段强制校验）。",
+                study: "幻觉源于 LLM 倾向于使用语义化的字段名（如 patient_name）而非物理表中的缩写（如 pat_nm）。实现步骤：\n1. **SchemaManager**: 通过 `system.columns` 实时拉取物理结构。\n2. **SchemaInjector**: 将这些物理真相注入 Prompt。\n3. **SQLGuardian**: 使用解析器提取生成 SQL 的所有 Identifiers，逐一比对 `schema_registry`。如果不匹配，立即抛出 `SecurityViolationError`。",
+                example: "【案例】用户搜“结算金额”。Coder 生成了 `SELECT SUM(jsje) ...`。但数据库中该字段实际叫 `setl_amt`。SQLGuardian 检测到 `jsje` 不在白名单中，强制熔断。此时 Critic 介入，提示 Coder：‘字段名 jsje 不存在，物理表中对应字段为 setl_amt，请重写。’",
+                code: "if field not in schema_registry.get_allowed_fields(table):\n    raise SecurityViolationError(f'探测到物理幻觉字段: {field}')"
+            }
+        ];
+
+        const categoryMap = { 'RAG': 'RAG & 记忆', 'ARCH': '架构流程', 'SQL': 'SQL 安全', 'BIZ': '医保业务' };
+
+        function renderQuestions(filter = 'ALL') {
+            const list = document.getElementById('questionList');
+            list.innerHTML = '';
+            const filtered = filter === 'ALL' ? questions : questions.filter(q => q.cat === filter);
+            
+            filtered.forEach(q => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.id = `q-${q.id}`;
+                card.innerHTML = `
+                    <div class="card-header" onclick="toggleCard(${q.id})">
+                        <div style="flex: 1">
+                            <div class="q-info">
+                                <span class="probability-badge">可能性: ${q.prob}%</span>
+                                <span style="font-size: 0.75rem; color: var(--text-muted)">${categoryMap[q.cat]}</span>
+                            </div>
+                            <div class="q-title">${q.id}. ${q.q}</div>
+                        </div>
+                        <i data-lucide="chevron-down" class="toggle-icon"></i>
+                    </div>
+                    <div class="answer-content">
+                        <div class="inner-tabs">
+                            <div class="inner-tab active" onclick="switchPane(${q.id}, 'interview')">面试简答</div>
+                            <div class="inner-tab" onclick="switchPane(${q.id}, 'study')">深度解析</div>
+                            <div class="inner-tab" onclick="switchPane(${q.id}, 'example')">实现案例</div>
+                        </div>
+                        <div class="content-pane" id="pane-${q.id}">
+                            <div class="pane-text">${q.interview}</div>
+                        </div>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+        function switchPane(id, type) {
+            event.stopPropagation();
+            const q = questions.find(x => x.id === id);
+            const pane = document.getElementById(`pane-${id}`);
+            const tabs = document.querySelectorAll(`#q-${id} .inner-tab`);
+            tabs.forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (type === 'interview') {
+                pane.innerHTML = `<div class="pane-text">${q.interview}</div>`;
+            } else if (type === 'study') {
+                pane.innerHTML = `
+                    <h4><i data-lucide="book-open"></i> 深度技术解析 (学习专用)</h4>
+                    <div class="pane-text">${q.study}</div>
+                    <div class="code-block">${q.code}</div>
+                `;
+            } else {
+                pane.innerHTML = `
+                    <h4><i data-lucide="zap"></i> 具体实现案例 (举例专用)</h4>
+                    <div class="pane-text">${q.example}</div>
+                `;
+            }
+            lucide.createIcons();
+        }
+
+        function toggleCard(id) {
+            document.getElementById(`q-${id}`).classList.toggle('open');
+        }
+
+        function filterCategory(cat) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            renderQuestions(cat);
+        }
+
+        renderQuestions();
+    </script>
+</body>
+</html>

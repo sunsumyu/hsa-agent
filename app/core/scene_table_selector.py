@@ -1,12 +1,13 @@
 """
 app/core/scene_table_selector.py
 =================================
-[V1.0] 场景感知表选择器 — 自动根据用户查询选择正确的物理表
+[V2.0] 场景感知表选择器 — 自动根据用户查询选择正确的物理表
 
 核心职责：
 - 分析用户查询中的关键词
 - 根据 scene_table_mapping 规则选择正确的表
 - 返回目标表列表供 ContextBuilder 注入 Schema
+- [V178.10] 自动拉入关联字典表（表间关联图谱）
 - 生成强制性表选择提示语用于 Prompt 注入
 """
 
@@ -19,7 +20,6 @@ from app.core.registry.schema_registry import schema_registry
 class SceneTableSelector:
     """场景感知的物理表选择器"""
 
-    # 硬编码场景关键词映射（配置文件加载失败时兜底）
     FALLBACK_MAPPING = {
         "fqz_fymx_test": [
             "乡镇卫生院", "村卫生室", "门诊统筹", "批量刷单",
@@ -35,6 +35,7 @@ class SceneTableSelector:
 
     def __init__(self):
         self._mapping = self._load_mapping()
+        self._relation_graph = self._load_relation_graph()
 
     def _load_mapping(self) -> dict:
         """从 schema_registry.yaml 加载场景映射"""
@@ -47,59 +48,67 @@ class SceneTableSelector:
                 if table and scenes:
                     mapping[table] = scenes
             if mapping:
-                logger.info(f"[SceneTableSelector] 加载场景映射: {len(mapping)} 表, {config.get('scene_table_mapping', [])}")
+                logger.info(f"[SceneTableSelector] 加载场景映射: {len(mapping)} 表")
                 return mapping
         except Exception as e:
             logger.warning(f"[SceneTableSelector] 加载失败，使用兜底映射: {e}")
         return self.FALLBACK_MAPPING
 
-    def select_tables(self, user_query: str) -> Tuple[str, List[str]]:
-        """
-        根据用户查询选择目标表
+    def _load_relation_graph(self) -> dict:
+        """[V178.10] 从 schema_registry.yaml 加载表间关联图谱"""
+        try:
+            config = schema_registry._config
+            graph = config.get("table_relation_graph", {})
+            if graph:
+                logger.info(f"[SceneTableSelector] 加载关联图谱: {len(graph)} 表")
+            return graph
+        except Exception as e:
+            logger.debug(f"[SceneTableSelector] 关联图谱加载跳过: {e}")
+            return {}
 
-        Args:
-            user_query: 用户原始查询
-
-        Returns:
-            (primary_table, all_tables): 主表名 + 所有相关表列表
-        """
+    def get_related_tables(self, primary_table: str, user_query: str) -> List[Tuple[str, str]]:
+        """[V178.10] 根据主表和用户查询，返回需要拉入的关联表。"""
+        if not self._relation_graph or primary_table not in self._relation_graph:
+            return []
+        graph_entry = self._relation_graph[primary_table]
+        auto_pull = graph_entry.get("auto_pull", [])
         query_lower = user_query.lower()
+        related = []
+        for entry in auto_pull:
+            table = entry.get("table", "")
+            keywords = entry.get("pull_keywords", [])
+            hint = entry.get("hint", "")
+            if any(kw.lower() in query_lower for kw in keywords):
+                related.append((table, hint))
+                logger.info(f"[SceneTableSelector] 关联表命中: {table}")
+        return related
 
-        # 计算各表的匹得分
+    def select_tables(self, user_query: str) -> Tuple[str, List[str]]:
+        """根据用户查询选择目标表，返回 (primary_table, all_tables)"""
+        query_lower = user_query.lower()
         scores = {}
         for table, keywords in self._mapping.items():
             score = sum(1 for kw in keywords if kw.lower() in query_lower)
             if score > 0:
                 scores[table] = score
-
         if not scores:
-            # 无场景匹配，使用默认主表
             primary = schema_registry.get_main_table()
             logger.info(f"[SceneTableSelector] 无场景匹配，使用默认主表: {primary}")
             return primary, [primary]
-
-        # 选择得分最高的表作为主表
         primary = max(scores, key=scores.get)
         all_tables = list(scores.keys())
-
-        logger.info(f"[SceneTableSelector] 场景匹配结果: 主表={primary}, 相关表={all_tables}, 得分={scores}")
+        # [V178.10] 检查关联图谱，自动拉入字典表
+        related = self.get_related_tables(primary, user_query)
+        for table_name, _ in related:
+            if table_name not in all_tables:
+                all_tables.append(table_name)
+                logger.info(f"[SceneTableSelector] 关联表拉入: {table_name}")
+        logger.info(f"[SceneTableSelector] 场景匹配: 主表={primary}, 表={all_tables}, 分={scores}")
         return primary, all_tables
 
     def get_enforcement_hint(self, user_query: str) -> Optional[str]:
-        """
-        生成表选择提示语，用于 Prompt 注入
-
-        只提供表选择指引和字段注意事项，不强制 SQL 模板。
-        SQL 模式由 LLM 根据方法论和 Schema 自行决定。
-
-        Args:
-            user_query: 用户原始查询
-
-        Returns:
-            表选择提示语，如果不需要强制则返回 None
-        """
+        """生成表选择提示语，用于 Prompt 注入"""
         primary, _ = self.select_tables(user_query)
-
         if primary == "fqz_fymx_test":
             return """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
@@ -112,13 +121,12 @@ class SceneTableSelector:
 4. 两表 setl_id 完全不重叠，JOIN 会导致数据丢失
 
 字段注意事项：
-- `fqz_fymx_test.setl_time` 是 String 类型且尾部带 `\\t`，必须用 `toDateTime(substring(trim(setl_time),1,19))` 转换
-- 必须用 `trim(...)` 清理字符串字段
+- `fqz_fymx_test.setl_time` 是 String 类型且尾部带 \\t，**严禁**直接 toDateTime()，必须用 toDateTime(substring(trim(setl_time),1,19)) 转换
+- 必须用 trim(...) 清理字符串字段
 - med_type 编码：11=门诊统筹，21=住院，53_04=特病门诊
 
 注意：以上仅为表选择指引，SQL 查询模式请根据审计方法论和用户原始问题自行决定，不要照搬历史 SQL 模板。
 """
-
         return None
 
 

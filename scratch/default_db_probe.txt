@@ -1,0 +1,33 @@
+=== fqz_gz_jzsj_all_ql in default database ===
+Total rows in default.fqz_gz_jzsj_all_ql: 2138354
+Rows with non-empty setl_id: 2138354
+Rows with non-empty chfpdr_name: 0
+
+=== fqz_fymx_test in default database ===
+Total rows in default.fqz_fymx_test: 4955
+Rows with non-empty setl_id: 4955
+
+=== Matching setl_id count between default tables ===
+Matching rows count: 0
+
+=== Unique items in default.fqz_fymx_test ===
+  - '益母草颗粒\t': 2807
+  - '雌二醇片/雌二醇地屈孕酮片复合包装\t': 589
+  - '戊酸雌二醇片\t': 480
+  - '地屈孕酮片\t': 321
+  - '保妇康栓\t': 217
+  - '米非司酮片\t': 205
+  - '阴道用乳杆菌活菌胶囊\t': 82
+  - '克霉唑阴道片\t': 78
+  - '炔雌醇环丙孕酮片\t': 62
+  - '替勃龙片\t': 49
+  - '戊酸雌二醇片/雌二醇环丙孕酮片复合包装\t': 24
+  - '左炔诺孕酮宫内节育系统\t': 11
+  - '甲磺酸酚妥拉明片\t': 9
+  - '聚甲酚磺醛栓\t': 6
+  - '地屈孕酮片\n\t': 4
+  - '聚甲酚磺醛阴道栓\t': 4
+  - '前列安栓\t': 3
+  - '非那雄胺片\t': 2
+  - '克林霉素磷酸酯阴道泡腾片\t': 1
+  - '甲磺酸酚妥拉明分散片\t': 1

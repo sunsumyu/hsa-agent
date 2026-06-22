@@ -1,0 +1,37 @@
+[
+    {
+        "input": "运行性别冲突算子，找出男女诊疗不匹配的案例",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["GENDER_CONFLICT"],
+        "context": "直接指令式请求, 必须选中 GENDER_CONFLICT 模板。",
+        "suite": "rules"
+    },
+    {
+        "input": "请执行高频购药检测算子",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["HIGH_FREQ_DRUG_PURCHASE"],
+        "context": "验证 HIGH_FREQ_DRUG_PURCHASE 模板激活。",
+        "suite": "rules"
+    },
+    {
+        "input": "跑一下跨机构重叠住院的违规审计",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["CROSS_HOSPITAL_OVERLAP"],
+        "context": "验证 CROSS_HOSPITAL_OVERLAP 模板激活, 测试跨机构住院重叠算子。",
+        "suite": "rules"
+    },
+    {
+        "input": "查一查重复计费的可疑记录",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["REPEAT_BILLING_DETECTOR"],
+        "context": "'重复计费'应映射到 REPEAT_BILLING_DETECTOR。",
+        "suite": "rules"
+    },
+    {
+        "input": "执行跨店高消费套现检测",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["CROSS_STORE_HIGH_SPEND"],
+        "context": "'跨店 + 高消费 + 套现'应激活 CROSS_STORE_HIGH_SPEND。",
+        "suite": "rules"
+    }
+]

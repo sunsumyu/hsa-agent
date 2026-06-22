@@ -1,0 +1,37 @@
+[
+    {
+        "input": "帮我看看最近有没有什么可疑的",
+        "assertion_type": "keyword_any",
+        "expected_keywords": ["数据源", "建议", "维度", "审计", "明确", "细化", "请", "范围"],
+        "context": "超级模糊的意图。Agent 应该主动澄清或提供风险概览建议，不应直接跑一个随机 SQL。",
+        "suite": "fuzzy"
+    },
+    {
+        "input": "查查重复报销的情况",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["REPEAT_BILLING_DETECTOR"],
+        "context": "验证语义路由能将'重复报销'对应到 REPEAT_BILLING_DETECTOR SQL 模板。",
+        "suite": "fuzzy"
+    },
+    {
+        "input": "找出疑似男女混搭诊疗的违规",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["GENDER_CONFLICT"],
+        "context": "验证语义路由能识别 gender-diagnosis mismatch 并路由到 GENDER_CONFLICT。",
+        "suite": "fuzzy"
+    },
+    {
+        "input": "看看有没有可能存在分解住院的患者",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["DECOMPOSITION_HOSPITALIZATION"],
+        "context": "'分解住院'必须被映射到对应的 YAML 规则。",
+        "suite": "fuzzy"
+    },
+    {
+        "input": "同一个人同一天在两家医院都结算了，这种情况有吗",
+        "assertion_type": "sql_template_used",
+        "expected_template_ids": ["CROSS_HOSPITAL_OVERLAP"],
+        "context": "自然语言描述应被理解为跨机构同日结算重叠 → CROSS_HOSPITAL_OVERLAP。",
+        "suite": "fuzzy"
+    }
+]

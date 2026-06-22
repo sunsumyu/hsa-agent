@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>✍️ 提示词版本管理中心 — HSA-Agent</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #020617;
+            --sidebar-bg: #0f172a;
+            --accent: #38bdf8;
+            --accent-purple: #818cf8;
+            --glass: rgba(15, 23, 42, 0.85);
+            --border: #334155;
+            --text: #f8fafc;
+            --text-secondary: #94a3b8;
+            --success: #34d399;
+            --warning: #fbbf24;
+            --danger: #f87171;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 侧边导航 */
+        .sidebar {
+            width: 260px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 30px 20px;
+            flex-shrink: 0;
+        }
+
+        .logo {
+            font-size: 1.4rem;
+            font-weight: 800;
+            background: linear-gradient(to right, var(--accent), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 40px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .nav-item {
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.3s;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.95rem;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background: #1e293b;
+            color: var(--accent);
+        }
+
+        /* 主工作区 */
+        .main-workspace {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: radial-gradient(circle at 80% 20%, rgba(56, 189, 248, 0.05), transparent 40%);
+        }
+
+        .header {
+            padding: 30px 40px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin: 0;
+            font-weight: 800;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            margin: 5px 0 0 0;
+            font-size: 0.9rem;
+        }
+
+        /* 左右分栏面板 */
+        .content-panel {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            padding: 20px 40px;
+            gap: 30px;
+        }
+
+        /* 左侧列表 */
+        .prompt-list-pane {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .prompt-card {
+            background: var(--glass);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: 0.3s;
+            position: relative;
+        }
+
+        .prompt-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent);
+            box-shadow: 0 4px 20px -5px rgba(56, 189, 248, 0.2);
+        }
+
+        .prompt-card.active {
+            border-color: var(--accent-purple);
+            background: rgba(129, 140, 248, 0.1);
+        }
+
+        .prompt-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .prompt-version-tag {
+            font-size: 0.75rem;
+            background: rgba(56, 189, 248, 0.2);
+            color: var(--accent);
+            padding: 2px 8px;
+            border-radius: 20px;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            font-weight: 600;
+        }
+
+        .prompt-card p {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .prompt-card-footer {
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #64748b;
+        }
+
+        /* 右侧详情与编辑区 */
+        .editor-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--glass);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .editor-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(15, 23, 42, 0.4);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .prompt-meta-details h2 {
+            margin: 0 0 5px 0;
+            font-size: 1.5rem;
+        }
+
+        .prompt-meta-details p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .variables-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .variable-badge {
+            font-size: 0.75rem;
+            background: rgba(148, 163, 184, 0.1);
+            color: var(--text-secondary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+        }
+
+        .editor-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* 提示词代码编辑框 */
+        .textarea-wrapper {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+        }
+
+        .textarea-header {
+            padding: 10px 20px;
+            background: rgba(15, 23, 42, 0.2);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            color: #64748b;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .code-textarea {
+            flex: 1;
+            background: #090d16;
+            color: #e2e8f0;
+            border: none;
+            padding: 20px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            resize: none;
+            outline: none;
+        }
+
+        /* 右侧版本历史时间轴 */
+        .history-sidebar {
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            background: rgba(15, 23, 42, 0.2);
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .history-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-timeline {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .timeline-item {
+            border-left: 2px solid #334155;
+            padding-left: 15px;
+            position: relative;
+            padding-bottom: 5px;
+        }
+
+        .timeline-item::after {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #475569;
+            border: 2px solid #020617;
+            transition: 0.3s;
+        }
+
+        .timeline-item.active::after {
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        .timeline-version {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .timeline-date {
+            font-size: 0.7rem;
+            color: #64748b;
+        }
+
+        .timeline-desc {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin: 4px 0 8px 0;
+            line-height: 1.3;
+        }
+
+        .timeline-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-link {
+            font-size: 0.75rem;
+            color: var(--accent);
+            cursor: pointer;
+            text-decoration: none;
+            transition: 0.3s;
+        }
+
+        .action-link:hover {
+            color: var(--accent-purple);
+        }
+
+        /* 底部操作保存栏 */
+        .editor-footer {
+            padding: 20px 30px;
+            border-top: 1px solid var(--border);
+            background: rgba(15, 23, 42, 0.4);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .save-form {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex: 1;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .input-field {
+            background: #090d16;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text);
+            font-family: inherit;
+            outline: none;
+            font-size: 0.85rem;
+        }
+
+        .input-field:focus {
+            border-color: var(--accent);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--accent), var(--accent-purple));
+            color: #020617;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: 0.3s;
+            font-size: 0.9rem;
+            box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
+        }
+
+        .btn:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(56, 189, 248, 0.4);
+        }
+
+        .btn-secondary {
+            background: #1e293b;
+            color: var(--text);
+            border: 1px solid var(--border);
+            box-shadow: none;
+        }
+
+        .btn-secondary:hover {
+            background: #334155;
+            box-shadow: none;
+        }
+
+        /* 比对 Diff 弹窗 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(2, 6, 23, 0.8);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: 0.3s;
+        }
+
+        .modal-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .diff-modal {
+            width: 90%;
+            height: 80%;
+            background: var(--sidebar-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transform: scale(0.95);
+            transition: 0.3s;
+        }
+
+        .modal-overlay.open .diff-modal {
+            transform: scale(1);
+        }
+
+        .diff-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .diff-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            background: #090d16;
+        }
+
+        .diff-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 1px solid var(--border);
+        }
+
+        .diff-pane:last-child {
+            border-right: none;
+        }
+
+        .diff-pane-title {
+            padding: 10px 20px;
+            background: rgba(15, 23, 42, 0.5);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.8rem;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .diff-content {
+            flex: 1;
+            padding: 20px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            color: #cbd5e1;
+        }
+
+        /* 状态加载提示 */
+        .toast-notification {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: var(--glass);
+            border-left: 4px solid var(--success);
+            padding: 15px 25px;
+            border-radius: 6px;
+            box-shadow: 0 10px 35px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            backdrop-filter: blur(10px);
+        }
+
+        .toast-notification.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .diff-checkbox {
+            margin-right: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <!-- 侧边导航 -->
+    <div class="sidebar">
+        <div class="logo">✍️ HSA-Agent</div>
+        <div class="nav-item" onclick="location.href='index.html'">🏠 概览首页</div>
+        <div class="nav-item" onclick="location.href='endpoint_management.html'">📊 算力监控</div>
+        <div class="nav-item" onclick="location.href='token_governance.html'">💰 成本治理</div>
+        <div class="nav-item" onclick="location.href='audit_history.html'">🕒 审计历史</div>
+        <div class="nav-item" onclick="location.href='memory_health.html'">🧠 记忆中枢</div>
+        <div class="nav-item active" onclick="location.href='prompts_manager.html'">✍️ 提示词管理</div>
+        
+        <div style="margin-top: auto; font-size: 0.8rem; color: #475569;">
+            Enterprise Version 2026.Q2
+        </div>
+    </div>
+
+    <!-- 主工作区 -->
+    <div class="main-workspace">
+        <div class="header">
+            <div>
+                <h1>提示词版本管理中心</h1>
+                <p>实时查看、编辑、回滚及比对大模型的系统级思维链（CoT）提示词模板。</p>
+            </div>
+            <div>
+                <button class="btn btn-secondary" onclick="loadPrompts()">🔄 刷新列表</button>
+            </div>
+        </div>
+
+        <div class="content-panel">
+            <!-- 左侧提示词列表 -->
+            <div class="prompt-list-pane" id="promptList">
+                <!-- 动态载入卡片 -->
+                <div style="text-align: center; color: var(--text-secondary); margin-top: 50px;">正在加载提示词列表...</div>
+            </div>
+
+            <!-- 右侧详情与编辑区 -->
+            <div class="editor-pane" id="editorPane" style="display: none;">
+                <div class="editor-header">
+                    <div class="prompt-meta-details">
+                        <h2 id="detTitle">PLANNER</h2>
+                        <p id="detDesc">任务规划器 - 解析用户审计任务，输出结构化步骤</p>
+                        <div class="variables-container" id="detVars">
+                            <!-- 变量 Tag -->
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <span class="prompt-version-tag" id="detVersion" style="font-size: 0.85rem; padding: 4px 12px;">v1.0.0</span>
+                        <div style="font-size: 0.75rem; color: #64748b; margin-top: 8px;" id="detModified">更新时间: 加载中</div>
+                    </div>
+                </div>
+
+                <div class="editor-body">
+                    <!-- 核心代码区 -->
+                    <div class="textarea-wrapper">
+                        <div class="textarea-header">
+                            <span>System Prompt Template</span>
+                            <span id="charCount">字符数: 0</span>
+                        </div>
+                        <textarea class="code-textarea" id="promptText" oninput="updateCharCount()"></textarea>
+                    </div>
+
+                    <!-- 历史记录时间轴 -->
+                    <div class="history-sidebar">
+                        <div class="history-header">
+                            <span>📜 版本演进历史</span>
+                            <button class="btn btn-secondary" style="font-size: 0.75rem; padding: 4px 8px; border-radius: 4px;" onclick="triggerDiff()">比对选中</button>
+                        </div>
+                        <div class="history-timeline" id="historyTimeline">
+                            <!-- 历史时间轴项 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 底部操作保存栏 -->
+                <div class="editor-footer">
+                    <div class="save-form">
+                        <div class="input-group" style="width: 120px;">
+                            <label style="font-size: 0.75rem; color: #64748b;">新版本号 (BUMP)</label>
+                            <input type="text" class="input-field" id="newVersion" placeholder="e.g. 1.0.1">
+                        </div>
+                        <div class="input-group" style="flex: 1;">
+                            <label style="font-size: 0.75rem; color: #64748b;">更新描述 (Changelog)</label>
+                            <input type="text" class="input-field" id="newDescription" placeholder="简述本次优化的考量与改进要点">
+                        </div>
+                        <button class="btn" style="align-self: flex-end;" onclick="saveNewPromptVersion()">💾 部署并热重载</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 空白状态 -->
+            <div class="editor-pane" id="emptyPane" style="flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:15px; color:#475569;">
+                <span style="font-size:3.5rem;">✍️</span>
+                <h3>请在左侧选择一个提示词模板进行管理</h3>
+                <p style="font-size:0.85rem; color:#334155; margin:0;">支持在线热更新、热部署，无需重启服务即可完美注入工作流。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 比对 Diff 弹窗 -->
+    <div class="modal-overlay" id="compareModal">
+        <div class="diff-modal">
+            <div class="diff-header">
+                <div>
+                    <h2 id="diffTitle" style="margin: 0; font-size: 1.3rem;">提示词模板版本差异比对 (Diff Viewer)</h2>
+                    <p style="margin: 5px 0 0 0; font-size: 0.8rem; color: var(--text-secondary);" id="diffSub">比对 PLANNER 的 v1.0.0 与 v1.0.1</p>
+                </div>
+                <button class="btn btn-secondary" onclick="closeModal()">关闭窗口</button>
+            </div>
+            <div class="diff-body">
+                <div class="diff-pane">
+                    <div class="diff-pane-title" id="diffTitleA">版本 A (v1.0.0)</div>
+                    <div class="diff-content" id="diffContentA">正在加载...</div>
+                </div>
+                <div class="diff-pane">
+                    <div class="diff-pane-title" id="diffTitleB">版本 B (v1.0.1)</div>
+                    <div class="diff-content" id="diffContentB">正在加载...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast-notification" id="toast">
+        <span id="toastIcon">✅</span>
+        <span id="toastMessage" style="font-size: 0.9rem;">操作成功！</span>
+    </div>
+
+    <script>
+        const API_HOST = "http://127.0.0.1:18882";
+        let activePromptId = null;
+        let selectedDiffVersions = [];
+
+        // 载入所有提示词
+        async function loadPrompts() {
+            try {
+                const res = await fetch(`${API_HOST}/api/prompts/list`);
+                const json = await res.json();
+                if (!json.ok) throw new Error(json.error);
+                
+                const listContainer = document.getElementById("promptList");
+                listContainer.innerHTML = "";
+                
+                json.prompts.forEach(p => {
+                    const card = document.createElement("div");
+                    card.className = `prompt-card ${activePromptId === p.id ? 'active' : ''}`;
+                    card.onclick = () => selectPrompt(p.id);
+                    
+                    card.innerHTML = `
+                        <h3>
+                            <span>${p.id}</span>
+                            <span class="prompt-version-tag">v${p.version}</span>
+                        </h3>
+                        <p>${p.description}</p>
+                        <div class="prompt-card-footer">
+                            <span>📂 包含变量: ${p.variables.length}</span>
+                            <span>🕒 ${p.last_modified.split(" ")[0]}</span>
+                        </div>
+                    `;
+                    listContainer.appendChild(card);
+                });
+            } catch (err) {
+                showToast("❌ 加载提示词列表失败: " + err.message, "danger");
+            }
+        }
+
+        // 选择提示词并展示详情
+        async function selectPrompt(promptId) {
+            activePromptId = promptId;
+            document.querySelectorAll(".prompt-card").forEach(c => c.classList.remove("active"));
+            
+            // 高亮当前选中卡片
+            loadPrompts(); // 重新加载卡片以保持高亮
+
+            document.getElementById("emptyPane").style.display = "none";
+            const editor = document.getElementById("editorPane");
+            editor.style.display = "flex";
+
+            try {
+                // 1. 加载详情
+                const res = await fetch(`${API_HOST}/api/prompts/${promptId}/details`);
+                const json = await res.json();
+                if (!json.ok) throw new Error(json.error);
+                
+                const d = json.data;
+                document.getElementById("detTitle").textContent = d.id;
+                document.getElementById("detDesc").textContent = d.description;
+                document.getElementById("detVersion").textContent = `v${d.version}`;
+                document.getElementById("detModified").textContent = `更新时间: ${d.last_modified}`;
+                document.getElementById("promptText").value = d.system_template;
+                
+                // 填充新版本号默认值 (如 1.0.0 -> 1.0.1)
+                const verParts = d.version.split(".");
+                if (verParts.length === 3) {
+                    verParts[2] = parseInt(verParts[2]) + 1;
+                    document.getElementById("newVersion").value = verParts.join(".");
+                } else {
+                    document.getElementById("newVersion").value = d.version + ".1";
+                }
+                document.getElementById("newDescription").value = "";
+
+                // 渲染变量 badges
+                const varsContainer = document.getElementById("detVars");
+                varsContainer.innerHTML = "";
+                if (d.variables && d.variables.length > 0) {
+                    d.variables.forEach(v => {
+                        const badge = document.createElement("span");
+                        badge.className = "variable-badge";
+                        badge.textContent = `{${v}}`;
+                        varsContainer.appendChild(badge);
+                    });
+                } else {
+                    varsContainer.innerHTML = `<span style="font-size:0.75rem; color:#475569;">（无输入变量）</span>`;
+                }
+
+                updateCharCount();
+
+                // 2. 加载历史记录时间轴
+                loadPromptHistory(promptId, d.version);
+            } catch (err) {
+                showToast("❌ 加载详情失败: " + err.message, "danger");
+            }
+        }
+
+        // 加载历史版本记录
+        async function loadPromptHistory(promptId, activeVersion) {
+            try {
+                const res = await fetch(`${API_HOST}/api/prompts/${promptId}/history`);
+                const json = await res.json();
+                if (!json.ok) throw new Error(json.error);
+                
+                const timeline = document.getElementById("historyTimeline");
+                timeline.innerHTML = "";
+                selectedDiffVersions = []; // 重置比对选中
+
+                // 如果历史记录为空，说明是第一版，我们可以把当前的算进去
+                if (json.history.length === 0) {
+                    timeline.innerHTML = `<div style="font-size:0.75rem; color:#475569; text-align:center; padding:20px;">当前为初始版，暂无历史修改记录。</div>`;
+                    return;
+                }
+
+                json.history.forEach(h => {
+                    const item = document.createElement("div");
+                    const isActive = h.version === activeVersion;
+                    item.className = `timeline-item ${isActive ? 'active' : ''}`;
+                    
+                    item.innerHTML = `
+                        <div class="timeline-version">
+                            <span>
+                                <input type="checkbox" class="diff-checkbox" data-version="${h.version}" onchange="toggleDiffSelection(this)">
+                                v${h.version} ${isActive ? '<b style="color:var(--accent); font-size:0.7rem;">(活动)</b>' : ''}
+                            </span>
+                            <span class="timeline-date">${h.last_modified.split(" ")[0]}</span>
+                        </div>
+                        <div class="timeline-desc">${h.description || '无修改描述'}</div>
+                        <div class="timeline-actions">
+                            ${!isActive ? `<span class="action-link" onclick="rollbackPrompt('${h.version}')">⏪ 回滚至此版本</span>` : '<span style="color:#475569; font-size:0.75rem;">当前运行中</span>'}
+                        </div>
+                    `;
+                    timeline.appendChild(item);
+                });
+            } catch (err) {
+                logger.error(err);
+            }
+        }
+
+        // 保存新版本的提示词模板
+        async function saveNewPromptVersion() {
+            if (!activePromptId) return;
+            
+            const systemTemplate = document.getElementById("promptText").value;
+            const version = document.getElementById("newVersion").value.trim();
+            const description = document.getElementById("newDescription").value.trim();
+            
+            if (!version) {
+                showToast("⚠️ 新版本号不能为空", "warning");
+                return;
+            }
+            if (!description) {
+                showToast("⚠️ 请输入本次优化的考量描述 (Changelog)", "warning");
+                return;
+            }
+
+            try {
+                // 1. 获取现有属性（变量列表等）
+                const resDetails = await fetch(`${API_HOST}/api/prompts/${activePromptId}/details`);
+                const jsonDetails = await resDetails.json();
+                if (!jsonDetails.ok) throw new Error(jsonDetails.error);
+                
+                const d = jsonDetails.data;
+
+                // 2. 发起保存请求
+                const resSave = await fetch(`${API_HOST}/api/prompts/save`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        prompt_id: activePromptId,
+                        version: version,
+                        description: description,
+                        system_template: systemTemplate,
+                        variables: d.variables,
+                        has_messages_placeholder: d.has_messages_placeholder,
+                        human_suffix: d.human_suffix
+                    })
+                });
+                
+                const jsonSave = await resSave.json();
+                if (!jsonSave.ok) throw new Error(jsonSave.error);
+                
+                showToast(`✅ ${jsonSave.message}`);
+                selectPrompt(activePromptId); // 刷新详情
+            } catch (err) {
+                showToast("❌ 部署失败: " + err.message, "danger");
+            }
+        }
+
+        // 回滚提示词版本
+        async function rollbackPrompt(targetVersion) {
+            if (!confirm(`⚠️ 确认将提示词 ${activePromptId} 回滚至版本 ${targetVersion} 吗？\n当前运行的主线代码将立即热重载生效！`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_HOST}/api/prompts/rollback`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        prompt_id: activePromptId,
+                        target_version: targetVersion
+                    })
+                });
+                const json = await res.json();
+                if (!json.ok) throw new Error(json.error);
+                
+                showToast(`✅ ${json.message}`);
+                selectPrompt(activePromptId);
+            } catch (err) {
+                showToast("❌ 回滚失败: " + err.message, "danger");
+            }
+        }
+
+        // 处理比对勾选框
+        function toggleDiffSelection(checkbox) {
+            const ver = checkbox.getAttribute("data-version");
+            if (checkbox.checked) {
+                if (selectedDiffVersions.length >= 2) {
+                    // 超过两个，自动取消最早的一个
+                    const firstVer = selectedDiffVersions.shift();
+                    const firstCheckbox = document.querySelector(`.diff-checkbox[data-version="${firstVer}"]`);
+                    if (firstCheckbox) firstCheckbox.checked = false;
+                }
+                selectedDiffVersions.push(ver);
+            } else {
+                selectedDiffVersions = selectedDiffVersions.filter(v => v !== ver);
+            }
+        }
+
+        // 触发比对弹框
+        async function triggerDiff() {
+            if (selectedDiffVersions.length !== 2) {
+                showToast("⚠️ 请在历史时间轴中勾选「任意两个」版本进行比对！", "warning");
+                return;
+            }
+            
+            const verA = selectedDiffVersions[0];
+            const verB = selectedDiffVersions[1];
+            
+            document.getElementById("diffSub").textContent = `正在比对 ${activePromptId} 的 v${verA} 与 v${verB}`;
+            document.getElementById("diffTitleA").textContent = `版本 A (v${verA})`;
+            document.getElementById("diffTitleB").textContent = `版本 B (v${verB})`;
+            
+            document.getElementById("diffContentA").innerHTML = "<span style='color:#475569;'>正在拉取模板...</span>";
+            document.getElementById("diffContentB").innerHTML = "<span style='color:#475569;'>正在拉取模板...</span>";
+            
+            const overlay = document.getElementById("compareModal");
+            overlay.classList.add("open");
+
+            try {
+                const res = await fetch(`${API_HOST}/api/prompts/compare?prompt_id=${activePromptId}&version_a=${verA}&version_b=${verB}`);
+                const json = await res.json();
+                if (!json.ok) throw new Error(json.error);
+                
+                // 进行极简文本行 diff 显示
+                document.getElementById("diffContentA").textContent = json.template_a;
+                document.getElementById("diffContentB").textContent = json.template_b;
+            } catch (err) {
+                showToast("❌ 差异比对失败: " + err.message, "danger");
+                closeModal();
+            }
+        }
+
+        function closeModal() {
+            document.getElementById("compareModal").classList.remove("open");
+        }
+
+        // 更新字符计数器
+        function updateCharCount() {
+            const txt = document.getElementById("promptText").value;
+            document.getElementById("charCount").textContent = `字符数: ${txt.length}`;
+        }
+
+        // 弹出全局通知消息
+        function showToast(message, type = "success") {
+            const toast = document.getElementById("toast");
+            const icon = document.getElementById("toastIcon");
+            const msgSpan = document.getElementById("toastMessage");
+            
+            msgSpan.textContent = message;
+            if (type === "success") {
+                toast.style.borderLeftColor = "var(--success)";
+                icon.textContent = "✅";
+            } else if (type === "warning") {
+                toast.style.borderLeftColor = "var(--warning)";
+                icon.textContent = "⚠️";
+            } else {
+                toast.style.borderLeftColor = "var(--danger)";
+                icon.textContent = "❌";
+            }
+            
+            toast.classList.add("show");
+            setTimeout(() => {
+                toast.classList.remove("show");
+            }, 4000);
+        }
+
+        // 首启加载
+        loadPrompts();
+    </script>
+</body>
+</html>

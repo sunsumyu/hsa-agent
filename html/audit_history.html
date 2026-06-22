@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>HSA-Agent 审计历史与对比中心</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #020617;
+            --card-bg: #0f172a;
+            --accent: #818cf8;
+            --text: #f8fafc;
+        }
+        body { background: var(--bg); color: var(--text); font-family: 'Outfit', sans-serif; padding: 30px; }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 15px; }
+        .history-list { margin-top: 30px; display: flex; flex-direction: column; gap: 15px; }
+        .history-card { 
+            background: var(--card-bg); 
+            padding: 20px; 
+            border-radius: 12px; 
+            border: 1px solid #1e293b; 
+            display: flex; 
+            justify-content: space-between;
+            align-items: center;
+            transition: 0.3s;
+        }
+        .history-card:hover { border-color: var(--accent); background: #1e293b; }
+        .compare-box { margin-top: 40px; padding: 30px; background: #1e293b; border-radius: 16px; border: 2px dashed #334155; }
+        .stat-diff { font-weight: 700; color: #22c55e; margin-left: 10px; }
+        .back-btn { text-decoration: none; color: #94a3b8; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🕒 审计历史与版本对比</h1>
+        <a href="index.html" class="back-btn">← 返回指挥门户</a>
+    </div>
+
+    <div class="compare-box">
+        <h3>🔍 版本性能对比 (Delta Analysis)</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 50px;">
+            <div>
+                <p style="color: #94a3b8;">基准版本 (Baseline)</p>
+                <div style="font-size: 1.2rem;">bench_7dim_20260514_1800.json</div>
+                <div style="margin-top: 10px;">Token 节省率: 78.4%</div>
+            </div>
+            <div style="border-left: 1px solid #334155; padding-left: 50px;">
+                <p style="color: #94a3b8;">当前版本 (Selected)</p>
+                <div style="font-size: 1.2rem;">bench_7dim_20260515_2241.json</div>
+                <div style="margin-top: 10px;">Token 节省率: 92.4% <span class="stat-diff">↑ 14.0% (架构重构增益)</span></div>
+                <div style="margin-top: 5px;">平均耗时: 18.5s <span class="stat-diff" style="color: #f59e0b;">↓ 2.1s (性能优化)</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="history-list">
+        <h3>📂 历史测试记录 (History Logs)</h3>
+        <!-- 模拟动态数据 -->
+        <div class="history-card">
+            <div>
+                <div style="font-weight: 700;">bench_7dim_20260515_2241.json (当前)</div>
+                <div style="color: #94a3b8; font-size: 0.85rem;">2026-05-15 22:41 | 4 Cases | Memory V3 Enabled</div>
+            </div>
+            <button style="background: var(--accent); border: none; color: white; padding: 8px 15px; border-radius: 6px; cursor: pointer;">选中进行对比</button>
+        </div>
+        <div class="history-card">
+            <div>
+                <div style="font-weight: 700;">bench_7dim_20260514_1800.json</div>
+                <div style="color: #94a3b8; font-size: 0.85rem;">2026-05-14 18:00 | 4 Cases | Legacy Static Schema</div>
+            </div>
+            <button style="background: #334155; border: none; color: white; padding: 8px 15px; border-radius: 6px; cursor: pointer;">选中进行对比</button>
+        </div>
+    </div>
+</body>
+</html>
