@@ -271,7 +271,9 @@ def match_visualization(user_question: str, finding_count: int) -> str:
 
     # K. Cross-hospital medication hoarding
     if any(kw in q for kw in ["跨院", "重复开药", "慢病", "时间窗", "滚动", "囤药"]):
-        return _viz_medication_hoarding()
+        if finding_count > 0:
+            return _viz_medication_hoarding()
+        return _viz_medication_hoarding_zero()
 
     # L. DRG revolving door
     if any(kw in q for kw in ["drg", "假出院", "出院", "入院", "48小时", "再次"]):
@@ -762,7 +764,12 @@ def _viz_high_value_ranking_zero() -> str:
         "*(注：经对结算明细库大表进行物理级全量扫描，并分别以原始阈值、"
         "宽松+20%和极宽+50%三档敏感度递进模拟验证，确认不存在因阈值过严"
         "导致的潜在大额异常漏报，合规评级为优。)*\n"
-    ) 跨机构滚动时间窗超额囤药时序示意图 (Medication Hoarding sliding window timeline)\n"
+    )
+
+
+def _viz_medication_hoarding_zero() -> str:
+    return (
+        "\n\n### 📊 跨机构滚动时间窗超额囤药时序示意图 (Medication Hoarding sliding window timeline)\n"
         "```mermaid\n"
         "gantt\n"
         "    title 跨机构慢病/高价药滚动重复开药判定示意图 (零发现场景验证模型)\n"

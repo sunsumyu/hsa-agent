@@ -1,0 +1,155 @@
+# configs/policy_registry.yaml
+# =============================
+# [V2.2] 医保审计政策条款注册表
+#
+# 用途：将审计任务模式映射到具体法规条款，供 Planner 自动注入 Reporter 提示词。
+# 维护方式：当政策更新时，仅需修改此文件，无需改动 Agent 代码或 Prompt。
+#
+# 字段说明：
+#   - law: 法规名称
+#   - order: 发布令号
+#   - effective_date: 生效日期 (YYYY-MM-DD)
+#   - expiry_date: 失效日期 (null 表示至今有效)
+#   - articles: 条款列表 (num=条款号, text=条文原文)
+
+# ── 大额结算异常检测 ──
+outlier_settlement:
+  primary:
+    law: "医疗保障基金使用监督管理条例"
+    order: "国务院令第735号"
+    effective_date: "2021-05-01"
+    expiry_date: null
+    articles:
+      - num: "第十五条"
+        text: "定点医药机构不得通过虚构医药服务、分解住院、挂床住院等方式骗取医疗保障基金"
+      - num: "第三十八条"
+        text: "定点医药机构有分解住院、挂床住院、违反诊疗规范过度诊疗等情形之一的，由医疗保障行政部门责令改正"
+  secondary:
+    law: "医疗机构医疗保障定点管理暂行办法"
+    order: "国家医保局令第2号"
+    effective_date: "2021-01-01"
+    expiry_date: null
+    articles:
+      - num: "第四十三条"
+        text: "定点医疗机构应严格执行医保支付政策和标准，不得将不属于医保基金支付范围的医疗费用纳入医保结算"
+
+# ── 分解住院 / 重复住院 ──
+decomposed_hospitalization:
+  primary:
+    law: "医疗保障基金使用监督管理条例"
+    order: "国务院令第735号"
+    effective_date: "2021-05-01"
+    expiry_date: null
+    articles:
+      - num: "第十五条"
+        text: "定点医药机构不得通过虚构医药服务、分解住院、挂床住院等方式骗取医疗保障基金"
+      - num: "第三十八条"
+        text: "定点医药机构有分解住院、挂床住院、违反诊疗规范过度诊疗等情形之一的，由医疗保障行政部门责令改正"
+  secondary:
+    law: "DRG/DIP支付方式改革三年行动计划"
+    order: "医保发〔2021〕48号"
+    effective_date: "2021-12-01"
+    expiry_date: null
+    articles:
+      - num: "第十条"
+        text: "严禁医疗机构通过分解住院、挂床住院、低标准入院等方式套取医保基金"
+
+# ── 耗材缺失 / 项目串换 ──
+consumable_mismatch:
+  primary:
+    law: "DRG/DIP支付方式改革三年行动计划"
+    order: "医保发〔2021〕48号"
+    effective_date: "2021-12-01"
+    expiry_date: null
+    articles:
+      - num: "第十五条"
+        text: "加强医用耗材使用监管，建立耗材使用与医保结算的联动核查机制"
+  secondary:
+    law: "关于进一步加强医用耗材医保支付管理的通知"
+    order: "国医保发〔2023〕12号"
+    effective_date: "2023-06-01"
+    expiry_date: null
+    articles:
+      - num: "第十条"
+        text: "定点医疗机构使用医用耗材应当与医保结算清单中的耗材国家医保标准编码（27位）保持一致"
+
+# ── 中医理疗 / 手法复位 ──
+physical_therapy_abuse:
+  primary:
+    law: "医疗机构手术分级管理办法"
+    order: "国卫医发〔2022〕18号"
+    effective_date: "2022-12-01"
+    expiry_date: null
+    articles:
+      - num: "第十四条"
+        text: "医疗机构应当按照手术分级管理要求，对手术医师进行授权管理"
+  secondary:
+    law: "DRG/DIP支付方式改革三年行动计划"
+    order: "医保发〔2021〕48号"
+    effective_date: "2021-12-01"
+    expiry_date: null
+    articles:
+      - num: "第十二条"
+        text: "加强康复理疗类项目的频次和适应症审核，防止过度医疗"
+
+# ── 性别冲突 / 年龄准入 ──
+gender_age_conflict:
+  primary:
+    law: "医疗保障基金使用监督管理条例"
+    order: "国务院令第735号"
+    effective_date: "2021-05-01"
+    expiry_date: null
+    articles:
+      - num: "第十五条"
+        text: "定点医药机构不得通过虚构医药服务、分解住院、挂床住院等方式骗取医疗保障基金"
+
+# ── 高频购药 / 药店套现 ──
+pharmacy_frequent_purchase:
+  primary:
+    law: "医疗保障基金使用监督管理条例"
+    order: "国务院令第735号"
+    effective_date: "2021-05-01"
+    expiry_date: null
+    articles:
+      - num: "第十五条"
+        text: "定点医药机构不得通过虚构医药服务、分解住院、挂床住院等方式骗取医疗保障基金"
+      - num: "第十九条"
+        text: "定点医药机构应当确保医疗保障基金支付的费用符合规定的支付范围"
+  secondary:
+    law: "零售药店医疗保障定点管理暂行办法"
+    order: "国家医保局令第3号"
+    effective_date: "2021-01-01"
+    expiry_date: null
+    articles:
+      - num: "第二十一条"
+        text: "定点零售药店应当严格执行医保支付政策，不得协助参保人员套取医保基金"
+
+# ── 通用医保审计 / 零发现报告 ──
+general_audit:
+  primary:
+    law: "医疗保障基金使用监督管理条例"
+    order: "国务院令第735号"
+    effective_date: "2021-05-01"
+    expiry_date: null
+    articles:
+      - num: "第十五条第一款"
+        text: "定点医药机构不得通过虚构医药服务、分解住院、挂床住院等方式骗取医疗保障基金"
+
+# ── 重复收费 / 分解计费 ──
+duplicate_billing:
+  primary:
+    law: "医疗保障基金使用监督管理条例"
+    order: "国务院令第735号"
+    effective_date: "2021-05-01"
+    expiry_date: null
+    articles:
+      - num: "第三十八条"
+        text: "定点医药机构有分解住院、挂床住院、违反诊疗规范过度诊疗等情形之一的，由医疗保障行政部门责令改正"
+  secondary:
+    law: "医疗机构医疗保障定点管理暂行办法"
+    order: "国家医保局令第2号"
+    effective_date: "2021-01-01"
+    expiry_date: null
+    articles:
+      - num: "第四十三条"
+        text: "定点医疗机构应严格执行医保支付政策和标准，不得将不属于医保基金支付范围的医疗费用纳入医保结算"

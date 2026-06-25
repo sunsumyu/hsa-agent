@@ -371,13 +371,26 @@ class AuditCoderAgent:
                 sql_logic = parsed_res.get("sql_logic", "")
                 is_probe = sql_logic and self._is_probe_query(sql_logic)
                 
+                # [V178.11] 增强证据链提取：覆盖所有可能的返回字段格式
                 if not is_probe:
+                    data_extracted = False
                     if "data" in parsed_res and parsed_res["data"]:
                         raw_data_list.append(str(parsed_res["data"]))
-                    elif "records_sample" in parsed_res: 
+                        data_extracted = True
+                        logger.info(f"🔮 [EVIDENCE] Extracted data from 'data' field: {len(str(parsed_res['data']))} chars, {len(parsed_res['data']) if isinstance(parsed_res['data'], list) else 'N/A'} rows")
+                    if "records_sample" in parsed_res and parsed_res["records_sample"]:
                         raw_data_list.append(str(parsed_res["records_sample"]))
-                    elif "raw_evidence" in parsed_res: 
+                        data_extracted = True
+                        logger.info(f"🔮 [EVIDENCE] Extracted data from 'records_sample' field: {len(str(parsed_res['records_sample']))} chars")
+                    if "raw_evidence" in parsed_res and parsed_res["raw_evidence"]:
                         raw_data_list.append(str(parsed_res["raw_evidence"]))
+                        data_extracted = True
+                        logger.info(f"🔮 [EVIDENCE] Extracted data from 'raw_evidence' field: {len(str(parsed_res['raw_evidence']))} chars")
+                    # [V178.11] 新增：如果 status=SUCCESS 但上述字段都为空，检查整个结果是否有内容
+                    if not data_extracted and parsed_res.get("status") == "SUCCESS":
+                        logger.warning(f"🔮 [EVIDENCE] SUCCESS status but no data fields! Keys: {list(parsed_res.keys())}, affected_rows: {parsed_res.get('affected_rows')}")
+                else:
+                    logger.info(f"🔮 [EVIDENCE] Skipped probe query data extraction: {sql_logic[:80]}...")
         
         # 启发式筛选核心审计 SQL，避免被最后一步的边界探针 SQL 覆盖
         core_sql = ""
@@ -407,8 +420,10 @@ class AuditCoderAgent:
                 break
 
         new_raw_data = "\n---\n".join(raw_data_list)
+        logger.info(f"🔮 [EVIDENCE] raw_data_list count: {len(raw_data_list)}, new_raw_data length: {len(new_raw_data)}, has_new_core_query: {has_new_core_query}")
         if not has_new_core_query and not new_raw_data:
             new_raw_data = state.get("raw_data", "")
+            logger.info(f"🔮 [EVIDENCE] Fallback to state.raw_data: length={len(new_raw_data)}")
 
         # [V2.1] 避免在工具未返回 methodology 时将 state 中的 methodology 覆盖为空字符串
         final_methodology = "\n\n".join(methodologies) if methodologies else state.get("methodology", "")

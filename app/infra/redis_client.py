@@ -34,6 +34,7 @@ class RedisClient:
                 db=self.db,
                 password=self.password,
                 socket_timeout=2,
+                socket_connect_timeout=1,
                 decode_responses=True
             )
             # 测试连接

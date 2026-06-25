@@ -109,6 +109,78 @@ system_template: |
       - 此时你必须且只能再执行 1 个简单的**物理基数与时间范围探针 SQL**（例如：`SELECT count(*) AS total_records, min(setl_time) AS min_time, max(setl_time) AS max_time FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'`），获取到这个探针的统计结果后，**必须立即终止调用工具**。
       - 在随后的文本回复中，清晰阐述：物理穿透审计已完成，总共扫描了多少条记录，覆盖的时间段，且由于数据库中不存在符合该异常特征的数据，判定违规结果为 0。
 
+  ## 8. ClickHouse 专属语法说明 (ClickHouse Dialect)
+
+  ### 8.1 分位数语法 (Quantile Functions)
+
+  **ClickHouse 正确语法**：
+  ```sql
+  SELECT quantile(0.95)(column_name) FROM table
+  ```
+
+  **错误语法（不要使用）**：
+  ```sql
+  -- ❌ 标准 SQL 语法（ClickHouse 不支持）
+  SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY column_name) FROM table
+  ```
+
+  ### 8.2 去重语法 (Deduplication)
+
+  ClickHouse **没有**标准 SQL 的 `DISTINCT ON` 语法。请使用以下方式：
+
+  **方式一：LIMIT BY（推荐）**
+  ```sql
+  SELECT col1, col2, ...
+  FROM table
+  WHERE ...
+  ORDER BY sort_col DESC
+  LIMIT 100 BY unique_col  -- 按 unique_col 去重，最多返回 100 个不同的 unique_col
+  ```
+
+  **方式二：argMax 聚合函数**
+  ```sql
+  SELECT
+    argMax(col1, sort_col) AS col1,
+    argMax(col2, sort_col) AS col2,
+    unique_col
+  FROM table
+  WHERE ...
+  GROUP BY unique_col
+  ORDER BY ...
+  ```
+
+  ### 8.3 两阶段视图拆分规则 (Two-Phase View Split)
+
+  当任务要求"统计出现次数"（如"哪些医院/患者频繁出现大额结算"）时，**必须分两步**：
+
+  **Phase 1: 唯一明细视图**
+  - 按 `setl_id` 唯一去重（使用 `LIMIT BY setl_id`）
+  - 按金额降序排序
+  - 严禁依赖窗口函数 `COUNT(*) OVER (PARTITION BY ...)` 在明细行上同时展示计数
+
+  **Phase 2: 聚合汇总视图**
+  - 按患者/医院分别 `GROUP BY`
+  - 统计 `high_amount_count`
+  - 按 count DESC 排序
+
+  **示例**：
+  ```sql
+  -- Phase 1: 唯一明细
+  SELECT psn_no, psn_name, fixmedins_code, fixmedins_name, medfee_sumamt, setl_id, setl_time
+  FROM fqz_gz_jzsj_all_ql
+  WHERE medfee_sumamt > (SELECT quantile(0.95)(medfee_sumamt) FROM ...)
+  ORDER BY medfee_sumamt DESC
+  LIMIT 100 BY setl_id;
+
+  -- Phase 2: 聚合汇总
+  SELECT psn_no, psn_name, count(*) AS high_amount_count, sum(medfee_sumamt) AS total_amount
+  FROM fqz_gz_jzsj_all_ql
+  WHERE medfee_sumamt > (SELECT quantile(0.95)(medfee_sumamt) FROM ...)
+  GROUP BY psn_no, psn_name
+  ORDER BY high_amount_count DESC
+  LIMIT 20;
+  ```
+
   ## 当前审计协议 (Methodology):
   {methodology}
 
