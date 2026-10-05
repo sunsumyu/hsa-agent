@@ -16,7 +16,7 @@ from app.core.observability import get_callbacks
 from dotenv import load_dotenv
 
 load_dotenv()
-from app.infra.enriched_llm import EnrichedChatOpenAI, EnrichedChatGoogleGenerativeAI, Reranker
+from app.infra.enriched_llm import EnrichedChatOpenAI, EnrichedChatGoogleGenerativeAI, EnrichedChatAnthropic, Reranker
 
 
 class ModelManager:
@@ -174,18 +174,28 @@ class ModelManager:
         
         try:
             if provider == "google":
-                llm = EnrichedChatGoogleGenerativeAI(
+                return EnrichedChatGoogleGenerativeAI(
                     model=model_name,
                     api_key=api_key, 
                     google_api_key=api_key,
                     temperature=temperature,
                     timeout=60.0,
-                    streaming=True
+                    streaming=True,
+                    endpoint_id=name
                 )
-                object.__setattr__(llm, 'endpoint_id', name)
-                return llm
+            elif provider == "anthropic":
+                base_url = base_url or os.getenv("ANTHROPIC_BASE_URL", "http://103.236.76.197:11223/anthropic")
+                return EnrichedChatAnthropic(
+                    model_name=model_name,
+                    anthropic_api_key=api_key,
+                    anthropic_api_url=base_url,
+                    temperature=temperature,
+                    timeout=120.0,
+                    streaming=True,
+                    endpoint_id=name
+                )
             else:
-                llm = EnrichedChatOpenAI(
+                return EnrichedChatOpenAI(
                     model=model_name,
                     openai_api_key=api_key,
                     openai_api_base=base_url,
@@ -193,11 +203,9 @@ class ModelManager:
                     timeout=60.0,
                     streaming=True,
                     default_headers=default_headers,
-                    http_async_client=self.async_client  # [V142.0] 注入共享客户端
+                    http_async_client=self.async_client,  # [V142.0] 注入共享客户端
+                    endpoint_id=name
                 )
-                # [V81.0] 物理绕过：使用 object.__setattr__ 绕过 Pydantic 的初始化校验，确保 ID 强绑定
-                object.__setattr__(llm, 'endpoint_id', name)
-                return llm
         except Exception as e:
             logger.error(f"LLM 实例化失败: {name} | {e}")
             return None
@@ -227,8 +235,12 @@ class ModelManager:
                         f_llm = self._create_llm(ep.id, ep)
                         if f_llm: fallback_objects.append(f_llm)
         
-        logger.info(f">>> [池化寻址] 池: {pool_id} | 选中: {selected_ep.id} | 备选数: {len(fallback_objects)}")
-        
+        if main_llm is None:
+            if fallback_objects:
+                main_llm = fallback_objects.pop(0)
+            else:
+                raise ValueError(f"!!! [算力枯竭] 节点 {selected_ep.id} 及备选节点均未能成功创建 LLM。")
+
         if fallback_objects:
             return main_llm.with_fallbacks(fallback_objects), selected_ep.id
         return main_llm, selected_ep.id
@@ -341,6 +353,17 @@ class ModelManager:
                     timeout=10.0,
                     max_retries=0
                 )
+            elif provider == "anthropic":
+                from langchain_anthropic import ChatAnthropic
+                base_url = base_url or os.getenv("ANTHROPIC_BASE_URL", "http://103.236.76.197:11223/anthropic")
+                llm = ChatAnthropic(
+                    model_name=ep.model_name,
+                    anthropic_api_key=api_key,
+                    anthropic_api_url=base_url,
+                    temperature=0.0,
+                    timeout=10.0,
+                    max_retries=0
+                )
             else:
                 default_headers = {}
                 if provider == "dashscope":
@@ -377,8 +400,6 @@ class ModelManager:
                 logger.warning(f"[HealthCheck] 巡检异常: {e}")
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-model_manager = _SP.try_resolve("model_manager") or ModelManager()
-if not _SP.is_registered("model_manager"):
-    _SP.register_instance("model_manager", model_manager)
+model_manager = LazyProxy("model_manager")
