@@ -109,6 +109,11 @@ argus/
    python -m scripts.run_audit --query "检查是否存在通过‘分解住院’规避大额结算监控的情况"
    ```
 
+## 📚 核心文档
+- [数据库物理数据范围与测试用例编写指南](file:///F:/chain/argus-agent/docs/database_data_scopes.md)：详述 ClickHouse 各表真实行数、字段特征、金额分布、真实违规值与测试用例边界。
+- [全域业务语义字典](file:///F:/chain/argus-agent/docs/database_mapping.md)：医保审计字段命名规范与核心表字段业务含义。
+- [架构重构与工程设计指南 (Refactoring & Architecture Guide)](file:///F:/chain/argus-agent/docs/ARCHITECTURE_REFACTORING_GUIDE.md)：基于 Martin Fowler《重构》与《演进式架构》体系的坏味道治理、设计模式落地与 10 秒 Code Review 架构门禁。
+
 ## 📅 路线图 (Roadmap)
 
 - [x] 基于 LangGraph 的多智能体循环架构
