@@ -119,3 +119,25 @@ async def test_resilient_model_content_normalization():
     res = await wrapper.ainvoke([HumanMessage(content="查询")])
     assert isinstance(res.content, str)
     assert res.content == "归一化文本"
+
+
+def test_transitional_factory_functions():
+    from app.infra.enriched_llm import (
+        EnrichedChatOpenAI,
+        EnrichedChatGoogleGenerativeAI,
+        EnrichedChatAnthropic,
+        ResilientChatModel
+    )
+
+    # 验证工厂函数返回 ResilientChatModel
+    m1 = EnrichedChatOpenAI(model="gpt-4o", api_key="sk-fake", endpoint_id="ep-1")
+    assert isinstance(m1, ResilientChatModel)
+    assert m1.endpoint_id == "ep-1"
+
+    m2 = EnrichedChatGoogleGenerativeAI(model="gemini-1.5-pro", google_api_key="fake-key", endpoint_id="ep-2")
+    assert isinstance(m2, ResilientChatModel)
+    assert m2.endpoint_id == "ep-2"
+
+    m3 = EnrichedChatAnthropic(model_name="claude-3-5-sonnet-20241022", anthropic_api_key="fake-key", endpoint_id="ep-3")
+    assert isinstance(m3, ResilientChatModel)
+    assert m3.endpoint_id == "ep-3"
