@@ -94,3 +94,36 @@ def test_eval_zero_findings_compliance_report():
     assert res.fn == 0
     assert res.recall_pct == 100.0
     assert res.precision_pct == 100.0
+
+
+def test_extract_totals_deduplication_and_grouping():
+    """测试 extract_totals 窄接口能够正确对账 UNION ALL 与 GROUP BY 场景"""
+    # 场景 1: UNION ALL 包含总计行与明细行
+    union_rows = [
+        {"drug_name": "【全库总计汇总】", "record_count": 4613, "total_amount": 100000.0},
+        {"drug_name": "缩宫素注射液", "record_count": 3000, "total_amount": 60000.0},
+        {"drug_name": "黄体酮胶囊", "record_count": 1613, "total_amount": 40000.0},
+    ]
+    cnt, amt = AuditMetricEvaluator.extract_totals(union_rows)
+    assert cnt == 4613
+    assert amt == 100000.0
+
+    # 场景 2: 3 个结算批次 GROUP BY
+    batch_rows = [
+        {"setl_date": "2024-03-06", "row_cnt": 1000, "medfee_sum": 150000.0},
+        {"setl_date": "2024-04-11", "row_cnt": 800, "medfee_sum": 100000.0},
+        {"setl_date": "2024-04-15", "row_cnt": 700, "medfee_sum": 98640.3},
+    ]
+    cnt2, amt2 = AuditMetricEvaluator.extract_totals(batch_rows)
+    assert cnt2 == 2500
+    assert abs(amt2 - 348640.3) < 0.01
+
+    # 场景 3: 纯明细记录 (无聚合列)
+    detail_rows = [
+        {"psn_no": "P1", "det_item_fee_sumamt": 500.0},
+        {"psn_no": "P2", "det_item_fee_sumamt": 800.0},
+    ]
+    cnt3, amt3 = AuditMetricEvaluator.extract_totals(detail_rows)
+    assert cnt3 == 2
+    assert amt3 == 1300.0
+

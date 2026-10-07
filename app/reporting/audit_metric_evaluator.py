@@ -15,7 +15,7 @@ app/reporting/audit_metric_evaluator.py
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -51,6 +51,84 @@ class AuditMetricEvaluator:
         "未发现", "合规", "零违规", "无异常", "未见异常",
         "零发现", "未见嫌疑", "未检出", "不存在", "符合规定"
     ]
+
+    @classmethod
+    def extract_totals(cls, db_rows: Optional[List[Dict[str, Any]]]) -> Tuple[int, float]:
+        """
+        [Narrow Interface] 从原始结果集中提取对账后的 (检出条数, 涉及总金额)。
+        内部深度处理：
+        1. 识别并优先使用全量汇总行 (如 '全库总计', '汇总', '总计', '合计')，防止与明细行双重计算
+        2. 自动识别汇总计数列 (如 record_count, row_cnt, total_records)
+        3. 自动识别费用金额列 (如 total_amount, det_item_fee_sumamt, medfee_sum, amount, fee)
+        4. 明细场景降级：len(db_rows) 与明细金额求和
+        """
+        rows = db_rows or []
+        if not rows or not isinstance(rows[0], dict):
+            return 0, 0.0
+
+        first_row = rows[0]
+
+        # 1. 检测计数列与金额列
+        count_col = None
+        for col in first_row.keys():
+            if col.lower() in cls.STRICT_AGGREGATE_ALIASES:
+                count_col = col
+                break
+        if not count_col:
+            for col in first_row.keys():
+                col_lower = col.lower()
+                if col_lower == "cnt":
+                    continue
+                if any(col_lower.endswith(sfx) for sfx in ["_count", "_cnt", "count", "num"]):
+                    try:
+                        if first_row.get(col) is not None:
+                            int(first_row[col])
+                            count_col = col
+                            break
+                    except (ValueError, TypeError):
+                        pass
+
+        # 金额列探测 (排除 count_col)
+        amount_col = None
+        for col in first_row.keys():
+            if col == count_col:
+                continue
+            col_lower = col.lower()
+            if any(k in col_lower for k in ["fee", "amt", "pay", "cost", "sum", "amount", "price"]):
+                try:
+                    if first_row.get(col) is not None:
+                        float(first_row[col])
+                        amount_col = col
+                        break
+                except (ValueError, TypeError):
+                    pass
+
+        # 2. 检查全量汇总行
+        summary_markers = ["全局汇总", "全库总计", "汇总", "总计", "合计"]
+        summary_rows = [
+            r for r in rows
+            if any(any(m in str(v).strip() for m in summary_markers) for v in r.values())
+        ]
+
+        if summary_rows and len(rows) > len(summary_rows):
+            target_rows = summary_rows
+        else:
+            target_rows = rows
+
+        # 3. 计算条数
+        if count_col:
+            det_count = sum(int(r[count_col]) for r in target_rows if r.get(count_col) is not None)
+        else:
+            det_count = len(target_rows)
+
+        # 4. 计算金额
+        if amount_col:
+            det_sum = sum(float(r[amount_col]) for r in target_rows if r.get(amount_col) is not None)
+        else:
+            from app.reporting.fast_route_conclusion import _extract_amount
+            det_sum = sum(_extract_amount(r) for r in target_rows)
+
+        return det_count, round(det_sum, 2)
 
     @classmethod
     def evaluate(

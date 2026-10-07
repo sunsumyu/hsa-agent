@@ -188,9 +188,8 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
 
     logger.info(">>> [REPORTER] 正在执行渲染任务...")
     raw_data_list = report_renderer.clean_and_parse_raw_data(state.get("raw_data"))
-    from app.reporting.fast_route_conclusion import _extract_amount
-    hard_sum = sum(_extract_amount(r) for r in raw_data_list)
-    hard_count = len(raw_data_list)
+    from app.reporting.audit_metric_evaluator import AuditMetricEvaluator
+    hard_count, hard_sum = AuditMetricEvaluator.extract_totals(raw_data_list)
     
     # [V2.1] 识别执行是否受限/逃生舱激活
     error_log = state.get("error_log") or ""
