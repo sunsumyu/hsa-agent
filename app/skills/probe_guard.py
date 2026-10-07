@@ -21,6 +21,13 @@ STRUCTURAL_WHITELIST: List[str] = [
     "UNION ",
     "OVER ",
     "OVER(",
+    "COUNTIF(",
+    "SUMIF(",
+    "AVGIF(",
+    "MAXIF(",
+    "MINIF(",
+    "IF(",
+    "IF (",
 ]
 
 # Aggregate whitelist: these statistical keywords are only exempt when
@@ -82,12 +89,15 @@ def is_probe_query(sql: str) -> bool:
         logger.debug(f"[ProbeGuard] pure baseline query detected: {sql[:80]}...")
         return True
 
-    # [V178.10] avg()/sum() special handling: only exempt with GROUP BY or JOIN
+    # [V178.10] avg()/sum() special handling: only exempt with GROUP BY or JOIN, or business filters
     if "AVG(" in sql_upper or "SUM(" in sql_upper or "AVERAGE(" in sql_upper:
         if has_group_by or has_join:
             logger.debug(f"[ProbeGuard] avg/sum with GROUP BY/JOIN: {sql[:80]}...")
             return False
         else:
+            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "IN(", "AND", "OR", "MULTISEARCH"]):
+                logger.debug(f"[ProbeGuard] aggregate with business filters: {sql[:80]}...")
+                return False
             logger.debug(f"[ProbeGuard] pure avg/sum baseline: {sql[:80]}...")
             return True
 
@@ -98,8 +108,12 @@ def is_probe_query(sql: str) -> bool:
     # 2. Simple count/boundary probes (no JOIN, no GROUP BY)
     if "JOIN" not in sql_upper and "GROUP BY" not in sql_upper:
         if any(x in sql_upper for x in ["COUNT(*)", "COUNT (", "MIN(SETL_TIME)", "MAX(SETL_TIME)", "MIN (SETL_TIME)", "MAX (SETL_TIME)"]):
+            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "AND", "OR", "MULTISEARCH"]):
+                return False
             return True
         if sql_upper.startswith("SELECT COUNT"):
+            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "AND", "OR", "MULTISEARCH"]):
+                return False
             return True
 
     # 3. Dictionary/DISTINCT lookups (item names, drug codes, etc.)

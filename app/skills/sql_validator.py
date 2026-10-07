@@ -58,8 +58,12 @@ class SQLLogicValidator:
         # 1. 基础架构校验 (主键聚合拦截)
         if "GROUP BY" in sql_upper and any(agg in sql_upper for agg in ["COUNT", "SUM", "AVG"]):
             forbidden_pks = ["SETL_ID", "MSG_ID", "REC_ID"]
+            gb_clause = sql_upper.split("GROUP BY")[-1]
+            for delim in ["ORDER BY", "HAVING", "LIMIT", "WINDOW", "SETTINGS", ";"]:
+                if delim in gb_clause:
+                    gb_clause = gb_clause.split(delim)[0]
             for pk in forbidden_pks:
-                if pk in sql_upper.split("GROUP BY")[-1]:
+                if re.search(rf"\b{pk}\b", gb_clause):
                     return False, f"❌ [架构拦截] 聚合查询禁止按唯一 ID `{pk}` 分组。"
 
         # 2. 动态业务规则拦截 (从 YAML 加载)
@@ -89,8 +93,6 @@ class SQLLogicValidator:
         return True, ""
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-sql_validator = _SP.try_resolve("sql_validator") or SQLLogicValidator()
-if not _SP.is_registered("sql_validator"):
-    _SP.register_instance("sql_validator", sql_validator)
+sql_validator = LazyProxy("sql_validator")

@@ -97,6 +97,15 @@ class LLMProvider:
         from app.memory.message_sanitizer import ensure_tool_pairing
         messages = ensure_tool_pairing(messages)
 
+        # [Anthropic/OpenAI Safety Guard] 若消息链全为 SystemMessage 或无用户消息，自动追加一条 HumanMessage 防止 400 报错
+        from langchain_core.messages import HumanMessage
+        has_user_msg = any(
+            isinstance(m, HumanMessage) or getattr(m, "type", "") in ("human", "user") or (isinstance(m, tuple) and m[0] in ("human", "user"))
+            for m in messages
+        )
+        if not has_user_msg:
+            messages = list(messages) + [HumanMessage(content="请根据系统提示与当前上下文执行审计分析并给出输出。")]
+
         # 6. 执行调用
         start_time = time.time()
         max_attempts = 3
@@ -120,6 +129,21 @@ class LLMProvider:
                         response = AIMessage(content="")
                 else:
                     response = await llm.ainvoke(messages, config=obs_config)
+                
+                # [Claude/Thinking Guard] 归一化 response.content 为纯文本字符串，防止 downstream 解析崩溃
+                if isinstance(response.content, list):
+                    text_parts = []
+                    for item in response.content:
+                        if isinstance(item, str):
+                            if item: text_parts.append(item)
+                        elif isinstance(item, dict):
+                            if item.get("type") == "text" and item.get("text"):
+                                text_parts.append(item["text"])
+                            elif "text" in item and item["text"]:
+                                text_parts.append(item["text"])
+                    if text_parts or not getattr(response, "tool_calls", None):
+                        response.content = "\n".join(text_parts).strip()
+                
                 latency_ms = (time.time() - start_time) * 1000
                 
                 # 6. 计费与用量追踪
@@ -196,8 +220,6 @@ class LLMProvider:
         )
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-llm_provider = _SP.try_resolve("llm_provider") or LLMProvider()
-if not _SP.is_registered("llm_provider"):
-    _SP.register_instance("llm_provider", llm_provider)
+llm_provider = LazyProxy("llm_provider")

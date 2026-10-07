@@ -143,7 +143,8 @@ class MetadataMappingLayer:
         """识别关键词并返回避坑指南"""
         guides = []
         for term, meta in self.ontology.items():
-            if term in text:
+            sub_terms = term.split('/')
+            if any(st in text for st in sub_terms):
                 guides.append(f"### 💡 {term} 业务避坑指南\n- **物理映射建议**: {meta['physical']}\n- **风险提示**: {meta['caveats']}")
         return "\n\n".join(guides)
 

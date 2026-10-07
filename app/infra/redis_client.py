@@ -100,8 +100,6 @@ class RedisClient:
                 logger.debug(f"🔐 [REDIS] 已释放分布式锁: {lock_key}")
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-redis_manager = _SP.try_resolve("redis_manager") or RedisClient()
-if not _SP.is_registered("redis_manager"):
-    _SP.register_instance("redis_manager", redis_manager)
+redis_manager = LazyProxy("redis_manager")

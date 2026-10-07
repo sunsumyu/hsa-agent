@@ -150,3 +150,10 @@ class TestValidateSqlEarlyChecks:
     def test_syntax_error_rejected(self):
         with pytest.raises(SecurityViolationError, match="解析失败"):
             SQLGuardian.validate_sql("SELCT FORM TABLE")
+
+    def test_contradiction_predicate_rejected(self):
+        with pytest.raises(SecurityViolationError, match="恒假"):
+            SQLGuardian.validate_sql(
+                "SELECT setl_id FROM fqz_fymx_test WHERE gend NOT LIKE '1%' AND gend NOT LIKE '2%'"
+            )
+

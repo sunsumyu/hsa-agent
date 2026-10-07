@@ -13,6 +13,7 @@ import json
 import asyncio
 import hashlib
 import time
+import re
 from typing import Dict, Any, List, Optional
 from loguru import logger
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, BaseMessage
@@ -30,6 +31,7 @@ from app.core.booster import booster
 from app.core.structured_tracer import StructuredTracer
 
 from app.skills.probe_guard import is_probe_query
+from app.core.protocol.tool_normalizer import ToolResponseNormalizer
 
 class AuditCoderAgent:
     def __init__(self, max_retries: Optional[int] = None):
@@ -43,6 +45,14 @@ class AuditCoderAgent:
     def _is_probe_query(self, sql: str) -> bool:
         """Delegate to extracted probe_guard module for backward compat."""
         return is_probe_query(sql)
+
+    def _truncate_data(self, data: Any, max_chars: int = 12000) -> str:
+        """Truncate data if it exceeds max_chars to prevent context window overflow."""
+        data_str = str(data)
+        if len(data_str) > max_chars:
+            logger.warning(f"🚨 [State Safeguard] 结果集过大 ({len(data_str)} chars)，自动截断至 {max_chars} chars。")
+            return data_str[:max_chars] + f"... \n\n[WARNING: Data truncated due to excessive length. Original length: {len(data_str)} chars]"
+        return data_str
 
     async def execute(self, state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
         """执行审计代码生成与物理查询 [V171.2]"""
@@ -165,9 +175,18 @@ class AuditCoderAgent:
         q_lower = user_q.lower()
         scenario_guidelines = ""
 
+        # [V2.1 NEW] 审计意图抽象规划 (Plan-and-Solve: 认知解耦)
+        from app.core.planning.audit_intent_planner import AuditIntentPlanner
+        audit_intent = AuditIntentPlanner.extract_intent(user_q)
+        if audit_intent.enforcement_guidance:
+            scenario_guidelines += f"\n\n{audit_intent.enforcement_guidance}\n"
+
         # [V2.0 NEW] 优先使用 SceneTableSelector 的强制提示（仅用于表选择，不强制 SQL 模板）
+        if not scene_enforcement and user_q:
+            from app.core.scene_table_selector import scene_table_selector
+            scene_enforcement = scene_table_selector.get_enforcement_hint(user_q)
         if scene_enforcement:
-            scenario_guidelines = scene_enforcement
+            scenario_guidelines += scene_enforcement
 
         zero_findings_rule = (
             "\n\n【⚠️ 零发现与终止准则 (Zero-Findings & Termination Rule)】\n"
@@ -200,33 +219,73 @@ class AuditCoderAgent:
                 tools=tools
             )
             
-            logger.info(f"🔮 [Coder LLM Response] Content: {str(response.content)[:500]} | Tool Calls: {getattr(response, 'tool_calls', None)}")
-            
+            raw_cnt = getattr(response, "content", "")
+            raw_tc = getattr(response, "tool_calls", None)
+            logger.info(f"🔮 [Coder LLM Response] Content: {raw_cnt[:300]} | Tool Calls: {raw_tc}")
+
+            # [协议网关深模块] 统一归一化处理工具调用 (过滤 XML/DSML/CTE/JSON 脏标记与多方言协议)
+            normalized = ToolResponseNormalizer.normalize(
+                raw_content=raw_cnt,
+                existing_tool_calls=raw_tc
+            )
+            response.tool_calls = normalized.tool_calls
+            if normalized.is_synthesized:
+                logger.info(f"✨ [Coder Self-Healing] 协议网关自愈合成为工具调用: {normalized.synthesized_sql[:120]}...")
+
             if not getattr(response, "tool_calls", None):
-                 span.set_result("未触发工具调用，直接回复")
-                 # [V178.10] 使用 state 中已累加的全量 sql_history，确保不丢失任何轮次的 SQL
-                 history_sql = state.get("sql_history", [])
-                 preserved_raw_data = state.get("raw_data", "")
-                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] history_sql from state: {history_sql}")
-                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] preserved_raw_data: {preserved_raw_data[:200]}...")
-                 core_sql = ""
-                 if history_sql:
-                     audit_queries = []
-                     for s in history_sql:
-                         is_probe = self._is_probe_query(s)
-                         logger.info(f"🔮 [DEBUG_SQL_DIRECT] checking query: is_probe={is_probe} for {s[:100]}...")
-                         if not is_probe:
-                             audit_queries.append(s)
-                     core_sql = audit_queries[-1] if audit_queries else history_sql[-1]
-                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] selected core_sql: {core_sql[:100]}...")
-                 return {
-                     "messages": [response],
-                     "error_log": None,
-                     "execution_trace": tracer.to_legacy_list(),
-                     "sql_query": core_sql,
-                     "sql_history": history_sql,  # [V178.10] 返回全量 sql_history，确保不丢失
-                     "raw_data": preserved_raw_data  # [V178.10] 显式返回 raw_data，确保前序轮次的审计证据不丢失
-                 }
+                history_sql = state.get("sql_history", [])
+                if not history_sql:
+                    logger.warning("🚨 [Coder Mandate] 模型首轮未触发工具调用且历史无 SQL，触发单刀直入强制执行...")
+                    from langchain_core.messages import HumanMessage
+                    retry_prompt = list(prompt) + [
+                        response,
+                        HumanMessage(content="【强制执行指令】你尚未物理执行任何 SQL 审计查询！严禁仅以自然语言文本回复或反问用户。当前系统已连接真实的 ClickHouse 数据库，所有数据均在库中，请立即调用 `execute_audit_sql` 工具执行对应的物理表查询获取真实统计数据！")
+                    ]
+                    retry_response = await llm_provider.chat(
+                        role="coder",
+                        messages=retry_prompt,
+                        config=config,
+                        state=state,
+                        tools=tools
+                    )
+                    retry_cnt = getattr(retry_response, "content", "")
+                    retry_tc = getattr(retry_response, "tool_calls", None)
+                    logger.info(f"🔮 [Coder Mandate Retry] Content: {retry_cnt[:300]} | Tool Calls: {retry_tc}")
+                    retry_norm = ToolResponseNormalizer.normalize(
+                        raw_content=retry_cnt,
+                        existing_tool_calls=retry_tc
+                    )
+                    retry_response.tool_calls = retry_norm.tool_calls
+                    if retry_norm.is_synthesized:
+                        logger.info(f"✨ [Coder Self-Healing] 强制重试自愈合成为工具调用: {retry_norm.synthesized_sql[:120]}...")
+                    if getattr(retry_response, "tool_calls", None):
+                        response = retry_response
+
+            if not getattr(response, "tool_calls", None):
+                span.set_result("未触发工具调用，直接回复")
+                # [V178.10] 使用 state 中已累加的全量 sql_history，确保不丢失任何轮次的 SQL
+                history_sql = state.get("sql_history", [])
+                preserved_raw_data = state.get("raw_data", "")
+                logger.info(f"🔮 [DEBUG_SQL_DIRECT] history_sql from state: {history_sql}")
+                logger.info(f"🔮 [DEBUG_SQL_DIRECT] preserved_raw_data: {preserved_raw_data[:200]}...")
+                core_sql = ""
+                if history_sql:
+                    audit_queries = []
+                    for s in history_sql:
+                        is_probe = self._is_probe_query(s)
+                        logger.info(f"🔮 [DEBUG_SQL_DIRECT] checking query: is_probe={is_probe} for {s[:100]}...")
+                        if not is_probe:
+                            audit_queries.append(s)
+                    core_sql = audit_queries[-1] if audit_queries else history_sql[-1]
+                logger.info(f"🔮 [DEBUG_SQL_DIRECT] selected core_sql: {core_sql[:100]}...")
+                return {
+                    "messages": [response],
+                    "error_log": None,
+                    "execution_trace": tracer.to_legacy_list(),
+                    "sql_query": core_sql,
+                    "sql_history": history_sql,  # [V178.10] 返回全量 sql_history，确保不丢失
+                    "raw_data": preserved_raw_data  # [V178.10] 显式返回 raw_data，确保前序轮次的审计证据不丢失
+                }
             
             # [V2.0 NEW] SQL物理执行前的语义拦截校验 [Gate 2]
             for tc in response.tool_calls:
@@ -264,6 +323,28 @@ class AuditCoderAgent:
         with tracer.span("QUALITY_GATE", node="CODER") as span:
             if processed["sql_query"]:
                 gate_error = self._run_quality_gates(processed["sql_query"], processed["methodology"], processed["raw_data"], processed["execution_trace"])
+                
+                # [Reflexion 闭环自愈] 后验反思评估 (Evaluator-Optimizer)
+                from app.core.reflection.audit_reflection_engine import AuditReflectionEngine
+                row_count = len(processed.get("raw_data") or [])
+                refl_res = AuditReflectionEngine.evaluate_execution(
+                    sql=processed["sql_query"],
+                    row_count=row_count,
+                    intent=audit_intent,
+                    error_msg=gate_error
+                )
+                if refl_res.needs_retry:
+                    refl_feedback = refl_res.diagnostic_feedback or gate_error or "执行结果异常，触发自愈"
+                    logger.warning(f"🚨 [Reflection Engine Self-Healing] {refl_feedback}")
+                    span.fail(refl_feedback)
+                    return {
+                        "error_log": refl_feedback,
+                        "sql_query": processed["sql_query"],
+                        "messages": [response] + processed["tool_msgs"],
+                        "retry_count": retry + 1,
+                        "execution_trace": tracer.to_legacy_list()
+                    }
+
                 if gate_error:
                     span.fail(gate_error)
                     return {
@@ -332,112 +413,9 @@ class AuditCoderAgent:
         return raw_results
 
     def _process_tool_results(self, results, state):
-        tool_msgs = []
-        raw_data_list = []
-        sql_logics = []
-        methodologies = []
-        tool_traces = []
-        has_error = False
-        error_msg = ""
-        
-        for t_call, res in results:
-            # 生成 Trace ID
-            trace_id = hashlib.sha256(f"{t_call['name']}_{time.time()}".encode()).hexdigest()[:8].upper()
-            
-            tool_msg = ToolMessage(content=str(res)[:2000], tool_call_id=t_call["id"])
-            tool_msgs.append(tool_msg)
-            
-            # [NEW] 智能支持 JSON 字符串响应的解析
-            parsed_res = res
-            if isinstance(res, str) and res.strip().startswith("{"):
-                try:
-                    parsed_res = json.loads(res)
-                except Exception:
-                    try:
-                        import ast
-                        parsed_res = ast.literal_eval(res)
-                    except Exception:
-                        pass
-            
-            if isinstance(parsed_res, dict):
-                if "sql_logic" in parsed_res: sql_logics.append(parsed_res["sql_logic"])
-                if "methodology" in parsed_res: methodologies.append(parsed_res["methodology"])
-                if "trace_hint" in parsed_res: tool_traces.append(f"[{trace_id}] {parsed_res['trace_hint']}")
-                if parsed_res.get("status") == "ERROR":
-                    has_error = True
-                    error_msg = parsed_res.get("error_message") or "Tool execution failed"
-                
-                # 证据链提取：排除探针查询的数据，避免其污染真实的审计证据链数据
-                sql_logic = parsed_res.get("sql_logic", "")
-                is_probe = sql_logic and self._is_probe_query(sql_logic)
-                
-                # [V178.11] 增强证据链提取：覆盖所有可能的返回字段格式
-                if not is_probe:
-                    data_extracted = False
-                    if "data" in parsed_res and parsed_res["data"]:
-                        raw_data_list.append(str(parsed_res["data"]))
-                        data_extracted = True
-                        logger.info(f"🔮 [EVIDENCE] Extracted data from 'data' field: {len(str(parsed_res['data']))} chars, {len(parsed_res['data']) if isinstance(parsed_res['data'], list) else 'N/A'} rows")
-                    if "records_sample" in parsed_res and parsed_res["records_sample"]:
-                        raw_data_list.append(str(parsed_res["records_sample"]))
-                        data_extracted = True
-                        logger.info(f"🔮 [EVIDENCE] Extracted data from 'records_sample' field: {len(str(parsed_res['records_sample']))} chars")
-                    if "raw_evidence" in parsed_res and parsed_res["raw_evidence"]:
-                        raw_data_list.append(str(parsed_res["raw_evidence"]))
-                        data_extracted = True
-                        logger.info(f"🔮 [EVIDENCE] Extracted data from 'raw_evidence' field: {len(str(parsed_res['raw_evidence']))} chars")
-                    # [V178.11] 新增：如果 status=SUCCESS 但上述字段都为空，检查整个结果是否有内容
-                    if not data_extracted and parsed_res.get("status") == "SUCCESS":
-                        logger.warning(f"🔮 [EVIDENCE] SUCCESS status but no data fields! Keys: {list(parsed_res.keys())}, affected_rows: {parsed_res.get('affected_rows')}")
-                else:
-                    logger.info(f"🔮 [EVIDENCE] Skipped probe query data extraction: {sql_logic[:80]}...")
-        
-        # 启发式筛选核心审计 SQL，避免被最后一步的边界探针 SQL 覆盖
-        core_sql = ""
-        # [V178.10] 手动累加 sql_history，不依赖 LangGraph reducer（node 内部多次调用不会触发 reducer）
-        accumulated_sql_history = state.get("sql_history", []) + sql_logics
-        logger.info(f"🔮 [DEBUG_SQL] state.sql_history: {state.get('sql_history')}")
-        logger.info(f"🔮 [DEBUG_SQL] current sql_logics: {sql_logics}")
-        logger.info(f"🔮 [DEBUG_SQL] accumulated_sql_history: {accumulated_sql_history}")
-        if accumulated_sql_history:
-            audit_queries = []
-            for sql in accumulated_sql_history:
-                is_probe = self._is_probe_query(sql)
-                logger.info(f"🔮 [DEBUG_SQL] checking query: is_probe={is_probe} for {sql[:100]}...")
-                if not is_probe:
-                    audit_queries.append(sql)
-            if audit_queries:
-                core_sql = audit_queries[-1]
-            else:
-                core_sql = accumulated_sql_history[-1]
-        logger.info(f"🔮 [DEBUG_SQL] selected core_sql: {core_sql[:100]}...")
-
-        # 判断本轮是否执行了新的核心审计 SQL
-        has_new_core_query = False
-        for sql in sql_logics:
-            if not self._is_probe_query(sql):
-                has_new_core_query = True
-                break
-
-        new_raw_data = "\n---\n".join(raw_data_list)
-        logger.info(f"🔮 [EVIDENCE] raw_data_list count: {len(raw_data_list)}, new_raw_data length: {len(new_raw_data)}, has_new_core_query: {has_new_core_query}")
-        if not has_new_core_query and not new_raw_data:
-            new_raw_data = state.get("raw_data", "")
-            logger.info(f"🔮 [EVIDENCE] Fallback to state.raw_data: length={len(new_raw_data)}")
-
-        # [V2.1] 避免在工具未返回 methodology 时将 state 中的 methodology 覆盖为空字符串
-        final_methodology = "\n\n".join(methodologies) if methodologies else state.get("methodology", "")
-
-        return {
-            "tool_msgs": tool_msgs,
-            "raw_data": new_raw_data,
-            "sql_query": core_sql,
-            "sql_history": accumulated_sql_history, # [V178.10] 返回全量累加 sql_history，不依赖 LangGraph reducer
-            "methodology": final_methodology,
-            "execution_trace": state.get("execution_trace", []) + tool_traces,
-            "has_error": has_error,
-            "error_msg": error_msg
-        }
+        """委托给 ToolEvidenceExtractor 深模块进行证据链标准化处理。"""
+        from app.agents.tool_evidence_extractor import tool_evidence_extractor
+        return tool_evidence_extractor.process(results, state).to_dict()
 
     def _run_quality_gates(self, sql, methodology, raw_data, trace):
         # 1. SQL Linter

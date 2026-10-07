@@ -91,3 +91,39 @@ class ServiceProvider:
     @classmethod
     def list_services(cls) -> list:
         return sorted(set(list(cls._factories.keys()) + list(cls._instances.keys())))
+
+
+class LazyProxy:
+    """A proxy object that resolves a service from ServiceProvider on first attribute access."""
+    def __init__(self, name: str, fallback_factory: Optional[Callable[[], Any]] = None):
+        self._name = name
+        self._fallback_factory = fallback_factory
+        self._instance = None
+
+    def _get_instance(self) -> Any:
+        if self._instance is None:
+            try:
+                self._instance = ServiceProvider.resolve(self._name)
+            except KeyError:
+                if self._fallback_factory is not None:
+                    self._instance = self._fallback_factory()
+                else:
+                    try:
+                        from app.core.bootstrap import register_services
+                        register_services()
+                        self._instance = ServiceProvider.resolve(self._name)
+                    except Exception:
+                        raise
+        return self._instance
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._get_instance(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name.startswith("_"):
+            super().__setattr__(name, value)
+        else:
+            setattr(self._get_instance(), name, value)
+
+    def __call__(self, *args, **kwargs) -> Any:
+        return self._get_instance()(*args, **kwargs)

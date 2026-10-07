@@ -473,10 +473,22 @@ def sanitize_audit_content(messages: List[Any]) -> List[Any]:
 
 def mask_audit_data(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    [V169.1] 针对医保结算数据列表的动态脱敏接口。
-    针对 psn_name, tel, cert_no 等字段执行深度打码。
+    [V179.5] 针对医保结算数据列表的动态脱敏接口（增强版）。
+    针对 psn_name, psn_no, setl_id 等敏感字段执行深度打码。
     """
-    pii_fields = {"psn_name", "psn_cert_no", "tel", "addr", "certno", "brdy", "contact_tel"}
+    # [V179.5] 扩展敏感字段集合，覆盖医保核心敏感数据
+    pii_fields = {
+        # 个人身份信息
+        "psn_name", "psn_cert_no", "tel", "addr", "certno", "brdy", "contact_tel",
+        # 医保核心标识
+        "psn_no", "setl_id", "setl_id_str",
+        # 机构信息
+        "fixmedins_code", "fixmedins_name",
+        # 诊断信息（可能包含敏感疾病）
+        "dise_name", "adm_dept_name", "dscg_dept_name",
+        # 医生信息
+        "chfpdr_name", "chfpdr_code",
+    }
     for item in data:
         for field in pii_fields:
             if field in item and item[field]:

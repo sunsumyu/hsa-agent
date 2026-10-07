@@ -22,14 +22,8 @@ async def get_models():
     return model_manager.get_model_list()
 
 
-@router.post("/agent/models/probe")
-@router.post("/ins-fqz/agent/models/probe")
-async def probe_models():
-    """[V5.3.0] 触发全量算力体检与云端额度同步"""
-    from app.core.quota.manager import quota_manager
-    await quota_manager.sync_all()
-    report = await model_manager.run_health_check()
-    return report
+    await model_manager.probe_all_endpoints()
+    return {"ok": True, "message": "全量自检与云端额度同步完成"}
 
 
 @router.get("/agent/history")

@@ -102,7 +102,7 @@ def _guess_provider(model_id: str) -> str:
     mid = model_id.lower()
     if "qwen" in mid or "bailian" in mid or "aliyun" in mid or "dashscope" in mid:
         return "阿里云百炼"
-    if "doubao" in mid or "volcano" in mid or "ark" in mid or "ep-" in mid:
+    if "doubao" in mid or "volcano" in mid or "ark" in mid or "ep-" in mid or "volc" in mid:
         return "火山引擎"
     if "deepseek" in mid:
         return "DeepSeek"

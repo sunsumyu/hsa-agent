@@ -135,6 +135,32 @@ class SchemaRegistry:
         self._ensure_loaded()
         return self._config.get("max_memory_usage", "2000000000")
 
+    def get_scene_table_mapping(self) -> List[Dict]:
+        """获取场景到数据表的映射列表 (保证自闭环懒加载)。"""
+        self._ensure_loaded()
+        return self._config.get("scene_table_mapping", [])
+
+    def get_table_relation_graph(self) -> Dict:
+        """获取表间关联图谱配置 (保证自闭环懒加载)。"""
+        self._ensure_loaded()
+        return self._config.get("table_relation_graph", {})
+
+    def get_table_columns(self, table_name: str) -> List[str]:
+        """获取指定表的所有已知物理字段（融合静态注册表与动态缓存，统一对外深接缝）。"""
+        self._ensure_loaded()
+        cols = set()
+        if entry := self.get_table(table_name):
+            cols.update([c.lower() for c in entry.field_names])
+        try:
+            from app.skills.schema_manager import schema_manager
+            if hasattr(schema_manager, "_schema_cache"):
+                for t, dyn_cols in schema_manager._schema_cache.items():
+                    if t.lower() == table_name.lower():
+                        cols.update([c.lower() for c in dyn_cols])
+        except Exception:
+            pass
+        return sorted(cols)
+
     def reload(self) -> None:
         """强制重新加载配置。"""
         self._tables.clear()

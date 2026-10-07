@@ -231,9 +231,10 @@ class AuditReportRenderer:
         import json
         import ast
         
-        total_records = 2138354
-        min_time = "2024-03-01"
-        max_time = "2024-05-09"
+        # [V179.5] 修复虚构数据：默认值设为 None，仅在成功解析到真实数据时才返回
+        total_records = None
+        min_time = None
+        max_time = None
         
         if not raw_data_str:
             return total_records, min_time, max_time
@@ -330,7 +331,7 @@ class AuditReportRenderer:
         # — all extracted to policy_matcher.py for testability and separation of concerns
         if finding_count == 0:
             llm_conclusion += build_zero_finding_boundary(
-                user_question, total_records, min_time, max_time, table_info
+                user_question, total_records, min_time, max_time, table_info, is_restricted=is_restricted
             )
         else:
             # [Phase 3.1] Positive-finding threshold transparency + 3-tier sensitivity
@@ -350,8 +351,8 @@ class AuditReportRenderer:
 
         sections = [
             self._chapter1_task(user_question, policy_basis),
-            self._chapter2_scope(sql_query, table_info, execution_trace, methodology, sql_history, semantic_alignment, user_question),
-            self._chapter3_findings(raw_data, total_amount, finding_count),
+            self._chapter2_scope(sql_query, table_info, execution_trace, methodology, sql_history, semantic_alignment, user_question, is_restricted=is_restricted),
+            self._chapter3_findings(raw_data, total_amount, finding_count, is_restricted=is_restricted),
             self._chapter4_conclusion(llm_conclusion),
             self._chapter5_risk(risk_level, total_amount, finding_count),
             self._chapter6_traceability(audit_metadata or {}), # [V156.0]
@@ -401,8 +402,23 @@ class AuditReportRenderer:
         sql_history: Optional[List[str]] = None, # [V178.9]
         semantic_alignment: Optional[Dict[str, Any]] = None, # [NEW]
         user_question: Optional[str] = None,
+        is_restricted: bool = False,
     ) -> str:
         lines = ["## 二、核查口径与技术实现", ""]
+        if is_restricted:
+            main_sql = "-- [受限核查] 由于意图校验或风控规则拦截，未物理执行 SQL 查询"
+            lines += [f"- **数据源表**：`{table_info or '受限未指定'}`"]
+            lines += [
+                "- **核心执行逻辑 (SQL 固化留痕)**：",
+                "```sql",
+                main_sql.strip(),
+                "```",
+                ""
+            ]
+            if methodology:
+                lines += ["**审计方法论**：", methodology.strip(), ""]
+            return "\n".join(lines)
+
         if table_info:
             lines += [f"- **数据源表**：`{table_info}`"]
         
@@ -544,6 +560,7 @@ class AuditReportRenderer:
         raw_data: List[Dict],
         total_amount: float,
         finding_count: int,
+        is_restricted: bool = False,
     ) -> str:
         lines = [
             "## 三、核查数据发现",
@@ -553,7 +570,9 @@ class AuditReportRenderer:
             "",
         ]
 
-        if not raw_data:
+        if is_restricted:
+            lines.append("由于 SQL 执行受限，本次未检出任何明细数据。")
+        elif not raw_data:
             lines.append("_在当前核查口径下，未检出符合条件的异常记录。_")
         else:
             rows = raw_data[: self.max_evidence_rows]
@@ -754,8 +773,6 @@ class AuditReportRenderer:
 
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-report_renderer = _SP.try_resolve("report_renderer") or AuditReportRenderer()
-if not _SP.is_registered("report_renderer"):
-    _SP.register_instance("report_renderer", report_renderer)
+report_renderer = LazyProxy("report_renderer")

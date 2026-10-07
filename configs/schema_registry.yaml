@@ -13,13 +13,25 @@ hospital_stats_table: fqz_all_yy_yd_1
 # ── [V2.0] 场景-表映射规则 (Scene-Table Mapping) ───────────────
 # 根据用户查询关键词自动选择正确的物理表
 scene_table_mapping:
-  - scenes: ["乡镇卫生院", "村卫生室", "门诊统筹", "批量刷单", "连续刷卡", "QA-CUST-26", "门诊费用", "牙", "拔牙", "口腔", "理疗", "康复", "卫生室", "卫生院", "门诊明细"]
+  - scenes: ["乡镇卫生院", "村卫生室", "门诊统筹", "批量刷单", "连续刷卡", "QA-CUST-26", "门诊费用", "牙", "拔牙", "口腔", "理疗", "康复", "卫生室", "卫生院", "门诊明细", "药品", "用药", "妇科", "专属", "耗材", "明细", "处方", "避孕", "节育", "上环", "冲正", "退费", "大额", "离群", "流水", "偏高", "超额"]
     table: "fqz_fymx_test"
-    reason: "门诊费用明细表，包含真实中文机构名、药品名及 med_type 数字编码。setl_time 是 String 类型需转换。"
+    reason: "门诊与费用明细表，包含真实中文机构名、药品名(hilist_name)、项目金额(det_item_fee_sumamt)及性别(gend)。注意若用户未明确限定年份，切勿擅自追加2024过滤。"
 
-  - scenes: ["住院", "药店购药", "分解住院", "出院", "入院", "重叠住院", "压床", "住院天数", "药店", "定点药店"]
+  - scenes: ["住院", "药店购药", "分解住院", "出院", "入院", "重叠住院", "压床", "住院天数", "药店", "定点药店", "就诊结算", "统筹基金", "对账", "反复结算", "拆单", "分解就诊"]
     table: "fqz_gz_jzsj_all_ql"
     reason: "结算主记录表，包含住院/药店汇总数据。fixmedins_name 是加密字段。"
+
+  - scenes: ["定点医疗机构", "定点零售药店", "医药机构", "医院名录", "药店名录", "二级医院", "三级医院", "定点医药机构", "纳管"]
+    table: "fqz_all_yy_yd"
+    reason: "全市定点医疗机构与定点零售药店名录库，包含 medins_type, medinslv 等统计维度。"
+
+  - scenes: ["行政区划", "区划字典", "层级划分", "国家级", "省级", "地市级", "区县级", "admdvs"]
+    table: "fqz_admdvs"
+    reason: "全国医保行政区划四级穿透字典库，包含 admdvs_lv (0=国家, 1=省级, 2=市级, 3=区县级)。"
+
+  - scenes: ["目录库", "药品目录", "临床药品", "头孢", "哌拉西林", "抗感染", "抗生素品种", "收载"]
+    table: "fqz_drug_mcs_info_list"
+    reason: "国家医保药品/诊疗目录限制信息库。"
 
 # ── [V178.10] 表间关联图谱 (Table Relation Graph) ─────────────────────
 # 当主表被激活时，自动拉入关联的字典表/辅助表
@@ -138,17 +150,22 @@ tables:
     critical_notes:
       - "setl_time 是 String 类型且尾部带 \\t，必须用 toDateTime(substring(trim(setl_time),1,19)) 转换，严禁直接 toDateTime(setl_time)"
       - "med_type 是数字编码：11=门诊统筹，21=住院，53_04=特病门诊，严禁用中文过滤"
+      - "该表自身自带 gend (性别代码: 1=男, 2=女) 与 age (年龄)，核查性别/年龄冲突无需关联就诊表"
+      - "⚠️【关键陷阱】gend 尾部带有 \\t 制表符（即 '1\\t'），ClickHouse 的 trim() 仅去空格无法去除 \\t！因此必须使用 gend LIKE '1%' 或 replace(gend, '\\t', '') = '1'，严禁使用 trim(gend) = '1'！"
       - "该表与 fqz_gz_jzsj_all_ql 的 setl_id 完全不重叠，严禁两表 JOIN"
       - "fixmedins_name 是真实中文机构名，可 LIKE 匹配（与主表的加密混淆字段不同）"
     partition_field: setl_time
     fields:
       - { name: setl_id,              type: String,   desc: "结算ID (与主表完全不重叠，严禁跨表 JOIN)" }
+      - { name: gend,                 type: String,   desc: "参保人性别 (1=男, 2=女, 尾部有\\t制表符，必须使用 gend LIKE '1%' 或 replace(gend, '\\t', '') = '1' 进行过滤)" }
+      - { name: age,                  type: Int64,    desc: "参保人年龄" }
+      - { name: psn_no,               type: String,   desc: "参保人唯一ID" }
+      - { name: psn_name,             type: String,   desc: "参保人姓名 (脱敏)" }
       - { name: hilist_code,          type: String,   desc: "医保目录编码" }
       - { name: hilist_name,          type: String,   desc: "医保目录名称/药品名" }
       - { name: cnt,                  type: Float64,  desc: "数量" }
       - { name: pric,                 type: Float64,  desc: "单价" }
       - { name: det_item_fee_sumamt,  type: Float64,  desc: "明细费用总额" }
-      - { name: psn_no,               type: String,   desc: "参保人唯一ID" }
       - { name: fixmedins_code,       type: String,   desc: "医疗机构编码" }
       - { name: fixmedins_name,       type: String,   desc: "医疗机构名称 (真实中文，可 LIKE 匹配)" }
       - { name: med_type,             type: String,   desc: "医疗类型编码 (11=门诊统筹, 21=住院, 53_04=特病门诊)" }
@@ -156,3 +173,41 @@ tables:
       - { name: setl_time,            type: String,   desc: "结算时间 (String, 尾部带 \\t, 必须用 toDateTime(substring(trim(setl_time),1,19)) 转换)" }
       - { name: chfpdr_name,          type: String,   desc: "医生姓名" }
       - { name: dise_name,            type: String,   desc: "诊断名称" }
+
+  - name: fqz_all_yy_yd
+    alias: 定点医药机构名录表
+    description: 全市定点医疗机构与定点零售药店信息库
+    fields:
+      - { name: fixmedins_code,       type: String,   desc: "定点医药机构编号" }
+      - { name: fixmedins_name,       type: String,   desc: "定点医药机构名称" }
+      - { name: admdvs,               type: String,   desc: "行政区划代码" }
+      - { name: medins_type,          type: String,   desc: "机构类型 (医院/门诊部/药店等)" }
+      - { name: medinslv,             type: String,   desc: "医院级别 (1=一级, 2=二级, 3=三级)" }
+      - { name: hosp_lv,              type: String,   desc: "医院等级 (甲等/乙等)" }
+      - { name: addr,                 type: String,   desc: "机构地址" }
+      - { name: uscc,                 type: String,   desc: "统一社会信用代码" }
+      - { name: vali_flag,            type: String,   desc: "有效标志" }
+
+  - name: fqz_admdvs
+    alias: 医保行政区划表
+    description: 全国医保行政区划四级穿透字典库
+    fields:
+      - { name: admdvs,               type: String,   desc: "行政区划代码" }
+      - { name: admdvs_name,          type: String,   desc: "行政区划名称" }
+      - { name: prnt_admdvs,          type: String,   desc: "上级行政区划代码" }
+      - { name: admdvs_lv,            type: String,   desc: "行政区划级别 (0=国家, 1=省级, 2=市级, 3=区县级)" }
+
+  - name: fqz_drug_mcs_info_list
+    alias: 国家标准药品名录库
+    description: 国家医保药品目录与重点监控药品分类信息库
+    fields:
+      - { name: med_list_code,         type: String,   desc: "国家医保药品代码" }
+      - { name: drug_genname,          type: String,   desc: "药品通用名 (如头孢类、哌拉西林等)" }
+      - { name: reg_name,              type: String,   desc: "药品注册商品名 (真实药品名称)" }
+      - { name: drugstdcode,           type: String,   desc: "国家药品本位码" }
+      - { name: drug_dosform,          type: String,   desc: "剂型" }
+      - { name: drug_type,             type: String,   desc: "药品分类 (西药/中成药)" }
+      - { name: spec,                  type: String,   desc: "规格" }
+      - { name: prodentp_name,         type: String,   desc: "生产企业名称" }
+      - { name: nat_hi_druglist_memo,  type: String,   desc: "医保目录限制用药备注" }
+      - { name: vali_flag,             type: String,   desc: "有效标志" }

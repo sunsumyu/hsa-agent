@@ -5,22 +5,48 @@
 """
 import re
 import hashlib
+import threading
 from typing import List, Dict, Any, Tuple
 
-# 记录被用户解决并固化的冲突决策
-# 结构: { finding_hash: boolean }  (True代表采纳，False代表废弃)
-_resolved_findings = {}
-
+# [V179.3] 使用 SHA-256 替代 MD5
 def get_finding_hash(finding: str) -> str:
-    return hashlib.md5(finding.strip().encode()).hexdigest()
+    return hashlib.sha256(finding.strip().encode('utf-8')).hexdigest()
+
+# [V179.6] 线程安全的冲突决策存储
+class ResolvedFindingsStore:
+    """线程安全的冲突决策存储，替代全局字典"""
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._data: Dict[str, bool] = {}
+        return cls._instance
+    
+    def set(self, finding_hash: str, accepted: bool):
+        with self._lock:
+            self._data[finding_hash] = accepted
+    
+    def get(self, finding_hash: str) -> bool:
+        with self._lock:
+            return self._data.get(finding_hash)
+    
+    def exists(self, finding_hash: str) -> bool:
+        with self._lock:
+            return finding_hash in self._data
+
+_findings_store = ResolvedFindingsStore()
 
 def mark_resolved(finding: str, accepted: bool):
     """记录人类审计员关于某项证据是否保留的决策"""
-    _resolved_findings[get_finding_hash(finding)] = accepted
+    _findings_store.set(get_finding_hash(finding), accepted)
 
 def is_discarded(finding: str) -> bool:
     """该条目是否被标记为废弃"""
-    return _resolved_findings.get(get_finding_hash(finding)) is False
+    return _findings_store.get(get_finding_hash(finding)) is False
 
 def detect_conflicts(findings: List[str]) -> List[Dict[str, Any]]:
     """

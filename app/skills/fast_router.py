@@ -324,8 +324,6 @@ class FastAuditRouter:
 
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-fast_router = _SP.try_resolve("fast_router") or FastAuditRouter()
-if not _SP.is_registered("fast_router"):
-    _SP.register_instance("fast_router", fast_router)
+fast_router = LazyProxy("fast_router")

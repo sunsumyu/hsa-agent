@@ -12,6 +12,7 @@ class UsageTracker:
         self.role_path = role_path
         self._ensure_dir()
         self.stats: UsageStats = self._load_stats()
+        self.cloud_remaining_tokens: Dict[str, int] = {} # {model_id: tokens}
         self.model_configs: Dict[str, ModelConfig] = self._load_model_configs()
         self.role_configs: Dict[str, RoleConfigV2] = self._load_role_configs()
         # [V4.9.6] 内存窗口：追踪分钟级指标 (RPM, TPM)
@@ -23,8 +24,6 @@ class UsageTracker:
         self.stability_scores: Dict[str, float] = self.stats.stability_scores # {model_id: score}
         # [V155.0] 性能画像：记录最近 10 次请求的耗时
         self.latency_window: Dict[str, List[float]] = {} # {model_id: [ms, ms, ...]}
-        # [V180.1] 云端余额缓存
-        self.cloud_remaining_tokens: Dict[str, int] = {} # {model_id: tokens}
 
     def _ensure_dir(self):
         os.makedirs(os.path.dirname(self.stats_path), exist_ok=True)
@@ -43,20 +42,45 @@ class UsageTracker:
                         del window[model_id][m]
 
     def _load_model_configs(self) -> Dict[str, ModelConfig]:
-        """[V50.0] 从算力池配置中提取所有 Endpoint 的模型定义"""
+        """[V50.1] 从算力池配置中提取所有 Endpoint 的模型定义，并合并云端全量数据"""
+        all_endpoints = {}
         try:
             if os.path.exists(self.config_path):
                 with open(self.config_path, 'r', encoding='utf-8-sig') as f:
                     data = json.load(f)
-                    all_endpoints = {}
                     for p_id, p_cfg in data.get("pools", {}).items():
                         for ep in p_cfg.get("endpoints", []):
-                            # 将 EndpointConfig 的字典转换为 ModelConfig 以保持兼容
                             all_endpoints[ep["id"]] = ModelConfig(**ep)
-                    return all_endpoints
         except Exception as e:
             logger.error(f"加载模型配置失败: {e}")
-        return {}
+            
+        try:
+            import sqlite3
+            db_path = os.path.join(os.path.dirname(self.stats_path), "cloud_discovery.db")
+            if os.path.exists(db_path):
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT name, platform, remaining FROM models")
+                    for name, platform, remaining in cursor.fetchall():
+                        if name not in all_endpoints:
+                            rem = 0
+                            try:
+                                rem = int(remaining.replace(',', ''))
+                            except:
+                                pass
+                            all_endpoints[name] = ModelConfig(
+                                provider=platform if platform else "unknown",
+                                model_name=name,
+                                family=name,
+                                platform=platform,
+                                api_key_env="UNKNOWN",
+                                daily_quota=rem if rem > 0 else 1000000,
+                            )
+                            self.cloud_remaining_tokens[name] = rem
+        except Exception as e:
+            logger.error(f"加载 cloud_discovery.db 失败: {e}")
+
+        return all_endpoints
 
     def _load_role_configs(self) -> Dict[str, RoleConfigV2]:
         """[V35.0] 加载角色模型映射与预算配置"""
@@ -379,11 +403,6 @@ class UsageTracker:
         return "\n".join(report)
 
 # 全局单例 (backward-compatible alias, delegates to DI container)
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-def _get_usage_tracker():
-    return _SP.try_resolve("usage_tracker") or UsageTracker()
-
-usage_tracker = _get_usage_tracker()
-if not _SP.is_registered("usage_tracker"):
-    _SP.register_instance("usage_tracker", usage_tracker)
+usage_tracker = LazyProxy("usage_tracker")

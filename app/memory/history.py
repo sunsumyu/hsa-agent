@@ -115,9 +115,7 @@ class HistoryManager:
             logger.error(f"生成调试转储失败: {e}")
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-history_manager = _SP.try_resolve("history_manager") or HistoryManager()
-if not _SP.is_registered("history_manager"):
-    _SP.register_instance("history_manager", history_manager)
+history_manager = LazyProxy("history_manager")
 from datetime import datetime

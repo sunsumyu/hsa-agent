@@ -135,7 +135,7 @@ def get_clickhouse_client():
     host = _os.getenv("CLICKHOUSE_HOST", "localhost")
     user = _os.getenv("CLICKHOUSE_USER", "default")
     password = _os.getenv("CLICKHOUSE_PASSWORD", "")
-    database = _os.getenv("CLICKHOUSE_DB", "fqz_hsa")
+    database = _os.getenv("CLICKHOUSE_DB", "default")
 
     # ── [V110.6] 物理自愈：优先使用 Native 协议（Port 9000） ──────────────────
     client = None
@@ -183,12 +183,13 @@ def get_clickhouse_client():
         except Exception as e_wsl:
             logger.warning(f"⚠️ [DB_CONN] 路径 2 (WSL IP) 探测失败: {e_wsl}")
  
-    # 路径 3: 标准 localhost (HTTP 8123)
+    # 路径 3: 标准 localhost (HTTP)
     if not client:
+        http_port = int(_os.getenv("CLICKHOUSE_HTTP_PORT", _os.getenv("CLICKHOUSE_PORT", "8223")))
         try:
-            logger.info(f"🔌 [DB_CONN] 路径 3: localhost:8123 (HTTP)...")
+            logger.info(f"🔌 [DB_CONN] 路径 3: localhost:{http_port} (HTTP)...")
             client = clickhouse_connect.get_client(
-                host='localhost', port=8123, username=user, password=password, database=database,
+                host='localhost', port=http_port, username=user, password=password, database=database,
                 connect_timeout=3, settings={"readonly": readonly_val}
             )
             client.query("SELECT 1")

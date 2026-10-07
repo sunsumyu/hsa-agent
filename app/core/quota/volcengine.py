@@ -28,7 +28,28 @@ class VolcengineQuotaFetcher(BaseQuotaFetcher):
             logger.error(f"火山引擎配额获取失败: {e}")
             return None
 
+    async def discover_models(self) -> list:
+        """从火山引擎动态发现所有可用模型"""
+        if not self.api_key:
+            return []
+        try:
+            url = f"{self.base_url}/models"
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, timeout=15) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        models = data.get("data", [])
+                        logger.info(f"🌋 [Volcengine] 动态发现 {len(models)} 个可用模型")
+                        return models
+                    else:
+                        logger.error(f"火山引擎模型发现失败: HTTP {response.status}")
+        except Exception as e:
+            logger.error(f"火山引擎模型发现异常: {e}")
+        return []
+
     async def get_real_time_usage(self, model_id: str) -> Optional[int]:
         """获取今日已用量"""
         # TODO: 调用火山云监控 API
         return None
+

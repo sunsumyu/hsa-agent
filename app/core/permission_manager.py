@@ -63,8 +63,6 @@ class PermissionManager:
         return filtered
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-permission_manager = _SP.try_resolve("permission_manager") or PermissionManager()
-if not _SP.is_registered("permission_manager"):
-    _SP.register_instance("permission_manager", permission_manager)
+permission_manager = LazyProxy("permission_manager")

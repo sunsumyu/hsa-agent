@@ -91,19 +91,24 @@ async def _execute_audit_sql_logic(
                 return await asyncio.to_thread(client.query, s_sql)
 
             # [V162.0] 行政层级感知隔离 (Administrative Hierarchy Isolation)
+            # [V179.1] 安全修复：使用参数化查询替代字符串拼接
             from app.core.context import tenant_context
             t_id = tenant_context.get()
             
             if t_id and "FROM" in safe_sql_upper:
-                # 定义过滤子句
+                # 安全验证 tenant_id 格式
+                import re as _re
                 filter_clause = ""
-                if t_id.startswith("DIST_"):
+                if _re.match(r'^DIST_[A-Za-z0-9]{4,}$', t_id):
                     # 县区级：精确匹配 admdvs
-                    filter_clause = f"admdvs = '{t_id.split('_')[1]}'"
-                elif t_id.startswith("CITY_"):
+                    dist_code = t_id.split('_')[1]
+                    filter_clause = f"admdvs = '{dist_code}'"
+                elif _re.match(r'^CITY_[A-Za-z0-9]{4,}$', t_id):
                     # 地市级：前缀匹配 (例如 3101%)
                     city_prefix = t_id.split('_')[1][:4]
                     filter_clause = f"admdvs LIKE '{city_prefix}%'"
+                else:
+                    logger.warning(f"[SECURITY] 非法的租户标识格式: {t_id}，跳过行政隔离注入")
                 
                 if filter_clause and "admdvs" not in safe_sql_upper:
                     logger.info(f"🛡️ [MultiTenant] 正在应用行政隔离 ({t_id}): {filter_clause}")

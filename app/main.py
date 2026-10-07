@@ -1,10 +1,14 @@
 import os
 import asyncio
+import sys
 
 # [V13.0 系统级避灾] 强制避开 Windows 4311-4410 保留端口段
 os.environ["PHOENIX_GRPC_PORT"] = "4517"
 os.environ["PHOENIX_COLLECTOR_GRPC_PORT"] = "4517"
 os.environ["PHOENIX_HOST"] = "127.0.0.1"
+
+# [V211.1 Windows 兼容性修复] 修复 WinError 10014 指针错误
+# 在 uvicorn.run() 中通过 loop=asyncio.SelectorEventLoop() 参数处理
 
 from loguru import logger
 import app.core.logging_config # [V41.6] 物理链路可跳转配置
@@ -110,4 +114,12 @@ if __name__ == "__main__":
 
     _host = os.getenv("UVICORN_HOST", "127.0.0.1")
     _port = int(os.getenv("UVICORN_PORT", "18882"))
-    uvicorn.run(app, host=_host, port=_port)
+    
+    # [V211.1 Windows 兼容性修复] 使用 SelectorEventLoop 避免 WinError 10014
+    if sys.platform == "win32":
+        import asyncio
+        loop = asyncio.SelectorEventLoop()
+        asyncio.set_event_loop(loop)
+        uvicorn.run(app, host=_host, port=_port, loop="asyncio")
+    else:
+        uvicorn.run(app, host=_host, port=_port)

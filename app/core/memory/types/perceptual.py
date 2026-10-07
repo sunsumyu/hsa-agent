@@ -19,7 +19,7 @@ class PerceptualMemory:
         self.storage = storage
         self._clip_model = None
         self._init_failed = False
-        self._init_models()
+        # [Performance] 延迟加载：不在初始化时阻塞下载大型 CLIP 模型，仅在处理图像时触发
 
     def _init_models(self):
         """物理加载多模态感知模型 (CLIP)"""

@@ -236,7 +236,16 @@ class FieldKnowledgeGraph:
         warnings = []
         fixed = sql
 
+        # 提取当前 SQL 中所有显式定义的 SELECT 别名 (如 AS total_amount, AS drug_name)
+        defined_aliases = {
+            m.lower() for m in re.findall(r'\bAS\s+([a-zA-Z0-9_]+)\b', sql, re.IGNORECASE)
+        }
+
         def _safe_replace(target_sql, forbidden_word, canonical_word):
+            # 若目标词本身就是本查询定义的输出列别名，禁止替换（避免破坏 GROUP BY / ORDER BY 中的别名引用）
+            if forbidden_word.lower() in defined_aliases:
+                return target_sql
+
             # 使用正则捕获组：(AS 关键字)? + (目标词)
             # 我们通过 lambda 逻辑，如果前面是 AS，则原样返回，不替换
             pattern = r'(\bAS\s+)?\b' + re.escape(forbidden_word) + r'\b'
@@ -321,13 +330,15 @@ class Neo4jManager:
 
             # [V131.7] 增加物理探测：避免在网络不佳时产生 defunct connection 错误
             import socket
-            host = connection_uri.split("//")[1].split(":")[0]
+            uri_parts = connection_uri.split("//")[1].split(":")
+            host = uri_parts[0]
+            port = int(uri_parts[1]) if len(uri_parts) > 1 else 7687
             try:
-                # 探测 7687 端口是否开放
-                with socket.create_connection((host, 7687), timeout=2.0):
+                # 探测配置的端口是否开放
+                with socket.create_connection((host, port), timeout=2.0):
                     pass
             except Exception as e_probe:
-                logger.warning(f">>> [NEO4J] 物理探测失败 ({host}:7687): {e_probe}。将自动降级为内存图谱。")
+                logger.warning(f">>> [NEO4J] 物理探测失败 ({host}:{port}): {e_probe}。将自动降级为内存图谱。")
                 self._connection_attempted = True
                 return
 
@@ -428,12 +439,8 @@ class Neo4jManager:
 # 模块级单例
 # ──────────────────────────────────────────────────────────────
 # Backward-compatible aliases, delegate to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-neo4j_manager = _SP.try_resolve("neo4j_manager") or Neo4jManager()
-if not _SP.is_registered("neo4j_manager"):
-    _SP.register_instance("neo4j_manager", neo4j_manager)
+neo4j_manager = LazyProxy("neo4j_manager")
 
-field_kg = _SP.try_resolve("field_kg") or FieldKnowledgeGraph()
-if not _SP.is_registered("field_kg"):
-    _SP.register_instance("field_kg", field_kg)
+field_kg = LazyProxy("field_kg")

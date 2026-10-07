@@ -56,19 +56,66 @@ def get_table_schema(table_name: str) -> str:
         return f"获取表结构失败: {e}"
 
 
+import ast
+import operator
+from typing import Dict, Any
+
+# 允许的操作符映射
+_CALC_ALLOWED_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+}
+
+def _safe_eval(expr: str) -> float:
+    """
+    [V179.4] 安全的数学表达式求值器。
+    只允许数字和基本算术运算符，禁止任何名称访问。
+    """
+    try:
+        tree = ast.parse(expr, mode='eval')
+    except SyntaxError:
+        raise ValueError(f"非法表达式语法: {expr}")
+    
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        elif isinstance(node, ast.Constant):
+            if isinstance(node.value, (int, float)):
+                return node.value
+            raise ValueError(f"不允许的类型: {type(node.value)}")
+        elif isinstance(node, ast.BinOp):
+            op_type = type(node.op)
+            if op_type not in _CALC_ALLOWED_OPS:
+                raise ValueError(f"不允许的操作符")
+            return _CALC_ALLOWED_OPS[op_type](_eval(node.left), _eval(node.right))
+        elif isinstance(node, ast.UnaryOp):
+            op_type = type(node.op)
+            if op_type not in _CALC_ALLOWED_OPS:
+                raise ValueError(f"不允许的单目操作符")
+            return _CALC_ALLOWED_OPS[op_type](_eval(node.operand))
+        else:
+            raise ValueError(f"不允许的表达式类型")
+    
+    return _eval(tree)
+
+
 @tool
 def calculator(expr: str) -> str:
     """高精度数学计算器。仅支持数字和算术运算符，拒绝名称、属性访问、函数调用等。防止 eval() 的子类逃逸攻击。"""
     if not expr or not _SAFE_EXPR_RE.match(expr):
         return f"非法表达式: {expr!r} (仅允许数字和 + - * / ( ) % )"
     try:
-        # compile 为 expression mode + 源码白名单双重防护
-        code = compile(expr, "<calc>", "eval")
-        for name in code.co_names:
-            return f"非法名称引用: {name}"
-        return str(eval(code, {"__builtins__": {}}, {}))
-    except Exception as e:
+        result = _safe_eval(expr)
+        return str(result)
+    except ValueError as e:
         return f"计算失败: {e}"
+    except Exception as e:
+        return f"计算异常: {e}"
 
 
 @tool
@@ -84,12 +131,12 @@ def check_audit_governance() -> Dict[str, Any]:
         "valid_table_prefixes": schema_registry.get_valid_prefixes(),
         "sensitive_fields": list(schema_registry.get_sensitive_fields()),
         "main_table": schema_registry.get_main_table(),
-        "default_time_filter": schema_registry.get_default_time_filter(),
+        "default_time_filter": "setl_time >= '2024-01-01' (仅适用于结算主表 fqz_gz_jzsj_all_ql)",
         "performance_constraints": {
             "max_execution_time_sec": schema_registry.get_max_execution_time(),
             "max_memory_usage": schema_registry.get_max_memory_usage()
         },
-        "instruction": "严禁使用上述 forbidden_tables。所有针对物理表的查询必须符合前缀规范，并显式带上时间范围过滤。"
+        "instruction": "严禁使用上述 forbidden_tables。针对主表(fqz_gz_jzsj_all_ql)等超大表建议带上时间过滤。对于费用明细表(fqz_fymx_test)或其他字典表，若用户未明确限定时间，严禁擅自追加年份过滤，以免过滤掉合规数据。"
     }
 
 @tool
@@ -180,3 +227,4 @@ def expand_medical_codes(intent: str) -> str:
     if not matched:
         return f"未找到与 '{intent}' 相关的专业分类。建议直接尝试 LIKE '%{intent}%'。"
     
+    return "\n\n".join(matched)

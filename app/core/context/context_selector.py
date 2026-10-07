@@ -29,7 +29,7 @@ class AdaptiveSelector:
         for field in entry.fields:
             name = field.get("name", "")
             ftype = field.get("type", "")
-            desc = field.get("description", "")
+            desc = field.get("description") or field.get("desc", "")
             xml += f'  <field name="{name}" type="{ftype}" description="{desc}" />\n'
         xml += '</table>'
         return xml

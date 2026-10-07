@@ -52,8 +52,6 @@ class AnomalyAlgorithmEngine:
         return [{"name": k, "desc": v.get("desc")} for k, v in self.algorithms.items()]
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-anomaly_detector = _SP.try_resolve("anomaly_detector") or AnomalyAlgorithmEngine()
-if not _SP.is_registered("anomaly_detector"):
-    _SP.register_instance("anomaly_detector", anomaly_detector)
+anomaly_detector = LazyProxy("anomaly_detector")

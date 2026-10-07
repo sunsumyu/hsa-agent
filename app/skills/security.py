@@ -77,6 +77,13 @@ class SQLGuardian:
             logger.error(f"[SECURITY] SQL 框架解析失败: {pe}")
             raise SecurityViolationError(f"物理语法解析失败：{str(pe)}。请检查 SQL 结构是否完整。")
 
+        # ── Step 0.5: 静态 AST 恒假互斥语义拦截 ────
+        from app.core.guardrails.contradiction_detector import ContradictionDetector
+        contra_violation = ContradictionDetector.detect(clean_sql)
+        if contra_violation:
+            logger.error(f"[SECURITY] 发现逻辑恒假矛盾条件: {contra_violation.message}")
+            raise SecurityViolationError(f"物理拦截：{contra_violation.message}")
+
         # ── Step 1: 表名白名单校验 (从 SchemaRegistry 读取) ────
         forbidden_tables = {t.lower() for t in schema_registry.get_forbidden_table_names()}
         valid_prefixes = tuple(p.lower() for p in schema_registry.get_valid_prefixes())
@@ -133,15 +140,13 @@ class SQLGuardian:
         SQLGuardian._audit_expression_complexity(expression)
         
         # ── [V132.0] 企业级自愈：自动对齐 ClickHouse 的大小写敏感表名 ────
-        from app.skills.schema_manager import schema_manager
         all_physical_tables = {t.lower(): t for t in schema_registry.get_all_table_names()}
         for table_node in expression.find_all(exp.Table):
             t_name = table_node.name
             if not t_name: continue
             
-            # 物理存在性校验
-            t_name_upper = t_name.upper()
-            dynamic_cols = schema_manager._schema_cache.get(t_name_upper, [])
+            # 物理存在性校验 (通过 schema_registry 统一深接缝)
+            dynamic_cols = schema_registry.get_table_columns(t_name)
             t_name_lower = t_name.lower()
             if t_name_lower in all_physical_tables:
                 actual_name = all_physical_tables[t_name_lower]
@@ -207,19 +212,10 @@ class SQLGuardian:
                 cte_names.add(cte.alias.lower())
         tables = [t.name.lower() for t in expression.find_all(exp.Table) if t.name.lower() not in cte_names]
         
-        # 2. 构建针对当前表的“物理真理库”
+        # 2. 构建针对当前表的“物理真理库” (通过 SchemaRegistry 统一深接缝)
         physical_columns = set()
         for t_name in tables:
-            # 路径 A: 从 YAML 静态注册表读取
-            entry = schema_registry.get_table(t_name)
-            if entry:
-                physical_columns.update([c.lower() for c in entry.field_names])
-            
-            # 路径 B [V128.6 企业级补强]: 从物理同步管理器 (SchemaManager) 读取
-            from app.skills.schema_manager import schema_manager
-            dynamic_cols = schema_manager._schema_cache.get(t_name.upper(), [])
-            if dynamic_cols:
-                physical_columns.update([c.lower() for c in dynamic_cols])
+            physical_columns.update(schema_registry.get_table_columns(t_name))
         
         # 3. 常见聚合函数与本地别名
         local_aliases = {alias.alias.lower() for alias in expression.find_all(exp.Alias)}

@@ -189,6 +189,17 @@ class QualityGate:
         try:
             methodology = state.get("methodology", "") if isinstance(state, dict) else ""
             original_question = state.get("original_question", "") if isinstance(state, dict) else ""
+            if not original_question and isinstance(state, dict) and "messages" in state:
+                for m in state.get("messages", []):
+                    if isinstance(m, tuple) and len(m) >= 2 and m[0] in ("user", "human"):
+                        original_question += " " + str(m[1])
+                    elif hasattr(m, "type") and getattr(m, "type") == "human":
+                        original_question += " " + str(getattr(m, "content", ""))
+                    elif hasattr(m, "role") and getattr(m, "role") == "user":
+                        original_question += " " + str(getattr(m, "content", ""))
+                    elif isinstance(m, dict) and (m.get("role") == "user" or m.get("type") == "human"):
+                        original_question += " " + str(m.get("content", ""))
+                original_question = original_question.strip()
         except Exception:
             methodology = ""
             original_question = ""
@@ -212,6 +223,25 @@ class QualityGate:
             logger.warning(f"[Gate 2] {warning}")
             # 不拦截，只警告 — 某些排名查询确实需要基线
             return {"passed": True, "error": None, "warnings": warnings}
+
+        # 规则2: [Task Archetype Guard] 领域任务原型不变式守卫 (基于 ArchetypeRegistry)
+        from app.core.registry.archetype_registry import archetype_registry
+        has_group_by = "GROUP BY" in sql_upper
+        has_limit = "LIMIT " in sql_upper or "LIMIT\n" in sql_upper or "LIMIT\t" in sql_upper
+
+        matched_archetypes = archetype_registry.match_archetypes(question_lower)
+        for arch in matched_archetypes:
+            if arch.forbid_raw_limit and has_limit and not has_group_by:
+                err_msg = arch.enforcement_hint or f"本任务为【{arch.display_name}】任务，必须使用 GROUP BY 进行全量统计，严禁对明细流水施加 LIMIT 采样！"
+                return {"passed": False, "error": err_msg, "warnings": warnings}
+
+        # 规则3: [Contradiction Guard] 静态 AST 恒假互斥防腐守卫
+        from app.core.guardrails.contradiction_detector import ContradictionDetector
+        violation = ContradictionDetector.detect(sql)
+        if violation:
+            err_msg = f"【静态语义恒假拦截】{violation.message} 冲突谓词: {violation.conflicting_predicates}"
+            logger.warning(f"[Gate 2 Contradiction] {err_msg}")
+            return {"passed": False, "error": err_msg, "warnings": warnings}
         
         return {"passed": True, "error": None, "warnings": warnings}
 

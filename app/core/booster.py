@@ -315,8 +315,6 @@ class PrecisionBooster:
         return True, ""
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-booster = _SP.try_resolve("booster") or PrecisionBooster()
-if not _SP.is_registered("booster"):
-    _SP.register_instance("booster", booster)
+booster = LazyProxy("booster")

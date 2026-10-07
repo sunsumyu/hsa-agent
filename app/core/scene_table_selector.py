@@ -25,11 +25,28 @@ class SceneTableSelector:
             "乡镇卫生院", "村卫生室", "门诊统筹", "批量刷单",
             "连续刷卡", "QA-CUST-26", "门诊费用", "牙", "拔牙",
             "口腔", "理疗", "康复", "卫生室", "卫生院",
-            "门诊明细", "刷单", "门诊"
+            "门诊明细", "刷单", "门诊", "手术明细", "分解收费",
+            "拆项目", "拆分", "主手术", "套账", "多记费用", "分解项目",
+            "药品", "用药", "妇科", "专属", "耗材", "明细", "处方",
+            "避孕", "节育", "上环", "冲正", "退费", "大额", "离群",
+            "流水", "偏高", "超额"
         ],
         "fqz_gz_jzsj_all_ql": [
             "住院", "药店购药", "分解住院", "出院", "入院",
-            "重叠住院", "压床", "住院天数", "药店", "定点药店"
+            "重叠住院", "压床", "住院天数", "药店", "定点药店",
+            "就诊结算", "统筹基金", "对账", "反复结算", "拆单", "分解就诊"
+        ],
+        "fqz_all_yy_yd": [
+            "定点医疗机构", "定点零售药店", "医药机构", "医院名录",
+            "药店名录", "二级医院", "三级医院", "定点医药机构", "纳管"
+        ],
+        "fqz_admdvs": [
+            "行政区划", "区划字典", "层级划分", "国家级", "省级",
+            "地市级", "区县级", "admdvs"
+        ],
+        "fqz_drug_mcs_info_list": [
+            "目录库", "药品目录", "临床药品", "头孢", "哌拉西林",
+            "抗感染", "抗生素品种", "收载"
         ]
     }
 
@@ -38,11 +55,11 @@ class SceneTableSelector:
         self._relation_graph = self._load_relation_graph()
 
     def _load_mapping(self) -> dict:
-        """从 schema_registry.yaml 加载场景映射"""
+        """从 schema_registry 加载场景映射 (遵守公开接缝)"""
         try:
-            config = schema_registry._config
+            entries = schema_registry.get_scene_table_mapping()
             mapping = {}
-            for entry in config.get("scene_table_mapping", []):
+            for entry in entries:
                 table = entry.get("table")
                 scenes = entry.get("scenes", [])
                 if table and scenes:
@@ -55,10 +72,9 @@ class SceneTableSelector:
         return self.FALLBACK_MAPPING
 
     def _load_relation_graph(self) -> dict:
-        """[V178.10] 从 schema_registry.yaml 加载表间关联图谱"""
+        """从 schema_registry 加载表间关联图谱 (遵守公开接缝)"""
         try:
-            config = schema_registry._config
-            graph = config.get("table_relation_graph", {})
+            graph = schema_registry.get_table_relation_graph()
             if graph:
                 logger.info(f"[SceneTableSelector] 加载关联图谱: {len(graph)} 表")
             return graph
@@ -91,6 +107,13 @@ class SceneTableSelector:
             score = sum(1 for kw in keywords if kw.lower() in query_lower)
             if score > 0:
                 scores[table] = score
+
+        # 结合 ArchetypeRegistry 领域原型增强匹配加权
+        from app.core.registry.archetype_registry import archetype_registry
+        for arch in archetype_registry.match_archetypes(query_lower):
+            for t in arch.target_tables:
+                scores[t] = scores.get(t, 0) + 2
+
         if not scores:
             primary = schema_registry.get_main_table()
             logger.info(f"[SceneTableSelector] 无场景匹配，使用默认主表: {primary}")
@@ -126,6 +149,25 @@ class SceneTableSelector:
 - med_type 编码：11=门诊统筹，21=住院，53_04=特病门诊
 
 注意：以上仅为表选择指引，SQL 查询模式请根据审计方法论和用户原始问题自行决定，不要照搬历史 SQL 模板。
+"""
+        elif primary == "fqz_all_yy_yd":
+            return """
+【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
+当前审计任务涉及医疗机构/药店名录普查与统计，物理主表为 `fqz_all_yy_yd`。
+机构代码为 `fixmedins_code`，机构名称为 `fixmedins_name`，机构类型为 `medins_type`。
+严禁依据外部预训练常识输出，必须直接执行 SQL 统计！
+"""
+        elif primary == "fqz_admdvs":
+            return """
+【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
+当前任务涉及医保行政区划字典与层级，物理主表为 `fqz_admdvs`。
+区划代码为 `admdvs_code`，区划名称为 `admdvs_name`。
+"""
+        elif primary == "fqz_drug_mcs_info_list":
+            return """
+【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
+当前任务涉及医保药品目录与药品特征分类，物理主表为 `fqz_drug_mcs_info_list`。
+药品代码为 `med_list_code`，药品通用名/商品名为 `drug_prodname` / `genname_codg`。
 """
         return None
 

@@ -2,11 +2,18 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, List, Any
-from jinja2 import Template
+from jinja2 import Environment, select_autoescape, Template
 from app.memory.entity_extractor import extract_graph
 
 class RichReportGenerator:
-    """[V51.0] 专业医疗审计可视化引擎 - 仪表盘大改版"""
+    """[V51.0] 专业医疗审计可视化引擎 - 仪表盘大改版 [V179.5 安全加固: 启用 Jinja2 autoescape]"""
+    
+    # [V179.5] 创建安全的 Jinja2 环境，自动转义 HTML
+    _jinja_env = Environment(
+        autoescape=select_autoescape(['html', 'xml']),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
     
     HTML_TEMPLATE = """
     <!DOCTYPE html>
@@ -180,8 +187,8 @@ class RichReportGenerator:
         findings_texts = [f["evidence"] for f in report_data.get("findings", [])]
         graph_data = extract_graph(findings_texts)
         
-        # 2. 渲染 Jinja2 模板
-        template = Template(cls.HTML_TEMPLATE)
+        # 2. 渲染 Jinja2 模板 [V179.5 安全加固: 使用 autoescape 环境]
+        template = cls._jinja_env.from_string(cls.HTML_TEMPLATE)
         html_out = template.render(
             report_id=report_data.get("report_id", "ARGUS-AUTO"),
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

@@ -34,11 +34,25 @@ class ContextPacket:
             self.token_count = self.estimate_tokens(self.content)
 
     @staticmethod
-    def estimate_tokens(text: str) -> int:
+    def estimate_tokens(text: Any) -> int:
         """中英混合高精度 Token 估算器"""
         if not text:
             return 0
-        chinese_chars = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+        if isinstance(text, list):
+            # 处理多模态/结构化消息内容列表 [{'type': 'text', 'text': '...'}]
+            text_parts = []
+            for item in text:
+                if isinstance(item, str):
+                    text_parts.append(item)
+                elif isinstance(item, dict) and "text" in item:
+                    text_parts.append(str(item["text"]))
+                else:
+                    text_parts.append(str(item))
+            text = " ".join(text_parts)
+        elif not isinstance(text, str):
+            text = str(text)
+
+        chinese_chars = sum(1 for ch in text if isinstance(ch, str) and '\u4e00' <= ch <= '\u9fff')
         english_words = len([w for w in text.split() if w])
         return int(chinese_chars + english_words * 1.3)
 
@@ -338,7 +352,7 @@ class ContextBuilder:
         chat_msgs = []
 
         for m in messages:
-            if isinstance(m, SystemMessage) and "【当前审计黄金上下文载荷" in m.content:
+            if isinstance(m, SystemMessage) and "【当前审计黄金上下文载荷" in str(getattr(m, "content", "")):
                 gssc_msg = m
             elif m.type == 'system':
                 system_msgs.append(m)
@@ -371,7 +385,7 @@ class ContextBuilder:
             else:
                 # GSSC 载荷太大，物理截断它
                 truncated_gssc = SystemMessage(
-                    content=gssc_msg.content[:4000] + "\n\n[⚠️ GSSC 载荷过长，部分内容已被物理截断]"
+                    content=str(gssc_msg.content)[:4000] + "\n\n[⚠️ GSSC 载荷过长，部分内容已被物理截断]"
                 )
                 retained_others.append(truncated_gssc)
                 budget_for_others = 0
@@ -389,7 +403,7 @@ class ContextBuilder:
             final_msgs = system_msgs.copy()
             gssc_added = None
             for m in retained_others:
-                if m == gssc_msg or "[⚠️ GSSC" in getattr(m, "content", ""):
+                if m == gssc_msg or "[⚠️ GSSC" in str(getattr(m, "content", "")):
                     final_msgs.append(m)
                     gssc_added = m
                     break
@@ -400,7 +414,7 @@ class ContextBuilder:
             return final_msgs
 
         # 收集被截断消息的文本内容进行摘要蒸馏
-        truncated_text = "\n".join(f"[{m.type}]: {m.content[:500]}" for m in truncated)
+        truncated_text = "\n".join(f"[{m.type}]: {str(m.content)[:500]}" for m in truncated)
         
         summary_content = "[⚠️ 较早的历史事实载荷超出预算，已被物理截断]"
         try:

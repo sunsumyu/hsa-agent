@@ -103,6 +103,13 @@ class EndpointPoolManager:
             if not state or (state.is_cooling and now < state.cooldown_until):
                 continue
             
+            # [Fast Filter] 凭据不存在的节点直接旁路，绝不派发
+            api_key = os.getenv(ep.api_key_env) if ep.api_key_env else None
+            if not api_key:
+                api_key = os.getenv("LLM_API_KEY")
+            if not api_key:
+                continue
+
             is_safe, usage, quota, _ = usage_tracker.check_limit(ep.id)
             if not is_safe: continue
 
@@ -251,8 +258,6 @@ class EndpointPoolManager:
             logger.warning(f"⚠️ [云端同步] 动态同步火山接入点失败: {e}")
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-endpoint_pool_manager = _SP.try_resolve("endpoint_pool_manager") or EndpointPoolManager()
-if not _SP.is_registered("endpoint_pool_manager"):
-    _SP.register_instance("endpoint_pool_manager", endpoint_pool_manager)
+endpoint_pool_manager = LazyProxy("endpoint_pool_manager")

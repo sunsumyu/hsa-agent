@@ -22,7 +22,7 @@ class SchemaManager:
         client = get_clickhouse_client()
         try:
             # 1. 抓取主表及核心表的字段清单 (V128.5 新增 fqz_fymx_test)
-            tables = ["fqz_gz_jzsj_all_ql", "fqz_all_yy_yd_1", "fqz_drug_mcs_info_list", "fqz_fymx_test"]
+            tables = ["fqz_gz_jzsj_all_ql", "fqz_all_yy_yd", "fqz_all_yy_yd_1", "fqz_drug_mcs_info_list", "fqz_fymx_test", "fqz_admdvs"]
             new_cache = {}
             new_metadata = []
             
@@ -82,8 +82,6 @@ class SchemaManager:
         return self._field_metadata
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-schema_manager = _SP.try_resolve("schema_manager") or SchemaManager()
-if not _SP.is_registered("schema_manager"):
-    _SP.register_instance("schema_manager", schema_manager)
+schema_manager = LazyProxy("schema_manager")

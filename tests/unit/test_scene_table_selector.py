@@ -108,6 +108,34 @@ class TestSceneTableSelector:
         primary, tables = scene_table_selector.select_tables("乡镇卫生院刷单")
         assert primary == "fqz_fymx_test"
 
+    def test_refund_anomaly_scenario_qa03(self):
+        """QA-03: 异常退费与冲正流水应精准路由至 fqz_fymx_test"""
+        selector = SceneTableSelector()
+        query = "请核查医保结算明细中的异常退费与冲正流水，帮我统计退费总笔数、退费累计金额"
+        primary, tables = selector.select_tables(query)
+        assert primary == "fqz_fymx_test"
+
+    def test_designated_institutions_scenario_qa07(self):
+        """QA-07: 全市纳管定点医疗机构与药店应路由至 fqz_all_yy_yd"""
+        selector = SceneTableSelector()
+        query = "全市目前一共纳管了多少家医保定点医疗机构和定点零售药店？其中二级医院有多少家？"
+        primary, tables = selector.select_tables(query)
+        assert primary == "fqz_all_yy_yd"
+
+    def test_administrative_divisions_scenario_qa08(self):
+        """QA-08: 行政区划字典层级划分应路由至 fqz_admdvs"""
+        selector = SceneTableSelector()
+        query = "我想了解医保行政区划字典的层级划分，系统里国家级、省级、地市级和区县级各有多少个行政区划？"
+        primary, tables = selector.select_tables(query)
+        assert primary == "fqz_admdvs"
+
+    def test_drug_catalog_scenario_qa09(self):
+        """QA-09: 临床药品目录库抗生素核查应路由至 fqz_drug_mcs_info_list"""
+        selector = SceneTableSelector()
+        query = "查一下医保药品目录库，总共收载了多少种临床药品？其中重点管控的头孢类和哌拉西林类各有多少个品种？"
+        primary, tables = selector.select_tables(query)
+        assert primary == "fqz_drug_mcs_info_list"
+
 
 class TestSceneTableSelectorIntegration:
     """集成测试 - 与 SchemaRegistry 集成"""
@@ -128,12 +156,15 @@ class TestSceneTableSelectorIntegration:
             assert entry is not None, f"表 {primary} 不在 SchemaRegistry 中"
 
     def test_scene_table_mapping_loaded(self):
-        """场景映射应从配置文件加载"""
+        """场景映射应从配置文件加载且包含五大核心表"""
         selector = SceneTableSelector()
-        # 检查映射是否已加载
-        assert len(selector._mapping) >= 2
+        # 检查映射是否已加载 5 张核心表
+        assert len(selector._mapping) >= 5
         assert "fqz_fymx_test" in selector._mapping
         assert "fqz_gz_jzsj_all_ql" in selector._mapping
+        assert "fqz_all_yy_yd" in selector._mapping
+        assert "fqz_admdvs" in selector._mapping
+        assert "fqz_drug_mcs_info_list" in selector._mapping
 
 
 if __name__ == "__main__":

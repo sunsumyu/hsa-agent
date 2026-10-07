@@ -56,8 +56,6 @@ class PerfMonitor:
         logger.info(f"PERF | {category} | {name} | {duration_ms:.2f}ms")
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-perf_monitor = _SP.try_resolve("perf_monitor") or PerfMonitor()
-if not _SP.is_registered("perf_monitor"):
-    _SP.register_instance("perf_monitor", perf_monitor)
+perf_monitor = LazyProxy("perf_monitor", fallback_factory=lambda: PerfMonitor())

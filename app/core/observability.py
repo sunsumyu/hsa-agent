@@ -8,15 +8,30 @@ import time
 import atexit
 from loguru import logger
 from typing import List, Any
-from langfuse import Langfuse
-from langfuse.langchain import CallbackHandler
+try:
+    from langfuse import Langfuse
+    from langfuse.langchain import CallbackHandler
+    _HAS_LANGFUSE = True
+except ImportError:
+    Langfuse = None
+    CallbackHandler = None
+    _HAS_LANGFUSE = False
+    logger.debug("⚠️ [Observability] langfuse 未安装，Langfuse 观测已禁用")
 
 # OpenTelemetry 核心组件
-from opentelemetry import trace
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    _HAS_OTEL = True
+except ImportError:
+    trace = None
+    Resource = SERVICE_NAME = TracerProvider = BatchSpanProcessor = OTLPSpanExporter = None
+    _HAS_OTEL = False
+    logger.debug("⚠️ [Observability] opentelemetry 未安装，OTel 链路已禁用")
+
 try:
     from openinference.instrumentation.langchain import LangChainInstrumentor
     _HAS_OPENINFERENCE = True
@@ -72,8 +87,8 @@ def init_observability():
     os.environ["PYTHONUTF8"] = "1"
     
     # 1. OpenTelemetry & Phoenix 物理初始化
-    if os.getenv("DISABLE_PHOENIX", "false").lower() == "true":
-        logger.info(">>> [Observability] Phoenix 监控组件已旁路（DISABLE_PHOENIX=true），秒级跳过初始化。")
+    if not _HAS_OTEL or os.getenv("DISABLE_PHOENIX", "false").lower() == "true":
+        logger.info(">>> [Observability] Phoenix/OpenTelemetry 监控组件未安装或已旁路，秒级跳过初始化。")
         _phoenix_session = None
     else:
         try:
@@ -134,34 +149,37 @@ def init_observability():
             _phoenix_session = None
 
     # 2. Langfuse 物理初始化 (V131.6 加固型：增加云端连通性预检)
-    try:
-        pk = os.getenv("LANGFUSE_PUBLIC_KEY")
-        sk = os.getenv("LANGFUSE_SECRET_KEY")
-        host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-        
-        if pk and sk:
-            # [V131.6] 连通性预检：避免在国内网络环境下因 cloud.langfuse.com 超时导致的系统卡顿
-            import socket
-            is_langfuse_reachable = False
-            try:
-                # 提取 host (处理 https:// 前缀)
-                clean_host = host.replace("https://", "").replace("http://", "").split(":")[0]
-                with socket.create_connection((clean_host, 443), timeout=1.5):
-                    is_langfuse_reachable = True
-            except:
-                pass
+    if not _HAS_LANGFUSE:
+        logger.debug(">>> [Observability] Langfuse 未安装，跳过云端链路初始化")
+    else:
+        try:
+            pk = os.getenv("LANGFUSE_PUBLIC_KEY")
+            sk = os.getenv("LANGFUSE_SECRET_KEY")
+            host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+            
+            if pk and sk:
+                # [V131.6] 连通性预检：避免在国内网络环境下因 cloud.langfuse.com 超时导致的系统卡顿
+                import socket
+                is_langfuse_reachable = False
+                try:
+                    # 提取 host (处理 https:// 前缀)
+                    clean_host = host.replace("https://", "").replace("http://", "").split(":")[0]
+                    with socket.create_connection((clean_host, 443), timeout=1.5):
+                        is_langfuse_reachable = True
+                except:
+                    pass
 
-            if is_langfuse_reachable:
-                # 初始化 Client 用于 Prompt Management
-                _langfuse_client = Langfuse(public_key=pk, secret_key=sk, host=host)
-                # 初始化 Handler 用于 Trace 追踪
-                from langfuse.langchain import CallbackHandler
-                _langfuse_handler = CallbackHandler(public_key=pk)
-                logger.info(f">>> [Observability] Langfuse 云端链路已激活 ({clean_host})")
-            else:
-                logger.warning(">>> [Observability] Langfuse 云端不可达，已自动切换至本地脱机模式")
-    except Exception as e:
-        logger.warning(f"[Observability] Langfuse 物理初始化失败: {e}")
+                if is_langfuse_reachable:
+                    # 初始化 Client 用于 Prompt Management
+                    _langfuse_client = Langfuse(public_key=pk, secret_key=sk, host=host)
+                    # 初始化 Handler 用于 Trace 追踪
+                    from langfuse.langchain import CallbackHandler
+                    _langfuse_handler = CallbackHandler(public_key=pk)
+                    logger.info(f">>> [Observability] Langfuse 云端链路已激活 ({clean_host})")
+                else:
+                    logger.warning(">>> [Observability] Langfuse 云端不可达，已自动切换至本地脱机模式")
+        except Exception as e:
+            logger.warning(f"[Observability] Langfuse 物理初始化失败: {e}")
 
 def get_callbacks(tags: List[str] = None) -> List:
     """[V37.5] 获取集成回调列表"""

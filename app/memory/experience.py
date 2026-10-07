@@ -108,8 +108,6 @@ class ExperienceManager:
             return ""
 
 # Backward-compatible alias, delegates to DI container
-from app.core.container import ServiceProvider as _SP
+from app.core.container import LazyProxy
 
-experience_manager = _SP.try_resolve("experience_manager") or ExperienceManager()
-if not _SP.is_registered("experience_manager"):
-    _SP.register_instance("experience_manager", experience_manager)
+experience_manager = LazyProxy("experience_manager")

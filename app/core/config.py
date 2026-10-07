@@ -19,6 +19,7 @@ from pydantic import Field
 # [V4.5.6] 物理固化完成：恢复离线模式，确保零延迟运行
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+os.environ["NO_GCE_CHECK"] = "true"
 # ---------------------------------------------------------
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

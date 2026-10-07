@@ -6,6 +6,19 @@
       "fallback_pool": "tier-2-chat",
       "endpoints": [
         {
+          "id": "claude-3-5-sonnet",
+          "family": "claude-3-5",
+          "platform": "anthropic",
+          "provider": "anthropic",
+          "model_name": "claude-3-5-sonnet-20241022",
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url_env": "ANTHROPIC_BASE_URL",
+          "weight": 150,
+          "daily_quota": 10000000,
+          "rpm_limit": 1000,
+          "tpm_limit": 100000
+        },
+        {
           "id": "doubao-1-5-pro",
           "family": "doubao-1-5",
           "platform": "volcengine",
