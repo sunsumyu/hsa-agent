@@ -65,3 +65,12 @@
 - **定位**：杜绝单纯依赖 Prompt 堆叠或 LLM-as-a-Judge 导致的不稳定性和同频幻觉，确保业务关键约束具备数学可证明的 100% 拦截率。
 - **详见工程指南**：[docs/neuro_symbolic_guardrails_and_agent_engineering_guide.md](file:///f:/chain/argus-agent/docs/neuro_symbolic_guardrails_and_agent_engineering_guide.md)
 
+### 2.6 客观度量与报告对账 (Objective Metric Evaluation & Reporter Alignment)
+- **定义**：在智能体输出最终审计报告前，通过纯代码与正则/数据解析（如 `AuditMetricEvaluator.extract_totals`）直接对底层数据库返回的结构化行记录进行精确汇总（总违规条数、总涉案金额）。
+- **原则**：严禁放任大模型在最终报告撰写阶段自由估计或主观改写统计数值；报告前置注入由物理执行结果直接算得的客观真值，彻底杜绝报告端的统计幻觉。
+
+### 2.7 经验库防投毒门禁 (Experience Anti-Poisoning Gate)
+- **定义**：基于 Hello-Agents 的 Anti-Error-Replay 原则，在语义经验库（`ExperienceManager`）持久化（`save_audit_experience`）前设立符号硬拦截。
+- **原则**：任何尝试作为 Golden Example 沉淀进向量数据库的 SQL，必须先通过 AST 静态矛盾检测器。凡包含恒假逻辑、标量互斥或非法区间的代码一律拒绝入库，切断脏经验在未来相似问题检索中自我强化与污染的恶性循环。
+
+

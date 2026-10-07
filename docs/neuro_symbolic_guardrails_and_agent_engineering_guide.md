@@ -140,6 +140,25 @@
   * 检查 SQL 的 `WHERE` 子句是否颠倒了主客体约束；
   * 输出规范化 `DiagnosticFeedback`，精准指导模型在单次会话内进行靶向自愈重写。
 
+### 4.4 深度模块四：客观度量与报告对账器 (`AuditMetricEvaluator`)
+* **定位**：端到端输出事实一致性对账器（Deterministic Truth-Verification）。
+* **源码**：[app/evaluation/audit_metric_evaluator.py](file:///f:/chain/argus-agent/app/evaluation/audit_metric_evaluator.py)
+* **挂载点**：[app/core/agent_graph.py](file:///f:/chain/argus-agent/app/core/agent_graph.py) 的 `reporter_node`。
+* **技术实现**：
+  * 纯代码解析 ClickHouse 执行返回的原始行记录（`db_rows`）；
+  * 智能识别并自动剔除 `UNION ALL` 产生的统计汇总尾行（避免重复累加条数与金额）；
+  * 穿透聚合明细行中的数量（`cnt`）与金额字段（`det_item_fee_sumamt`），计算客观真值；
+  * 在 Reporter 节点撰写报告前，将真值作为强事实上下文注入，消除大模型在结项审计报告中的统计估算幻觉。
+
+### 4.5 深度模块五：经验库防投毒门禁 (`ExperienceManager` Anti-Poisoning Gate)
+* **定位**：长程语义记忆污染切断器（Anti-Error-Replay / Memory Protection）。
+* **源码**：[app/memory/experience.py](file:///f:/chain/argus-agent/app/memory/experience.py)
+* **挂载点**：`save_audit_experience` 存储入口。
+* **技术实现**：
+  * 任何准备作为“成功经验（Golden Examples）”固化入 FAISS 向量库与 `pool.json` 的 SQL，必须无条件通过 `ContradictionDetector.detect` 的静态 AST 审查；
+  * 拦截包括全否定枚举、标量等值冲突、区间倒置在内的所有潜在恒假逻辑；
+  * 杜绝偶尔生成的病态 SQL 固化为语义案例，彻底掐断“脏经验检出 -> 注入 Prompt -> 模型学样写错”的自强化投毒循环。
+
 ---
 
 ## 5. 架构原则：Matt Pocock 深模块与单一事实源（SSOT）
