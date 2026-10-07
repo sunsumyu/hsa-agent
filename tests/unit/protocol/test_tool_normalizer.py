@@ -63,3 +63,14 @@ def test_normalizer_preserves_trailing_string_literal_quotes():
     raw_sql_2 = "SELECT count() FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01' AND setl_time < '2025-01-01'"
     result_2 = ToolResponseNormalizer.clean_sql_ast(raw_sql_2)
     assert result_2 == raw_sql_2
+
+def test_normalizer_aliases_hallucinated_tool_names():
+    """验证模型幻觉工具调用名（如复数 write_audit_notes）被自动归一化为正确工具名"""
+    calls = [
+        {"name": "write_audit_notes", "args": {"category": "risk", "content": "finding"}},
+        {"name": "read_audit_note", "args": {}},
+    ]
+    result = ToolResponseNormalizer.normalize("some text", existing_tool_calls=calls)
+    assert result.tool_calls[0]["name"] == "write_audit_note"
+    assert result.tool_calls[1]["name"] == "read_all_audit_notes"
+

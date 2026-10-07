@@ -98,3 +98,16 @@ def test_extract_directory_inspection_scope07_08_09():
     intent3 = AuditIntentPlanner.extract_intent(prompt3)
     assert intent3.archetype == AuditArchetype.DIRECTORY_INSPECTION
 
+def test_extract_temporal_overlap_cases():
+    """测试用例 11 & 12: 异地同时跨院住院与入院时间晚于出院 -> 锁定 TEMPORAL_OVERLAP 原型"""
+    prompt1 = "核查是否存在同一患者在同一天内，在两家不同医院【同时住院】的情况？"
+    intent1 = AuditIntentPlanner.extract_intent(prompt1)
+    assert intent1.archetype == AuditArchetype.TEMPORAL_OVERLAP
+    assert "时序冲突" in (intent1.enforcement_guidance or "")
+
+    prompt2 = "核查全域医保结算是否存在入院时间晚于出院时间的异常住院结算记录"
+    intent2 = AuditIntentPlanner.extract_intent(prompt2)
+    assert intent2.archetype == AuditArchetype.TEMPORAL_OVERLAP
+    assert "adm_time > dscg_time" in intent2.violation_feature
+
+

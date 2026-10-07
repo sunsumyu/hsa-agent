@@ -48,6 +48,7 @@ from app.skills.analysis_tools import (
 from app.skills.memory_tools import (
     manage_memory,
     write_audit_note,
+    write_audit_notes,
     read_all_audit_notes,
     clear_audit_notes,
     get_embeddings,
@@ -77,6 +78,7 @@ __all__ = [
     # Memory
     "manage_memory",
     "write_audit_note",
+    "write_audit_notes",
     "read_all_audit_notes",
     "clear_audit_notes",
     "get_embeddings",

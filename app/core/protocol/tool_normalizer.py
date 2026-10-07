@@ -65,14 +65,25 @@ class ToolResponseNormalizer:
 
         return cand
 
+    TOOL_ALIASES = {
+        "write_audit_notes": "write_audit_note",
+        "read_audit_note": "read_all_audit_notes",
+        "read_audit_notes": "read_all_audit_notes",
+    }
+
     @classmethod
     def normalize(cls, raw_content: Any, existing_tool_calls: Optional[List[dict]] = None) -> NormalizedToolCallResult:
-        # 若已有原生合法的 tool_calls，仍对其参数内部的 SQL 进行清洗，去除残留脏标记
+        # 若已有原生合法的 tool_calls，对其名称进行别名归一化，并清洗 SQL 参数脏标记
         if existing_tool_calls:
             first_sql = None
             clean_calls = []
             for tc in existing_tool_calls:
-                args = tc.get("args") or {}
+                tc_clean = dict(tc)
+                tc_name = tc_clean.get("name")
+                if tc_name in cls.TOOL_ALIASES:
+                    tc_clean["name"] = cls.TOOL_ALIASES[tc_name]
+
+                args = tc_clean.get("args") or {}
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
@@ -82,12 +93,9 @@ class ToolResponseNormalizer:
                     clean_s = cls.clean_sql_ast(args["sql"])
                     if not first_sql and clean_s:
                         first_sql = clean_s
-                    tc_clean = dict(tc)
                     tc_clean["args"] = dict(args)
                     tc_clean["args"]["sql"] = clean_s
-                    clean_calls.append(tc_clean)
-                else:
-                    clean_calls.append(tc)
+                clean_calls.append(tc_clean)
             return NormalizedToolCallResult(tool_calls=clean_calls, synthesized_sql=first_sql, is_synthesized=False)
 
         content_str = str(raw_content) if raw_content is not None else ""

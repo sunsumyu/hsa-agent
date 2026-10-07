@@ -106,6 +106,11 @@ def write_audit_note(category: str, content: str, ttl_days: int = 30) -> str:
         return f"❌ 写入外部便签失败: {e}"
 
 @tool
+def write_audit_notes(category: str, content: str, ttl_days: int = 30) -> str:
+    """write_audit_note 的别名工具，兼容模型调用单复数形态。"""
+    return write_audit_note.invoke({"category": category, "content": content, "ttl_days": ttl_days})
+
+@tool
 def read_all_audit_notes() -> str:
     """
     审计外部便签读取器：一键拉回完整的跨窗口审计线索与全部便签内容。

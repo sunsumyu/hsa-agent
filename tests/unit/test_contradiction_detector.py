@@ -106,3 +106,23 @@ def test_passes_valid_numeric_range():
     """
     assert ContradictionDetector.detect(sql) is None
 
+def test_detects_date_range_inversion_contradiction():
+    """测试用例 11: 日期区间倒置恒假 (setl_time > '2024-12-31' AND setl_time < '2024-01-01')"""
+    sql = """
+    SELECT * FROM fqz_fymx_test 
+    WHERE setl_time > '2024-12-31' AND setl_time < '2024-01-01'
+    """
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "setl_time"
+    assert "区间" in violation.message or "矛盾" in violation.message
+
+def test_passes_valid_date_range():
+    """测试用例 12: 正常有效日期范围应当顺利放行"""
+    sql = """
+    SELECT * FROM fqz_fymx_test 
+    WHERE setl_time >= '2024-01-01' AND setl_time <= '2024-12-31'
+    """
+    assert ContradictionDetector.detect(sql) is None
+
+

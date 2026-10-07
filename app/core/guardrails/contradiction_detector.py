@@ -96,19 +96,15 @@ class ContradictionDetector:
             elif pred_type == "IS_NOT_NULL":
                 col_is_not_null.add(col_name_lower)
             elif pred_type in ("GT", "GTE"):
-                try:
-                    f_val = float(val_obj)
+                c_val = cls._parse_comparable_value(val_obj)
+                if c_val is not None:
                     is_strict = (pred_type == "GT")
-                    col_lower_bounds.setdefault(col_name_lower, []).append((f_val, is_strict))
-                except (ValueError, TypeError):
-                    pass
+                    col_lower_bounds.setdefault(col_name_lower, []).append((c_val, is_strict))
             elif pred_type in ("LT", "LTE"):
-                try:
-                    f_val = float(val_obj)
+                c_val = cls._parse_comparable_value(val_obj)
+                if c_val is not None:
                     is_strict = (pred_type == "LT")
-                    col_upper_bounds.setdefault(col_name_lower, []).append((f_val, is_strict))
-                except (ValueError, TypeError):
-                    pass
+                    col_upper_bounds.setdefault(col_name_lower, []).append((c_val, is_strict))
 
         # 1. 检查标量互斥等值: col = '1' AND col = '2'
         for col, eq_vals in col_equalities.items():
@@ -182,7 +178,7 @@ class ContradictionDetector:
                 if max_lower[0] > min_upper[0]:
                     return ContradictionViolation(
                         column=col,
-                        message=f"字段 `{col}` 存在数值区间倒置矛盾 (要求下限 {max_lower[0]} > 上限 {min_upper[0]})，导致恒假空集！",
+                        message=f"字段 `{col}` 存在数值/时间区间倒置矛盾 (要求下限大于上限)，导致恒假空集！",
                         conflicting_predicates=col_raw_predicates.get(col, [])
                     )
                 elif max_lower[0] == min_upper[0] and (max_lower[1] or min_upper[1]):
@@ -319,4 +315,33 @@ class ContradictionDetector:
     def _extract_literal(cls, expr: exp.Expression) -> Optional[str]:
         if isinstance(expr, exp.Literal):
             return str(expr.this)
+        return None
+
+    @classmethod
+    def _parse_comparable_value(cls, val_obj: Any) -> Optional[float]:
+        """
+        解析可排序比较的值（数值 float 或 ISO 日期/时间戳）。
+        """
+        if val_obj is None:
+            return None
+        # 1. 直接 float 转换
+        try:
+            return float(val_obj)
+        except (ValueError, TypeError):
+            pass
+
+        # 2. ISO 日期 / 时间戳解析
+        if isinstance(val_obj, str):
+            clean = val_obj.strip("'\" \t\r\n")
+            # 支持 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS 或带 T 的 ISO 格式
+            match = re.match(r"^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?$", clean)
+            if match:
+                try:
+                    from datetime import datetime
+                    date_part = match.group(1)
+                    time_part = match.group(2) or "00:00:00"
+                    dt = datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %H:%M:%S")
+                    return dt.timestamp()
+                except Exception:
+                    pass
         return None

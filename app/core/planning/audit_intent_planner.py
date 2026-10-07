@@ -121,12 +121,22 @@ class AuditIntentPlanner:
             )
 
         # 6. 检查时序冲突原型 (TEMPORAL_OVERLAP)
-        temporal_keywords = ["同日", "同时", "异地", "重叠", "并发"]
-        hospital_keywords = ["住院", "就诊", "门诊", "结算", "病历"]
+        if any(kw in q for kw in ["入院晚于出院", "入院时间晚于出院", "入出院时序倒置", "入院时间晚于"]):
+            return AuditIntent(
+                audit_subject="住院就诊记录",
+                violation_feature="入院时间晚于出院时间 (adm_time > dscg_time)",
+                archetype=AuditArchetype.TEMPORAL_OVERLAP,
+                enforcement_guidance=(
+                    "【时序逻辑矛盾审计】筛选入院时间晚于出院时间的异常住院结算记录：`adm_time > dscg_time`！"
+                )
+            )
+
+        temporal_keywords = ["同日", "同时", "异地", "重叠", "并发", "同一天", "跨院"]
+        hospital_keywords = ["住院", "就诊", "门诊", "结算", "病历", "医院"]
         if any(tk in q for tk in temporal_keywords) and any(hk in q for hk in hospital_keywords):
             return AuditIntent(
                 audit_subject="参保人",
-                violation_feature="异地同时/重叠结算",
+                violation_feature="跨院/异地同时重叠住院结算",
                 archetype=AuditArchetype.TEMPORAL_OVERLAP,
                 enforcement_guidance="【时序冲突审计】必须对同一参保人在相同时间窗口内的跨机构记录进行自连接或时序区间比对。"
             )
