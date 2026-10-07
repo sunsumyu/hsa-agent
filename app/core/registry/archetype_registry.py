@@ -25,6 +25,9 @@ class ArchetypeCategory(str, Enum):
     RANKING = "ranking"                        # 排名 / TOP-N / 离群极值
     GENDER_CONFLICT = "gender_conflict"        # 性别限制冲突
     CLINICAL_CATALOG = "clinical_catalog"      # 药品 / 诊疗目录核查
+    MISSING_COMPANION = "missing_companion"    # 伴随依赖缺失核查 (如无手术收麻醉)
+    TEMPORAL_OVERLAP = "temporal_overlap"      # 时序冲突 / 重叠住院
+    REVERSAL_REFUND = "reversal_refund"        # 退费与冲正流水核查
     GENERAL_AUDIT = "general_audit"            # 常规结算稽核
 
 
@@ -121,6 +124,52 @@ class ArchetypeRegistry:
             requires_group_by=False,
             forbid_raw_limit=False,
             enforcement_hint=None,
+        ),
+        AuditArchetype(
+            category=ArchetypeCategory.MISSING_COMPANION,
+            name="missing_companion",
+            display_name="伴随依赖缺失核查",
+            keywords=(
+                "无手术", "未做手术", "未收取手术", "无手术收取麻醉",
+                "麻醉费", "麻醉", "全麻", "局麻", "伴随缺失", "前置缺失",
+                "未做化验", "未做检查", "缺少前提"
+            ),
+            target_tables=("fqz_fymx_test",),
+            requires_group_by=False,
+            forbid_raw_limit=False,
+            enforcement_hint=(
+                "本任务为【伴随依赖缺失核查】任务（如计收麻醉但无手术），"
+                "必须在就诊/结算粒度通过子查询 (`NOT IN / NOT EXISTS`) 或 `LEFT JOIN ... IS NULL` 跨行核对前提项目的存在性，"
+                "严禁在单条明细的 WHERE 子句中直接施加伴随字段的否定排除！"
+            ),
+        ),
+        AuditArchetype(
+            category=ArchetypeCategory.TEMPORAL_OVERLAP,
+            name="temporal_overlap",
+            display_name="时序冲突与重叠住院",
+            keywords=(
+                "同时住院", "重叠住院", "异地同时", "同一天内", "两家不同医院",
+                "入出院时序", "入院时间晚于出院", "时间倒置", "跨院同时"
+            ),
+            target_tables=("fqz_gz_jzsj_all_ql", "fqz_all_yy_yd_1"),
+            requires_group_by=False,
+            forbid_raw_limit=False,
+            enforcement_hint=(
+                "本任务为【时序冲突与重叠住院】任务，必须对同一参保人 (`psn_no`) 跨机构记录进行自连接区间重叠计算，"
+                "或比对入院出院时间 (`adm_time > dscg_time`)。"
+            ),
+        ),
+        AuditArchetype(
+            category=ArchetypeCategory.REVERSAL_REFUND,
+            name="reversal_refund",
+            display_name="退费与冲正流水核查",
+            keywords=(
+                "退费", "冲正", "负数金额", "异常退费", "冲正流水", "负数退费"
+            ),
+            target_tables=("fqz_fymx_test",),
+            requires_group_by=False,
+            forbid_raw_limit=False,
+            enforcement_hint="退费与冲正核查：必须路由至明细表 fqz_fymx_test 筛选 det_item_fee_sumamt < 0。",
         ),
     ]
 

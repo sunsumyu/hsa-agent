@@ -242,6 +242,29 @@ class QualityGate:
             err_msg = f"【静态语义恒假拦截】{violation.message} 冲突谓词: {violation.conflicting_predicates}"
             logger.warning(f"[Gate 2 Contradiction] {err_msg}")
             return {"passed": False, "error": err_msg, "warnings": warnings}
+
+        # 规则4: [Missing Companion Guard] 伴随依赖缺失单行伪排除反模式拦截
+        from app.core.registry.archetype_registry import ArchetypeCategory
+        if any(arch.category == ArchetypeCategory.MISSING_COMPANION for arch in matched_archetypes):
+            from_idx = sql_upper.find("FROM")
+            after_from = sql_upper[from_idx:] if from_idx != -1 else sql_upper
+            has_subquery = "SELECT" in after_from or "NOT IN (" in sql_upper or "NOT EXISTS (" in sql_upper
+            has_join = "JOIN" in sql_upper
+            has_window = "OVER" in sql_upper
+            has_group_agg = "GROUP BY" in sql_upper and "HAVING" in sql_upper
+            
+            if not (has_subquery or has_join or has_window or has_group_agg):
+                if "NOT LIKE" in sql_upper or "!=" in sql_upper or "<>" in sql_upper:
+                    err_msg = (
+                        "【伴随依赖缺失审计拦截】检测到单行伪排除反模式！"
+                        "排查“无前置项目收取伴随项目”（如无手术收麻醉费）必须在就诊/结算粒度（如 `setl_id`）"
+                        "通过子查询（`NOT IN (SELECT setl_id FROM ... WHERE hilist_name LIKE '%手术%')`）、"
+                        "`LEFT JOIN ... IS NULL` 或窗口聚合进行跨行核对，"
+                        "严禁在单条明细记录的 WHERE 子句中直接施加伴随字段的否定排除（如 hilist_name NOT LIKE），"
+                        "否则将导致所有伴随明细全量误判为违规！"
+                    )
+                    logger.warning(f"[Gate 2 Missing Companion] {err_msg}")
+                    return {"passed": False, "error": err_msg, "warnings": warnings}
         
         return {"passed": True, "error": None, "warnings": warnings}
 

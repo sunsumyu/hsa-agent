@@ -70,3 +70,38 @@ class TestArchetypeRegistry:
         sql = "SELECT toDate(setl_time) as d, sum(medfee_sumamt) FROM fqz_gz_jzsj_all_ql GROUP BY d ORDER BY d LIMIT 100"
         res = QualityGate.validate_sql_semantics(state, sql)
         assert res["passed"] is True
+
+    def test_missing_companion_archetype_matching(self):
+        query = "核查未做手术却收取全麻费用的违规就诊明细"
+        matched = archetype_registry.match_archetypes(query)
+        categories = [m.category for m in matched]
+        assert ArchetypeCategory.MISSING_COMPANION in categories
+
+    def test_quality_gate_blocks_single_row_pseudo_exclusion_on_missing_companion(self):
+        """单行伪排除反模式 (在单条明细记录 WHERE 直接否定伴随项目) 必须被 QualityGate 拦截"""
+        state = {
+            "messages": [
+                ("user", "核查无手术收取麻醉费用的违规就诊结算")
+            ]
+        }
+        # 错误反模式：单行同时过滤 麻醉 AND NOT 手术，这会导致所有麻醉明细全部误判为违规
+        bad_sql = "SELECT setl_id, psn_no, hilist_name FROM fqz_fymx_test WHERE hilist_name LIKE '%麻醉%' AND hilist_name NOT LIKE '%手术%'"
+        res = QualityGate.validate_sql_semantics(state, bad_sql)
+        assert res["passed"] is False
+        assert "伴随依赖缺失" in res["error"] or "单行伪排除" in res["error"]
+
+    def test_quality_gate_passes_cross_row_subquery_on_missing_companion(self):
+        """合规的跨行子查询 (NOT IN / NOT EXISTS) 应当被放行"""
+        state = {
+            "messages": [
+                ("user", "核查无手术收取麻醉费用的违规就诊结算")
+            ]
+        }
+        good_sql = (
+            "SELECT setl_id, psn_no, hilist_name FROM fqz_fymx_test "
+            "WHERE hilist_name LIKE '%麻醉%' "
+            "AND setl_id NOT IN (SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%手术%')"
+        )
+        res = QualityGate.validate_sql_semantics(state, good_sql)
+        assert res["passed"] is True
+
