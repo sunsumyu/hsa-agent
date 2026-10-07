@@ -52,6 +52,15 @@ class ExperienceManager:
         task_str = " ".join(tasks)
         if not task_str or not sql: return
         
+        # [防投毒门禁] 拦截恒假逻辑矛盾，杜绝脏经验污染长期记忆
+        from app.core.guardrails.contradiction_detector import ContradictionDetector
+        violation = ContradictionDetector.detect(sql)
+        if violation:
+            logger.warning(
+                f"🚨 [经验固化拦截] 尝试固化的 SQL 包含逻辑恒假矛盾 (列: {violation.column}, 冲突: {violation.conflicting_predicates})，已拒绝入库！"
+            )
+            return
+
         pool = self._load_pool()
         # 避免完全重复的意图
         if any(e["intent"] == task_str for e in pool): return
