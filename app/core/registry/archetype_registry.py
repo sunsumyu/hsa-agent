@@ -28,6 +28,8 @@ class ArchetypeCategory(str, Enum):
     MISSING_COMPANION = "missing_companion"    # 伴随依赖缺失核查 (如无手术收麻醉)
     TEMPORAL_OVERLAP = "temporal_overlap"      # 时序冲突 / 重叠住院
     REVERSAL_REFUND = "reversal_refund"        # 退费与冲正流水核查
+    SPLIT_BILLING = "split_billing"            # 分解收费 / 套收 / 拆开计费
+    DRUG_RESALE = "drug_resale"                # 药贩子套现 / 高频异常购药网络
     GENERAL_AUDIT = "general_audit"            # 常规结算稽核
 
 
@@ -170,6 +172,40 @@ class ArchetypeRegistry:
             requires_group_by=False,
             forbid_raw_limit=False,
             enforcement_hint="退费与冲正核查：必须路由至明细表 fqz_fymx_test 筛选 det_item_fee_sumamt < 0。",
+        ),
+        AuditArchetype(
+            category=ArchetypeCategory.SPLIT_BILLING,
+            name="split_billing",
+            display_name="手术分解与套收计费核查",
+            keywords=(
+                "分解收费", "拆分收费", "手术分解", "套收", "拆开计费",
+                "主干手术与子步骤", "分解项目", "拆单"
+            ),
+            target_tables=("fqz_fymx_test",),
+            requires_group_by=False,
+            forbid_raw_limit=False,
+            enforcement_hint=(
+                "本任务为【手术分解与套收计费核查】任务（如主干手术与子步骤拆分计费），"
+                "必须在同就诊/结算（setl_id 或 mdtrt_id）粒度通过自连接 JOIN 或分组计数进行联合核对，"
+                "严禁在单条明细记录的 WHERE 条件中施加互相冲突的等值条件！"
+            ),
+        ),
+        AuditArchetype(
+            category=ArchetypeCategory.DRUG_RESALE,
+            name="drug_resale",
+            display_name="药贩子套现与频繁异常购药网络",
+            keywords=(
+                "药贩子", "倒药", "套现", "频繁购药", "异常购药", "超量购药",
+                "门诊慢特病购药", "闭环套现", "跨机构购药", "高频次异常购药"
+            ),
+            target_tables=("fqz_gz_jzsj_all_ql", "fqz_fymx_test"),
+            requires_group_by=True,
+            forbid_raw_limit=True,
+            enforcement_hint=(
+                "本任务为【药贩子套现与频繁异常购药网络】任务，违规行为体现为跨机构高频开药或定点闭环。"
+                "必须按参保人（GROUP BY psn_no 或 psn_no, toDate(setl_time)）进行全量聚合统计，"
+                "严禁对明细流水直接施加 LIMIT 采样，亦不可在单条明细上仅按 cnt > 100 进行单条过滤！"
+            ),
         ),
     ]
 

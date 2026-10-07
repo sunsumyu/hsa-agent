@@ -125,4 +125,50 @@ def test_passes_valid_date_range():
     """
     assert ContradictionDetector.detect(sql) is None
 
+def test_detects_equality_violating_lower_bound():
+    """测试用例 13: 数值等值与下限矛盾 (age = 10 AND age > 18)"""
+    sql = "SELECT * FROM fqz_fymx_test WHERE age = 10 AND age > 18"
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "age"
+    assert "矛盾" in violation.message or "下限" in violation.message or "区间" in violation.message
+
+def test_detects_equality_violating_upper_bound():
+    """测试用例 14: 数值等值与上限矛盾 (pric = 100 AND pric < 50)"""
+    sql = "SELECT * FROM fqz_fymx_test WHERE pric = 100 AND pric < 50"
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "pric"
+    assert "矛盾" in violation.message or "上限" in violation.message or "区间" in violation.message
+
+def test_detects_date_equality_violating_range():
+    """测试用例 15: 日期等值与日期下限矛盾 (setl_time = '2024-01-01' AND setl_time > '2024-06-01')"""
+    sql = "SELECT * FROM fqz_fymx_test WHERE setl_time = '2024-01-01' AND setl_time > '2024-06-01'"
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "setl_time"
+    assert "矛盾" in violation.message or "下限" in violation.message or "区间" in violation.message
+
+def test_detects_in_list_exhausted_by_not_in():
+    """测试用例 16: IN 列表被 NOT IN 集合完全覆盖排除 (gend IN ('1') AND gend NOT IN ('1', '2'))"""
+    sql = "SELECT * FROM fqz_fymx_test WHERE gend IN ('1') AND gend NOT IN ('1', '2')"
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "gend"
+    assert "NOT IN" in violation.message or "排除" in violation.message or "矛盾" in violation.message
+
+def test_detects_equality_conflicting_with_not_in():
+    """测试用例 17: 等值取值命中 NOT IN 排除列表 (gend = '1' AND gend NOT IN ('1', '2'))"""
+    sql = "SELECT * FROM fqz_fymx_test WHERE gend = '1' AND gend NOT IN ('1', '2')"
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "gend"
+    assert "NOT IN" in violation.message or "排除" in violation.message or "矛盾" in violation.message
+
+def test_passes_valid_equality_within_bounds():
+    """测试用例 18: 合规的等值且处于有效区间内应当顺利放行"""
+    sql = "SELECT * FROM fqz_fymx_test WHERE age = 25 AND age >= 18 AND age <= 60"
+    assert ContradictionDetector.detect(sql) is None
+
+
 

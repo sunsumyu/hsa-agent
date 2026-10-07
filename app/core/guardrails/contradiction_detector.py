@@ -68,6 +68,7 @@ class ContradictionDetector:
         col_inequalities: Dict[str, Set[str]] = {}
         col_not_likes: Dict[str, Set[str]] = {}
         col_in_lists: Dict[str, Set[str]] = {}
+        col_not_in_lists: Dict[str, Set[str]] = {}
         col_is_null: Set[str] = set()
         col_is_not_null: Set[str] = set()
         col_lower_bounds: Dict[str, List[Tuple[float, bool]]] = {}
@@ -91,6 +92,8 @@ class ContradictionDetector:
                 col_not_likes.setdefault(col_name_lower, set()).add(base_val)
             elif pred_type == "IN" and isinstance(val_obj, set):
                 col_in_lists.setdefault(col_name_lower, set()).update(val_obj)
+            elif pred_type == "NOT_IN" and isinstance(val_obj, set):
+                col_not_in_lists.setdefault(col_name_lower, set()).update(val_obj)
             elif pred_type == "IS_NULL":
                 col_is_null.add(col_name_lower)
             elif pred_type == "IS_NOT_NULL":
@@ -185,6 +188,53 @@ class ContradictionDetector:
                     return ContradictionViolation(
                         column=col,
                         message=f"字段 `{col}` 存在严格区间重叠矛盾 (下限等于上限且包含严格不等式)，无任何数值满足！",
+                        conflicting_predicates=col_raw_predicates.get(col, [])
+                    )
+
+        # 7. 检查等值与区间边界矛盾: col = 10 AND col > 18, 或 setl_time = '2024-01-01' AND setl_time > '2024-06-01'
+        for col, eq_vals in col_equalities.items():
+            for eq_raw in eq_vals:
+                c_eq = cls._parse_comparable_value(eq_raw)
+                if c_eq is None:
+                    continue
+                if col in col_lower_bounds:
+                    for (lower_val, is_strict) in col_lower_bounds[col]:
+                        if c_eq < lower_val or (c_eq == lower_val and is_strict):
+                            return ContradictionViolation(
+                                column=col,
+                                message=f"字段 `{col}` 等值设定为 '{eq_raw}'，但同时被要求下限 >{'=' if not is_strict else ''} 冲突界限，产生恒假矛盾！",
+                                conflicting_predicates=col_raw_predicates.get(col, [])
+                            )
+                if col in col_upper_bounds:
+                    for (upper_val, is_strict) in col_upper_bounds[col]:
+                        if c_eq > upper_val or (c_eq == upper_val and is_strict):
+                            return ContradictionViolation(
+                                column=col,
+                                message=f"字段 `{col}` 等值设定为 '{eq_raw}'，但同时被要求上限 <{'=' if not is_strict else ''} 冲突界限，产生恒假矛盾！",
+                                conflicting_predicates=col_raw_predicates.get(col, [])
+                            )
+
+        # 8. 检查等值与 NOT IN 矛盾: col = '1' AND col NOT IN ('1', '2')
+        for col, eq_vals in col_equalities.items():
+            if col in col_not_in_lists:
+                not_in_vals = col_not_in_lists[col]
+                conflict = eq_vals.intersection(not_in_vals)
+                if conflict:
+                    val = next(iter(conflict))
+                    return ContradictionViolation(
+                        column=col,
+                        message=f"字段 `{col}` 要求等于 '{val}'，但同时出现在 NOT IN 排除列表中，产生恒假矛盾！",
+                        conflicting_predicates=col_raw_predicates.get(col, [])
+                    )
+
+        # 9. 检查 IN 允许列表被 NOT IN 完全排除: col IN ('1') AND col NOT IN ('1', '2')
+        for col, in_vals in col_in_lists.items():
+            if col in col_not_in_lists:
+                not_in_vals = col_not_in_lists[col]
+                if in_vals.issubset(not_in_vals):
+                    return ContradictionViolation(
+                        column=col,
+                        message=f"字段 `{col}` 的 IN 允许列表 {sorted(list(in_vals))} 已被 NOT IN 排除列表完全排除，导致恒假空集！",
                         conflicting_predicates=col_raw_predicates.get(col, [])
                     )
 

@@ -124,3 +124,32 @@ def test_passes_zero_findings_baseline_without_retry():
     
     assert result.needs_retry is False
 
+def test_reflects_on_missing_companion_pseudo_exclusion_error():
+    """测试用例 7: 伴随依赖缺失单行伪排除报错 -> 触发自愈并给出跨行子查询指导"""
+    sql = "SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%麻醉%' AND hilist_name NOT LIKE '%手术%'"
+    result = AuditReflectionEngine.evaluate_execution(
+        sql=sql,
+        row_count=0,
+        error_msg="【伴随依赖缺失审计拦截】检测到单行伪排除反模式！"
+    )
+    assert result.needs_retry is True
+    assert "伴随依赖缺失" in result.diagnostic_feedback or "跨行" in result.diagnostic_feedback
+    assert "setl_id" in (result.suggested_correction or "") or "NOT IN" in (result.suggested_correction or "")
+
+def test_reflects_on_split_billing_zero_hits():
+    """测试用例 8: 分解收费场景返回 0 行 -> 触发自愈并检查是否按就诊进行联合比对"""
+    intent = AuditIntent(
+        audit_subject="分解收费结算",
+        violation_feature="主干手术与子步骤拆分",
+        archetype=AuditArchetype.SPLIT_BILLING
+    )
+    sql = "SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%结肠切除%' AND hilist_name LIKE '%引流%'"
+    result = AuditReflectionEngine.evaluate_execution(
+        sql=sql,
+        row_count=0,
+        intent=intent
+    )
+    assert result.needs_retry is True
+    assert "分解收费" in result.diagnostic_feedback or "拆分" in result.diagnostic_feedback
+
+

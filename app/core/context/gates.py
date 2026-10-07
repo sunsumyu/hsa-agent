@@ -265,6 +265,28 @@ class QualityGate:
                     )
                     logger.warning(f"[Gate 2 Missing Companion] {err_msg}")
                     return {"passed": False, "error": err_msg, "warnings": warnings}
+
+        # 规则5: [Split Billing Guard] 手术分解与套收计费单行多条件反模式拦截
+        if any(arch.category == ArchetypeCategory.SPLIT_BILLING for arch in matched_archetypes):
+            from_idx = sql_upper.find("FROM")
+            after_from = sql_upper[from_idx:] if from_idx != -1 else sql_upper
+            has_subquery = "SELECT" in after_from or "IN (" in sql_upper
+            has_join = "JOIN" in sql_upper
+            has_window = "OVER" in sql_upper
+            has_group_agg = "GROUP BY" in sql_upper and "HAVING" in sql_upper
+
+            if not (has_subquery or has_join or has_window or has_group_agg):
+                import re
+                like_matches = re.findall(r"hilist_name\s+(?:ILIKE|LIKE)\s+('[^']+')", sql, re.IGNORECASE)
+                if len(set(like_matches)) >= 2:
+                    err_msg = (
+                        "【分解收费审计拦截】检测到同一单条明细记录上对项目字段 (hilist_name) 施加了多个互斥的 LIKE 匹配！"
+                        "单条流水记录的品名不可能同时包含不同手术/步骤名称。"
+                        "排查主干手术与子步骤分解收费，必须在就诊粒度（setl_id / mdtrt_id）通过自连接 JOIN、"
+                        "子查询或 GROUP BY setl_id 统计项目种类，严禁在单条明细的 WHERE 中同时匹配多个项目！"
+                    )
+                    logger.warning(f"[Gate 2 Split Billing] {err_msg}")
+                    return {"passed": False, "error": err_msg, "warnings": warnings}
         
         return {"passed": True, "error": None, "warnings": warnings}
 

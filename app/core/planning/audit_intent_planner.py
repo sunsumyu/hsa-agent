@@ -12,6 +12,8 @@ class AuditArchetype(str, Enum):
     REVERSAL_REFUND = "REVERSAL_REFUND"          # 负数冲正/退费违规
     ZERO_FINDINGS_BASELINE = "ZERO_FINDINGS_BASELINE" # 零发现基线合规
     DIRECTORY_INSPECTION = "DIRECTORY_INSPECTION" # 字典/机构资质/目录核查
+    SPLIT_BILLING = "SPLIT_BILLING"              # 分解收费 / 套收 / 拆开计费
+    DRUG_RESALE = "DRUG_RESALE"                  # 药贩子套现 / 频繁异常购药网络
     GENERAL = "GENERAL"                          # 常规/聚合查询
 
 class AuditIntent(BaseModel):
@@ -166,7 +168,33 @@ class AuditIntentPlanner:
                     enforcement_guidance=f"【伴随依赖缺失审计】必须通过 LEFT JOIN 或 NOT EXISTS 筛选计收了{dep}但无{trigger}的记录。"
                 )
 
-        # 8. 检查频次离群原型 (FREQUENCY_OUTLIER)
+        # 8. 检查药贩子闭环套现与高频异常购药网络原型 (DRUG_RESALE)
+        if any(kw in q for kw in ["药贩子", "倒药", "套现", "频繁购药", "异常购药", "闭环套现", "频繁就诊取药"]):
+            return AuditIntent(
+                audit_subject="套现参保人/异常购药网络",
+                violation_feature="药贩子跨机构倒药闭环/高频次异常购药",
+                archetype=AuditArchetype.DRUG_RESALE,
+                enforcement_guidance=(
+                    "【药贩子套现与高频购药审计】违规特征体现在参保人高频次、跨机构购药网络。"
+                    "必须按参保人（GROUP BY psn_no 或 psn_no, toDate(setl_time)）聚合统计就诊次数或定点机构数，"
+                    "严禁在单条明细流水上使用 WHERE cnt > 100 过滤（药贩子单次购药剂量常属正常）或使用 LIMIT 采样明细！"
+                )
+            )
+
+        # 9. 检查分解收费与拆分计费原型 (SPLIT_BILLING)
+        if any(kw in q for kw in ["分解收费", "拆分收费", "手术分解", "套收", "拆开计费", "主干手术与子步骤", "分解项目"]):
+            return AuditIntent(
+                audit_subject="分解收费结算明细",
+                violation_feature="主干项目与子步骤拆开计费/分解收费",
+                archetype=AuditArchetype.SPLIT_BILLING,
+                enforcement_guidance=(
+                    "【手术分解与套收计费核查】违规发生在同一就诊/结算内拆分多个项目收费。"
+                    "必须在同一就诊/结算粒度（如 mdtrt_id / setl_id）通过 JOIN 自连接或 GROUP BY + HAVING count(DISTINCT hilist_name) > 1 进行联合比对，"
+                    "严禁在单条明细的 WHERE 中对同字段写矛盾条件！"
+                )
+            )
+
+        # 10. 检查频次离群原型 (FREQUENCY_OUTLIER)
         outlier_keywords = ["超量", "过度", "频次", "异常偏高", "离群", "top", "排名"]
         if any(ok in q for ok in outlier_keywords):
             return AuditIntent(

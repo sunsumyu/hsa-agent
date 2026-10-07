@@ -105,3 +105,80 @@ class TestArchetypeRegistry:
         res = QualityGate.validate_sql_semantics(state, good_sql)
         assert res["passed"] is True
 
+    def test_split_billing_archetype_matching(self):
+        """测试分解收费/手术拆分计费原型匹配"""
+        query = "排查医院是否存在手术分解收费、将主干手术与子步骤拆开计费的套收违规"
+        matched = archetype_registry.match_archetypes(query)
+        categories = [m.category for m in matched]
+        assert ArchetypeCategory.SPLIT_BILLING in categories
+        split = next(m for m in matched if m.category == ArchetypeCategory.SPLIT_BILLING)
+        assert "fqz_fymx_test" in split.target_tables
+
+    def test_drug_resale_archetype_matching(self):
+        """测试药贩子套现/高频购药网络原型匹配"""
+        query = "排查药贩子倒药闭环套现、门诊慢特病短时间内频繁异常购药行为"
+        matched = archetype_registry.match_archetypes(query)
+        categories = [m.category for m in matched]
+        assert ArchetypeCategory.DRUG_RESALE in categories
+        resale = next(m for m in matched if m.category == ArchetypeCategory.DRUG_RESALE)
+        assert resale.requires_group_by is True
+        assert resale.forbid_raw_limit is True
+        assert "fqz_gz_jzsj_all_ql" in resale.target_tables
+
+    def test_quality_gate_blocks_unaggregated_drug_resale(self):
+        """未聚合的药贩子查询施加 LIMIT 必须被拦截"""
+        state = {
+            "messages": [
+                ("user", "核查药贩子跨机构倒药闭环套现明细")
+            ]
+        }
+        bad_sql = "SELECT psn_no, medfee_sumamt FROM fqz_gz_jzsj_all_ql WHERE med_type = '门诊慢特病' LIMIT 50"
+        res = QualityGate.validate_sql_semantics(state, bad_sql)
+        assert res["passed"] is False
+        assert "药贩子" in res["error"] or "GROUP BY" in res["error"]
+
+    def test_quality_gate_passes_aggregated_drug_resale(self):
+        """包含 GROUP BY 的药贩子聚合查询应当顺利放行"""
+        state = {
+            "messages": [
+                ("user", "核查药贩子跨机构倒药闭环套现明细")
+            ]
+        }
+        good_sql = (
+            "SELECT psn_no, count(DISTINCT fixmedins_code) as h_cnt, sum(medfee_sumamt) as s "
+            "FROM fqz_gz_jzsj_all_ql "
+            "GROUP BY psn_no HAVING h_cnt >= 2 AND s > 5000"
+        )
+        res = QualityGate.validate_sql_semantics(state, good_sql)
+        assert res["passed"] is True
+
+    def test_quality_gate_blocks_single_row_multiple_likes_on_split_billing(self):
+        """排查分解收费时，单行对同一字段施加多个不同的 LIKE 匹配必须被拦截"""
+        state = {
+            "messages": [
+                ("user", "排查医院是否存在手术分解收费、拆开计费的违规行为")
+            ]
+        }
+        bad_sql = "SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%切除术%' AND hilist_name LIKE '%引流术%'"
+        res = QualityGate.validate_sql_semantics(state, bad_sql)
+        assert res["passed"] is False
+        assert "分解收费" in res["error"] or "自连接" in res["error"]
+
+    def test_quality_gate_passes_join_on_split_billing(self):
+        """合规的自连接 JOIN 或分组聚合在分解收费场景下应当放行"""
+        state = {
+            "messages": [
+                ("user", "排查医院是否存在手术分解收费、拆开计费的违规行为")
+            ]
+        }
+        good_sql = (
+            "SELECT t1.setl_id, t1.hilist_name, t2.hilist_name "
+            "FROM fqz_fymx_test t1 "
+            "JOIN fqz_fymx_test t2 ON t1.setl_id = t2.setl_id "
+            "WHERE t1.hilist_name LIKE '%切除术%' AND t2.hilist_name LIKE '%引流术%'"
+        )
+        res = QualityGate.validate_sql_semantics(state, good_sql)
+        assert res["passed"] is True
+
+
+

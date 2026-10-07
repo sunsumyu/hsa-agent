@@ -34,6 +34,16 @@ class AuditReflectionEngine:
 
         # 1. 优先处理错误信息 (静态门禁或 DB 异常)
         if error_msg:
+            if "伴随依赖缺失" in error_msg or "单行伪排除" in error_msg:
+                return ReflectionResult(
+                    needs_retry=True,
+                    diagnostic_feedback=(
+                        f"【反思自愈诊断】检测到伴随依赖缺失单行伪排除反模式拦截: {error_msg}。"
+                        "切勿在单行明细的 WHERE 中同时排除伴随字段！"
+                        "必须在就诊/结算粒度（如 `setl_id`）使用跨行子查询进行排查。"
+                    ),
+                    suggested_correction="改用跨行子查询: `WHERE hilist_name LIKE '%伴随项目%' AND setl_id NOT IN (SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%前置项目%')`"
+                )
             if "恒假" in error_msg or "矛盾" in error_msg:
                 return ReflectionResult(
                     needs_retry=True,
@@ -123,6 +133,32 @@ class AuditReflectionEngine:
                 return ReflectionResult(
                     needs_retry=False,
                     diagnostic_feedback="【合规零发现】排查规则完成扫描，未发现违规记录，属于正常合规事实。"
+                )
+
+            # 分解收费与套收检查 (SPLIT_BILLING)
+            elif intent.archetype == AuditArchetype.SPLIT_BILLING:
+                return ReflectionResult(
+                    needs_retry=True,
+                    diagnostic_feedback=(
+                        "【反思自愈诊断】本次查询返回 0 行！"
+                        "检测到当前场景属于分解收费与套收违规排查（如主干手术与子步骤拆开计费），"
+                        "如果你的 SQL 在单条明细的 WHERE 中对同一字段施加了多个互斥条件，或者缺少就诊粒度的联合统计，"
+                        "请改用同一就诊（setl_id）的自连接 JOIN 或按 setl_id 分组统计项目种类（HAVING count(DISTINCT hilist_name) > 1）！"
+                    ),
+                    suggested_correction="请使用同一结算自连接或 GROUP BY setl_id 进行跨行多项目联合筛查。"
+                )
+
+            # 药贩子套现与高频异常购药检查 (DRUG_RESALE)
+            elif intent.archetype == AuditArchetype.DRUG_RESALE:
+                return ReflectionResult(
+                    needs_retry=True,
+                    diagnostic_feedback=(
+                        "【反思自愈诊断】本次查询返回 0 行！"
+                        "检测到当前场景属于药贩子套现与高频异常购药网络排查，"
+                        "违规特征体现在参保人高频次购药或定点闭环，单次明细剂量常属正常。"
+                        "请务必按参保人维度聚合（GROUP BY psn_no 或 psn_no, toDate(setl_time)），并比对频次与定点机构数门限！"
+                    ),
+                    suggested_correction="请改用按参保人聚合统计: `GROUP BY psn_no HAVING count() > 门限`"
                 )
 
         # 4. 常规查询零发现属于合规事实，放行

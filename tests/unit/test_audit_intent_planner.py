@@ -110,4 +110,19 @@ def test_extract_temporal_overlap_cases():
     assert intent2.archetype == AuditArchetype.TEMPORAL_OVERLAP
     assert "adm_time > dscg_time" in intent2.violation_feature
 
+def test_extract_split_billing_archetype():
+    """测试用例 13: 手术分解收费/拆开计费 -> 锁定 SPLIT_BILLING 原型"""
+    prompt = "排查医院是否存在手术分解收费、将主干手术与子步骤拆开计费的套收行为"
+    intent = AuditIntentPlanner.extract_intent(prompt)
+    assert intent.archetype == AuditArchetype.SPLIT_BILLING
+    assert "分解收费" in (intent.enforcement_guidance or "") or "拆分" in (intent.enforcement_guidance or "")
+
+def test_extract_drug_resale_archetype():
+    """测试用例 14: 药贩子套现/倒药闭环 -> 锁定 DRUG_RESALE 原型"""
+    prompt = "排查药贩子倒药闭环套现、门诊慢特病短时间内高频次异常购药"
+    intent = AuditIntentPlanner.extract_intent(prompt)
+    assert intent.archetype == AuditArchetype.DRUG_RESALE
+    assert "药贩子" in (intent.enforcement_guidance or "") or "GROUP BY" in (intent.enforcement_guidance or "")
+
+
 

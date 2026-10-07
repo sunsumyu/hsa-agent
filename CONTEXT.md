@@ -78,5 +78,20 @@
 - **危害**：由于费用明细表中每行记录仅代表单一项目，任何麻醉记录本身都不会包含“手术”字符，导致所有正常的麻醉明细都被误判为违规，造成 100% 假阳性雪崩。
 - **治理铁律**：由 `QualityGate` 规则 4 进行语法结构拦截，强制要求在就诊结算粒度使用跨行关联（`NOT IN (SELECT ...)`、`LEFT JOIN ... IS NULL`）或窗口聚合进行对撞。
 
+### 2.9 手术分解与套收计费联合核验铁律 (Split Billing Joint Verification)
+- **定义**：在手术分解收费、套收与拆单计费（如主干手术与子步骤拆分计费）中，违规行为发生在同一就诊/结算流水（`setl_id` 或 `mdtrt_id`）内同时计收了主干项目与其包含的附带项目。
+- **反模式**：模型错误地在单行明细记录的 WHERE 子句中同时施加不同项目的匹配（如 `WHERE hilist_name LIKE '%切除%' AND hilist_name LIKE '%引流%'`），因单条记录不可能同时为两项手术而导致恒假 0 行。
+- **治理铁律**：由 `QualityGate` 规则 5 进行结构拦截，强制要求在同一就诊粒度通过自连接 JOIN、子查询或 `GROUP BY setl_id` 统计项目种类（`HAVING count(DISTINCT hilist_name) > 1`）进行联合比对。
+
+### 2.10 药贩子跨机构网络与异常购药聚合铁律 (Drug Resale Network Aggregation)
+- **定义**：针对倒药闭环、套现与门诊慢特病高频超量购药，违规特征在于参保人在短时间内高频次跨机构购药，其单次开药剂量通常处于正常范围。
+- **反模式**：模型错误地在单条明细流水上施加 `WHERE cnt > 100`（导致漏检）或直接对流水施加 `LIMIT` 采样（导致截断）。
+- **治理铁律**：由 `ArchetypeRegistry` 强制声明 `requires_group_by=True` 与 `forbid_raw_limit=True`，强制要求按参保人维度（`GROUP BY psn_no` 或 `psn_no, toDate(setl_time)`）聚合统计就诊频次、总额或定点医药机构数门限。
+
+### 2.11 数理等值与上下界区间形式化相容铁律 (Equality-Range Formal Consistency)
+- **定义**：任何属性如果被同时赋予标量等值（`col = V`）与数值/时间上下界（`col > L` 或 `col < U`），或被施加允许集合与排除集合（`col IN (...) AND col NOT IN (...)`），必须满足形式化代数相容性。
+- **治理铁律**：由 `ContradictionDetector` 执行静态 AST 数理判定，当等值违反下界/上界，或 IN 允许列表被 NOT IN 完全排除时，在物理执行前执行 100% 形式化拦截，杜绝暗中返回空集导致的推理中毒。
+
+
 
 
