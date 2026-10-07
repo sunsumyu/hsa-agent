@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 import pytest
 from app.memory.experience import ExperienceManager
 
@@ -8,7 +9,8 @@ def test_experience_manager_anti_poisoning_rejects_contradiction(monkeypatch, tm
     monkeypatch.setattr("app.memory.experience.POOL_FILE", test_pool_file)
     
     mgr = ExperienceManager()
-    monkeypatch.setattr(mgr, "_get_vector_store", lambda: None)
+    mock_vs = MagicMock()
+    monkeypatch.setattr(mgr, "_get_vector_store", lambda: mock_vs)
     
     # 模拟一个尝试存入的包含恒假矛盾的脏 SQL (二元全排除)
     bad_sql_1 = "SELECT setl_id FROM fqz_fymx_test WHERE gend NOT LIKE '1%' AND gend NOT LIKE '2%'"
@@ -33,9 +35,12 @@ def test_experience_manager_accepts_valid_golden_sql(monkeypatch, tmp_path):
     valid_sql = "SELECT psn_no, sum(det_item_fee_sumamt) FROM fqz_fymx_test WHERE gend LIKE '1%' GROUP BY psn_no"
     
     # Mock vector store saving to avoid downloading embeddings model during quick test
-    monkeypatch.setattr(mgr, "_get_vector_store", lambda: None)
+    mock_vs = MagicMock()
+    monkeypatch.setattr(mgr, "_get_vector_store", lambda: mock_vs)
     
     mgr.save_audit_experience(["合规男性费用统计"], valid_sql)
     pool = mgr._load_pool()
     assert len(pool) == 1
     assert pool[0]["golden_sql"] == valid_sql
+    assert mock_vs.add_documents.called
+
