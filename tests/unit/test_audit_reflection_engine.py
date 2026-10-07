@@ -88,3 +88,39 @@ def test_passes_general_query_zero_hits():
     )
     
     assert result.needs_retry is False
+
+def test_reflects_on_zero_hits_with_reversal_refund_missing_negative_filter():
+    """测试用例 5 (QA-SCOPE-03): 退费原型执行 0 行且缺少负数条件 -> 触发自愈诊断"""
+    intent = AuditIntent(
+        audit_subject="退费与冲正结算记录",
+        violation_feature="负数金额",
+        archetype=AuditArchetype.REVERSAL_REFUND
+    )
+    sql = "SELECT setl_id FROM fqz_fymx_test WHERE det_item_fee_sumamt > 0"
+    
+    result = AuditReflectionEngine.evaluate_execution(
+        sql=sql,
+        row_count=0,
+        intent=intent
+    )
+    
+    assert result.needs_retry is True
+    assert "det_item_fee_sumamt < 0" in (result.suggested_correction or "") or "负数" in (result.diagnostic_feedback or "")
+
+def test_passes_zero_findings_baseline_without_retry():
+    """测试用例 6 (QA-SCOPE-06): 零发现合规基线返回 0 行 -> 正常放行，严禁死循环重试"""
+    intent = AuditIntent(
+        audit_subject="同日同人同院结算记录",
+        violation_feature="拆单排查",
+        archetype=AuditArchetype.ZERO_FINDINGS_BASELINE
+    )
+    sql = "SELECT psn_no FROM fqz_gz_jzsj_all_ql GROUP BY psn_no, toDate(setl_time), fixmedins_name HAVING count(DISTINCT setl_id) > 1"
+    
+    result = AuditReflectionEngine.evaluate_execution(
+        sql=sql,
+        row_count=0,
+        intent=intent
+    )
+    
+    assert result.needs_retry is False
+

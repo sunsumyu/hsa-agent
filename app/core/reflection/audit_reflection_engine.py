@@ -102,5 +102,28 @@ class AuditReflectionEngine:
                             suggested_correction="请将 WHERE 条件修改为正向筛选女性: `gend LIKE '2%'`"
                         )
 
+            # 负数退费与冲正原型检查 (REVERSAL_REFUND)
+            elif intent.archetype == AuditArchetype.REVERSAL_REFUND:
+                has_negative_filter = "< 0" in sql_clean or "<0" in sql_clean
+                if not has_negative_filter or "> 0" in sql_clean or ">0" in sql_clean or "ABS(" in sql_upper:
+                    return ReflectionResult(
+                        needs_retry=True,
+                        diagnostic_feedback=(
+                            "【反思自愈诊断】本次查询返回 0 行！"
+                            "检测到当前场景属于负数冲正与退费记录核查，"
+                            "但你的 SQL 条件缺少了对负数金额的筛选（如 `det_item_fee_sumamt < 0`），"
+                            "或者错误地写成了正数过滤/ABS绝对值！"
+                            "请确保精确筛选金额小于 0 的退费明细。"
+                        ),
+                        suggested_correction="请在 WHERE 条件中增加正向负数筛选: `det_item_fee_sumamt < 0`"
+                    )
+
+            # 零发现合规基线检查 (ZERO_FINDINGS_BASELINE)
+            elif intent.archetype == AuditArchetype.ZERO_FINDINGS_BASELINE:
+                return ReflectionResult(
+                    needs_retry=False,
+                    diagnostic_feedback="【合规零发现】排查规则完成扫描，未发现违规记录，属于正常合规事实。"
+                )
+
         # 4. 常规查询零发现属于合规事实，放行
         return ReflectionResult(needs_retry=False)

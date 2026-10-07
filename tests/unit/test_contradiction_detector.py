@@ -65,3 +65,44 @@ def test_handles_empty_or_invalid_sql_gracefully():
     """测试用例 6: 空 SQL 或语法碎片不应导致崩溃"""
     assert ContradictionDetector.detect("") is None
     assert ContradictionDetector.detect("   ") is None
+
+def test_detects_numeric_range_inversion_contradiction():
+    """测试用例 7: 数值区间倒置恒假 (det_item_fee_sumamt > 1000 AND det_item_fee_sumamt < 100)"""
+    sql = """
+    SELECT * FROM fqz_fymx_test 
+    WHERE det_item_fee_sumamt > 1000 AND det_item_fee_sumamt < 100
+    """
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "det_item_fee_sumamt"
+    assert "区间" in violation.message or "矛盾" in violation.message
+
+def test_detects_null_contradiction():
+    """测试用例 8: 空值与非空直接矛盾 (psn_no IS NULL AND psn_no IS NOT NULL)"""
+    sql = """
+    SELECT * FROM fqz_fymx_test 
+    WHERE psn_no IS NULL AND psn_no IS NOT NULL
+    """
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "psn_no"
+    assert "空值" in violation.message or "矛盾" in violation.message
+
+def test_detects_in_list_and_conflicting_equality():
+    """测试用例 9: IN 列表与单值互斥 (gend IN ('1') AND gend = '2')"""
+    sql = """
+    SELECT * FROM fqz_fymx_test 
+    WHERE gend IN ('1') AND gend = '2'
+    """
+    violation = ContradictionDetector.detect(sql)
+    assert violation is not None
+    assert violation.column.lower() == "gend"
+
+def test_passes_valid_numeric_range():
+    """测试用例 10: 正常有效区间 (det_item_fee_sumamt >= 100 AND det_item_fee_sumamt <= 1000) 应当顺利放行"""
+    sql = """
+    SELECT * FROM fqz_fymx_test 
+    WHERE det_item_fee_sumamt >= 100 AND det_item_fee_sumamt <= 1000
+    """
+    assert ContradictionDetector.detect(sql) is None
+
