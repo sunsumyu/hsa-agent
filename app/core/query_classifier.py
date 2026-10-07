@@ -46,7 +46,7 @@ class QueryClassifier:
         return patterns
 
     def classify(self, query: str) -> QueryType:
-        """根据查询文本返回问题类型，指导后续分析流向"""
+        """根据查询文本返回问题类型，指导后续分析流向 (Matt Pocock Deep Module)"""
         if not query:
             return QueryType.THRESHOLD_FILTER
             
@@ -58,31 +58,51 @@ class QueryClassifier:
                 logger.info(f"🚦 [QueryClassifier] 问题分类: {QueryType.TOP_N} (命中的关键词: '{kw}')")
                 return QueryType.TOP_N
 
-        # 2. 匹配 RANKING
+        # 2. 结合 ArchetypeRegistry 领域任务原型 (Locality for Maintainers)
+        try:
+            from app.core.registry.archetype_registry import archetype_registry, ArchetypeCategory
+            primary_arch = archetype_registry.get_primary_archetype(query_lower)
+            if primary_arch:
+                if primary_arch.category == ArchetypeCategory.RANKING:
+                    logger.info(f"🚦 [QueryClassifier] 命中领域任务原型 RANKING -> {QueryType.RANKING}")
+                    return QueryType.RANKING
+                elif primary_arch.category == ArchetypeCategory.RECONCILIATION:
+                    logger.info(f"🚦 [QueryClassifier] 命中领域任务原型 RECONCILIATION -> {QueryType.AGGREGATION}")
+                    return QueryType.AGGREGATION
+                elif primary_arch.category == ArchetypeCategory.INVENTORY:
+                    if any(w in query_lower for w in ["多少", "几个", "数量", "统计", "count"]):
+                        logger.info(f"🚦 [QueryClassifier] 命中领域任务原型 INVENTORY -> {QueryType.COUNT_BASED}")
+                        return QueryType.COUNT_BASED
+                    logger.info(f"🚦 [QueryClassifier] 命中领域任务原型 INVENTORY -> {QueryType.AGGREGATION}")
+                    return QueryType.AGGREGATION
+        except Exception as e:
+            logger.debug(f"[QueryClassifier] 原型查询类型判断跳过: {e}")
+
+        # 3. 匹配 RANKING
         for kw in self.patterns.get("RANKING", []):
             if kw in query_lower:
                 logger.info(f"🚦 [QueryClassifier] 问题分类: {QueryType.RANKING} (命中的关键词: '{kw}')")
                 return QueryType.RANKING
 
-        # 3. 匹配 AGGREGATION
+        # 4. 匹配 AGGREGATION
         for kw in self.patterns.get("AGGREGATION", []):
             if kw in query_lower:
                 logger.info(f"🚦 [QueryClassifier] 问题分类: {QueryType.AGGREGATION} (命中的关键词: '{kw}')")
                 return QueryType.AGGREGATION
 
-        # 4. 匹配 COMPARISON
+        # 5. 匹配 COMPARISON
         for kw in self.patterns.get("COMPARISON", []):
             if kw in query_lower:
                 logger.info(f"🚦 [QueryClassifier] 问题分类: {QueryType.COMPARISON} (命中的关键词: '{kw}')")
                 return QueryType.COMPARISON
 
-        # 5. 匹配 COUNT_BASED
+        # 6. 匹配 COUNT_BASED
         for kw in self.patterns.get("COUNT_BASED", []):
             if kw in query_lower:
                 logger.info(f"🚦 [QueryClassifier] 问题分类: {QueryType.COUNT_BASED} (命中的关键词: '{kw}')")
                 return QueryType.COUNT_BASED
 
-        # 6. 默认匹配 THRESHOLD_FILTER
+        # 7. 默认匹配 THRESHOLD_FILTER
         for kw in self.patterns.get("THRESHOLD_FILTER", []):
             if kw in query_lower:
                 logger.info(f"🚦 [QueryClassifier] 问题分类: {QueryType.THRESHOLD_FILTER} (命中的关键词: '{kw}')")
@@ -93,3 +113,4 @@ class QueryClassifier:
 
 # 单例导出
 query_classifier = QueryClassifier()
+

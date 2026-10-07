@@ -211,10 +211,15 @@ class QualityGate:
         sql_upper = sql.upper().strip()
         question_lower = (original_question or "").lower()
         
-        # 规则1: RANKING 查询 + 不必要的基线
-        ranking_keywords = ["排名", "最高", "前", "top"]
+        # 领域任务原型解析 (基于 ArchetypeRegistry 单一事实源)
+        from app.core.registry.archetype_registry import archetype_registry, ArchetypeCategory
+        matched_archetypes = archetype_registry.match_archetypes(question_lower)
+
+        # 规则1: RANKING 原型查询 + 不必要的基线计算
         baseline_keywords = ["QUANTILE", "PERCENTILE", "AVG(", "MEDIAN(", "STDDEV("]
-        is_ranking_query = any(kw in question_lower for kw in ranking_keywords)
+        is_ranking_query = any(arch.category == ArchetypeCategory.RANKING for arch in matched_archetypes)
+        if not is_ranking_query:
+            is_ranking_query = any(kw in question_lower for kw in ["排名", "最高", "前", "top"])
         has_baseline = any(kw in sql_upper for kw in baseline_keywords)
         
         if is_ranking_query and has_baseline and "OVER" not in sql_upper and "GROUP BY" not in sql_upper:
@@ -225,11 +230,9 @@ class QualityGate:
             return {"passed": True, "error": None, "warnings": warnings}
 
         # 规则2: [Task Archetype Guard] 领域任务原型不变式守卫 (基于 ArchetypeRegistry)
-        from app.core.registry.archetype_registry import archetype_registry
         has_group_by = "GROUP BY" in sql_upper
         has_limit = "LIMIT " in sql_upper or "LIMIT\n" in sql_upper or "LIMIT\t" in sql_upper
 
-        matched_archetypes = archetype_registry.match_archetypes(question_lower)
         for arch in matched_archetypes:
             if arch.forbid_raw_limit and has_limit and not has_group_by:
                 err_msg = arch.enforcement_hint or f"本任务为【{arch.display_name}】任务，必须使用 GROUP BY 进行全量统计，严禁对明细流水施加 LIMIT 采样！"

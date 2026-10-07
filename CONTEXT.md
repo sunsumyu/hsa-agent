@@ -92,6 +92,13 @@
 - **定义**：任何属性如果被同时赋予标量等值（`col = V`）与数值/时间上下界（`col > L` 或 `col < U`），或被施加允许集合与排除集合（`col IN (...) AND col NOT IN (...)`），必须满足形式化代数相容性。
 - **治理铁律**：由 `ContradictionDetector` 执行静态 AST 数理判定，当等值违反下界/上界，或 IN 允许列表被 NOT IN 完全排除时，在物理执行前执行 100% 形式化拦截，杜绝暗中返回空集导致的推理中毒。
 
+### 2.12 领域原型深度收敛与场景外围深模块化 (Archetype Locality & Deep Module Consolidation)
+- **定义**：遵循 Matt Pocock 深模块原则（Codebase Design），消除霰弹式修改（Shotgun Surgery）。所有审计任务原型（`AuditArchetype`）、目标表映射、强约束提示统一由 `ArchetypeRegistry` 作为单一事实源收敛。
+- **架构接缝与高杠杆**：
+  - `SceneTableSelector` 内部深度融合 `ArchetypeRegistry`，其接缝方法 `get_enforcement_hint(query)` 在提供底层物理表 schema 指引的同时，自动注入任务原型的结构不变式（如伴随缺失子查询要求、手术分解自连接要求、药贩子参保人聚合要求），调用端（`CoderAgent`, `ContextBuilder`）一次调用即可获得极高杠杆保护。
+  - `QueryClassifier` 与 `QualityGate` 统一通过 `ArchetypeRegistry` 获取领域原型范畴，彻底摒弃调用端散落的浅层硬编码关键词列表。
+
+
 
 
 

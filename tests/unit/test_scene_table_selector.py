@@ -136,6 +136,43 @@ class TestSceneTableSelector:
         primary, tables = selector.select_tables(query)
         assert primary == "fqz_drug_mcs_info_list"
 
+    def test_enforcement_hint_synthesizes_missing_companion_archetype(self):
+        """[Matt Pocock Deep Module] 伴随缺失场景应同时生成物理表指引与领域原型结构守卫"""
+        selector = SceneTableSelector()
+        query = "核查未做手术收取麻醉费用的违规就诊明细"
+        hint = selector.get_enforcement_hint(query)
+        assert hint is not None
+        assert "fqz_fymx_test" in hint
+        assert "伴随依赖缺失核查" in hint
+        assert "子查询 (`NOT IN / NOT EXISTS`)" in hint
+
+    def test_enforcement_hint_synthesizes_split_billing_archetype(self):
+        """[Matt Pocock Deep Module] 手术分解场景应注入自连接与跨行聚合守卫"""
+        selector = SceneTableSelector()
+        query = "核查主手术与子步骤分解收费违规行为"
+        hint = selector.get_enforcement_hint(query)
+        assert hint is not None
+        assert "手术分解与套收计费核查" in hint
+        assert "自连接 JOIN 或分组计数" in hint
+
+    def test_enforcement_hint_synthesizes_drug_resale_archetype(self):
+        """[Matt Pocock Deep Module] 药贩子套现场景应注入参保人聚合与禁LIMIT采样守卫"""
+        selector = SceneTableSelector()
+        query = "核查药贩子高频跨机构倒药套现网络"
+        hint = selector.get_enforcement_hint(query)
+        assert hint is not None
+        assert "药贩子套现与频繁异常购药网络" in hint
+        assert "GROUP BY psn_no" in hint
+
+    def test_enforcement_hint_synthesizes_reconciliation_archetype(self):
+        """[Matt Pocock Deep Module] 资金对账任务应注入宏观对账禁LIMIT采样守卫"""
+        selector = SceneTableSelector()
+        query = "请对2024年1月的医保基金结算数据进行日结对账，检查资金是否存在差异"
+        hint = selector.get_enforcement_hint(query)
+        assert hint is not None
+        assert "资金对账与宏观汇总" in hint
+        assert "全量聚合统计" in hint
+
 
 class TestSceneTableSelectorIntegration:
     """集成测试 - 与 SchemaRegistry 集成"""

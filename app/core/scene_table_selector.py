@@ -55,21 +55,37 @@ class SceneTableSelector:
         self._relation_graph = self._load_relation_graph()
 
     def _load_mapping(self) -> dict:
-        """从 schema_registry 加载场景映射 (遵守公开接缝)"""
+        """从 schema_registry 加载场景映射并与 ArchetypeRegistry 领域知识库自动内聚融合"""
+        mapping = {}
         try:
             entries = schema_registry.get_scene_table_mapping()
-            mapping = {}
             for entry in entries:
                 table = entry.get("table")
                 scenes = entry.get("scenes", [])
                 if table and scenes:
-                    mapping[table] = scenes
-            if mapping:
-                logger.info(f"[SceneTableSelector] 加载场景映射: {len(mapping)} 表")
-                return mapping
+                    mapping[table] = list(scenes)
         except Exception as e:
             logger.warning(f"[SceneTableSelector] 加载失败，使用兜底映射: {e}")
-        return self.FALLBACK_MAPPING
+
+        if not mapping:
+            mapping = {k: list(v) for k, v in self.FALLBACK_MAPPING.items()}
+
+        # 领域内聚 (Locality for Maintainers)：将 ArchetypeRegistry 的原型关键词注入对应物理表
+        try:
+            from app.core.registry.archetype_registry import archetype_registry
+            for arch in archetype_registry._archetypes:
+                for t in arch.target_tables:
+                    if t not in mapping:
+                        mapping[t] = []
+                    for kw in arch.keywords:
+                        if kw not in mapping[t]:
+                            mapping[t].append(kw)
+        except Exception as e:
+            logger.debug(f"[SceneTableSelector] 注入原型关键词跳过: {e}")
+
+        if mapping:
+            logger.info(f"[SceneTableSelector] 加载场景映射: {len(mapping)} 表")
+        return mapping
 
     def _load_relation_graph(self) -> dict:
         """从 schema_registry 加载表间关联图谱 (遵守公开接缝)"""
@@ -130,10 +146,13 @@ class SceneTableSelector:
         return primary, all_tables
 
     def get_enforcement_hint(self, user_query: str) -> Optional[str]:
-        """生成表选择提示语，用于 Prompt 注入"""
+        """
+        生成综合物理表选择与领域原型强约束提示语，用于 Prompt 注入 (Matt Pocock Deep Module)
+        """
         primary, _ = self.select_tables(user_query)
+        table_hint = None
         if primary == "fqz_fymx_test":
-            return """
+            table_hint = """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
 根据场景关键词检测，建议使用 `fqz_fymx_test` 表。
 
@@ -151,25 +170,42 @@ class SceneTableSelector:
 注意：以上仅为表选择指引，SQL 查询模式请根据审计方法论和用户原始问题自行决定，不要照搬历史 SQL 模板。
 """
         elif primary == "fqz_all_yy_yd":
-            return """
+            table_hint = """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
 当前审计任务涉及医疗机构/药店名录普查与统计，物理主表为 `fqz_all_yy_yd`。
 机构代码为 `fixmedins_code`，机构名称为 `fixmedins_name`，机构类型为 `medins_type`。
 严禁依据外部预训练常识输出，必须直接执行 SQL 统计！
 """
         elif primary == "fqz_admdvs":
-            return """
+            table_hint = """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
 当前任务涉及医保行政区划字典与层级，物理主表为 `fqz_admdvs`。
 区划代码为 `admdvs_code`，区划名称为 `admdvs_name`。
 """
         elif primary == "fqz_drug_mcs_info_list":
-            return """
+            table_hint = """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
 当前任务涉及医保药品目录与药品特征分类，物理主表为 `fqz_drug_mcs_info_list`。
 药品代码为 `med_list_code`，药品通用名/商品名为 `drug_prodname` / `genname_codg`。
 """
-        return None
+
+        # 结合 ArchetypeRegistry 领域任务原型的不变式约束 (Locality & Leverage)
+        from app.core.registry.archetype_registry import archetype_registry
+        archetype_hints = []
+        for arch in archetype_registry.match_archetypes(user_query):
+            if arch.enforcement_hint:
+                archetype_hints.append(f"【🚨 {arch.display_name}结构守卫】\n{arch.enforcement_hint}")
+
+        if not table_hint and not archetype_hints:
+            return None
+
+        parts = []
+        if table_hint:
+            parts.append(table_hint.strip())
+        if archetype_hints:
+            parts.append("\n\n".join(archetype_hints))
+
+        return "\n\n".join(parts)
 
 
 # 模块级单例
