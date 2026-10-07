@@ -23,10 +23,10 @@ class ContradictionDetector:
     }
 
     @classmethod
-    def detect(cls, sql: str) -> Optional[ContradictionViolation]:
+    def detect(cls, sql: str, archetypes: Optional[List[Any]] = None) -> Optional[ContradictionViolation]:
         """
-        静态检测 SQL 中是否存在导致恒假空集的逻辑矛盾。
-        若发现矛盾，返回 ContradictionViolation；若合规，返回 None。
+        静态检测 SQL 中是否存在导致恒假空集的逻辑矛盾或违反领域任务原型的不变式。
+        若发现矛盾或违规，返回 ContradictionViolation；若合规，返回 None。
         """
         if not sql or not sql.strip():
             return None
@@ -42,16 +42,30 @@ class ContradictionDetector:
         if not parsed:
             return None
 
+        # 检查是否具备跨行关联机制 (JOIN、子查询、窗口函数或分组聚合)
+        has_cross_row = (
+            bool(parsed.find(exp.Join))
+            or len(list(parsed.find_all(exp.Select))) > 1
+            or bool(parsed.find(exp.Subquery))
+            or bool(parsed.find(exp.Window))
+            or (bool(parsed.find(exp.Group)) and bool(parsed.find(exp.Having)))
+        )
+
         # 遍历所有 WHERE 和 HAVING 子句
         for clause in parsed.find_all(exp.Where, exp.Having):
-            violation = cls._check_scope(clause.this)
+            violation = cls._check_scope(clause.this, has_cross_row=has_cross_row, archetypes=archetypes)
             if violation:
                 return violation
 
         return None
 
     @classmethod
-    def _check_scope(cls, root_node: exp.Expression) -> Optional[ContradictionViolation]:
+    def _check_scope(
+        cls,
+        root_node: exp.Expression,
+        has_cross_row: bool = False,
+        archetypes: Optional[List[Any]] = None
+    ) -> Optional[ContradictionViolation]:
         """
         提取 AND 连接的作用域，并分析各列上的谓词集合。
         """
@@ -60,12 +74,15 @@ class ContradictionDetector:
 
         # 扁平化顶层 AND 节点
         and_conjuncts = cls._flatten_and(root_node)
-        if len(and_conjuncts) < 2:
+        if len(and_conjuncts) < 1:
+            return None
+        if len(and_conjuncts) < 2 and not archetypes:
             return None
 
         # 按字段名归类谓词
         col_equalities: Dict[str, Set[str]] = {}
         col_inequalities: Dict[str, Set[str]] = {}
+        col_likes: Dict[str, Set[str]] = {}
         col_not_likes: Dict[str, Set[str]] = {}
         col_in_lists: Dict[str, Set[str]] = {}
         col_not_in_lists: Dict[str, Set[str]] = {}
@@ -87,6 +104,8 @@ class ContradictionDetector:
                 col_equalities.setdefault(col_name_lower, set()).add(val_obj)
             elif pred_type == "NEQ":
                 col_inequalities.setdefault(col_name_lower, set()).add(val_obj)
+            elif pred_type == "LIKE":
+                col_likes.setdefault(col_name_lower, set()).add(val_obj)
             elif pred_type == "NOT_LIKE":
                 base_val = val_obj.rstrip("%")
                 col_not_likes.setdefault(col_name_lower, set()).add(base_val)
@@ -237,6 +256,44 @@ class ContradictionDetector:
                         message=f"字段 `{col}` 的 IN 允许列表 {sorted(list(in_vals))} 已被 NOT IN 排除列表完全排除，导致恒假空集！",
                         conflicting_predicates=col_raw_predicates.get(col, [])
                     )
+
+        # 10. 领域任务原型守卫: 伴随依赖缺失核查中的单行伪排除反模式 (MISSING_COMPANION)
+        if archetypes and not has_cross_row:
+            arch_cats = {getattr(a, "category", a) for a in archetypes}
+            arch_cat_strs = {str(getattr(c, "value", c)) for c in arch_cats}
+
+            if "missing_companion" in arch_cat_strs:
+                # 检查是否存在对项目字段的单行排除 (NOT LIKE 或 !=)
+                for col in ("hilist_name", "item_name", "med_list_codg", "hilist_code"):
+                    if col in col_not_likes or col in col_inequalities:
+                        return ContradictionViolation(
+                            column=col,
+                            message=(
+                                "【伴随依赖缺失审计拦截】检测到单行伪排除反模式！"
+                                "排查“无前置项目收取伴随项目”（如无手术收麻醉费）必须在就诊/结算粒度（如 `setl_id`）"
+                                "通过子查询（`NOT IN (SELECT setl_id FROM ... WHERE hilist_name LIKE '%手术%')`）、"
+                                "`LEFT JOIN ... IS NULL` 或窗口聚合进行跨行核对，"
+                                f"严禁在单条明细记录的 WHERE 子句中直接施加伴随字段的否定排除（如 {col} NOT LIKE），"
+                                "否则将导致所有伴随明细全量误判为违规！"
+                            ),
+                            conflicting_predicates=col_raw_predicates.get(col, [])
+                        )
+
+            # 11. 领域任务原型守卫: 手术分解与套收计费单行多条件反模式 (SPLIT_BILLING)
+            if "split_billing" in arch_cat_strs:
+                # 检查是否存在对项目字段的单行多个互斥 LIKE 匹配
+                for col in ("hilist_name", "item_name", "med_list_codg", "hilist_code"):
+                    if len(col_likes.get(col, set())) >= 2:
+                        return ContradictionViolation(
+                            column=col,
+                            message=(
+                                f"【分解收费审计拦截】检测到同一单条明细记录上对项目字段 ({col}) 施加了多个互斥的 LIKE 匹配！"
+                                "单条流水记录的品名不可能同时包含不同手术/步骤名称。"
+                                "排查主干手术与子步骤分解收费，必须在就诊粒度（setl_id / mdtrt_id）通过自连接 JOIN、"
+                                f"子查询或 GROUP BY setl_id 统计项目种类，严禁在单条明细的 WHERE 中同时匹配多个项目！"
+                            ),
+                            conflicting_predicates=col_raw_predicates.get(col, [])
+                        )
 
         return None
 

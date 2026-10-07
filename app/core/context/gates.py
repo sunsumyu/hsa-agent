@@ -235,59 +235,14 @@ class QualityGate:
                 err_msg = arch.enforcement_hint or f"本任务为【{arch.display_name}】任务，必须使用 GROUP BY 进行全量统计，严禁对明细流水施加 LIMIT 采样！"
                 return {"passed": False, "error": err_msg, "warnings": warnings}
 
-        # 规则3: [Contradiction Guard] 静态 AST 恒假互斥防腐守卫
+        # 规则3: [Neuro-Symbolic Gate] 静态 AST 恒假互斥与领域任务原型不变式守卫 (Matt Pocock Deep Module)
         from app.core.guardrails.contradiction_detector import ContradictionDetector
-        violation = ContradictionDetector.detect(sql)
+        violation = ContradictionDetector.detect(sql, archetypes=matched_archetypes)
         if violation:
             err_msg = f"【静态语义恒假拦截】{violation.message} 冲突谓词: {violation.conflicting_predicates}"
             logger.warning(f"[Gate 2 Contradiction] {err_msg}")
             return {"passed": False, "error": err_msg, "warnings": warnings}
 
-        # 规则4: [Missing Companion Guard] 伴随依赖缺失单行伪排除反模式拦截
-        from app.core.registry.archetype_registry import ArchetypeCategory
-        if any(arch.category == ArchetypeCategory.MISSING_COMPANION for arch in matched_archetypes):
-            from_idx = sql_upper.find("FROM")
-            after_from = sql_upper[from_idx:] if from_idx != -1 else sql_upper
-            has_subquery = "SELECT" in after_from or "NOT IN (" in sql_upper or "NOT EXISTS (" in sql_upper
-            has_join = "JOIN" in sql_upper
-            has_window = "OVER" in sql_upper
-            has_group_agg = "GROUP BY" in sql_upper and "HAVING" in sql_upper
-            
-            if not (has_subquery or has_join or has_window or has_group_agg):
-                if "NOT LIKE" in sql_upper or "!=" in sql_upper or "<>" in sql_upper:
-                    err_msg = (
-                        "【伴随依赖缺失审计拦截】检测到单行伪排除反模式！"
-                        "排查“无前置项目收取伴随项目”（如无手术收麻醉费）必须在就诊/结算粒度（如 `setl_id`）"
-                        "通过子查询（`NOT IN (SELECT setl_id FROM ... WHERE hilist_name LIKE '%手术%')`）、"
-                        "`LEFT JOIN ... IS NULL` 或窗口聚合进行跨行核对，"
-                        "严禁在单条明细记录的 WHERE 子句中直接施加伴随字段的否定排除（如 hilist_name NOT LIKE），"
-                        "否则将导致所有伴随明细全量误判为违规！"
-                    )
-                    logger.warning(f"[Gate 2 Missing Companion] {err_msg}")
-                    return {"passed": False, "error": err_msg, "warnings": warnings}
-
-        # 规则5: [Split Billing Guard] 手术分解与套收计费单行多条件反模式拦截
-        if any(arch.category == ArchetypeCategory.SPLIT_BILLING for arch in matched_archetypes):
-            from_idx = sql_upper.find("FROM")
-            after_from = sql_upper[from_idx:] if from_idx != -1 else sql_upper
-            has_subquery = "SELECT" in after_from or "IN (" in sql_upper
-            has_join = "JOIN" in sql_upper
-            has_window = "OVER" in sql_upper
-            has_group_agg = "GROUP BY" in sql_upper and "HAVING" in sql_upper
-
-            if not (has_subquery or has_join or has_window or has_group_agg):
-                import re
-                like_matches = re.findall(r"hilist_name\s+(?:ILIKE|LIKE)\s+('[^']+')", sql, re.IGNORECASE)
-                if len(set(like_matches)) >= 2:
-                    err_msg = (
-                        "【分解收费审计拦截】检测到同一单条明细记录上对项目字段 (hilist_name) 施加了多个互斥的 LIKE 匹配！"
-                        "单条流水记录的品名不可能同时包含不同手术/步骤名称。"
-                        "排查主干手术与子步骤分解收费，必须在就诊粒度（setl_id / mdtrt_id）通过自连接 JOIN、"
-                        "子查询或 GROUP BY setl_id 统计项目种类，严禁在单条明细的 WHERE 中同时匹配多个项目！"
-                    )
-                    logger.warning(f"[Gate 2 Split Billing] {err_msg}")
-                    return {"passed": False, "error": err_msg, "warnings": warnings}
-        
         return {"passed": True, "error": None, "warnings": warnings}
 
     @staticmethod

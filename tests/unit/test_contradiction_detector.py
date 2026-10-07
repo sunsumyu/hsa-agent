@@ -170,5 +170,69 @@ def test_passes_valid_equality_within_bounds():
     sql = "SELECT * FROM fqz_fymx_test WHERE age = 25 AND age >= 18 AND age <= 60"
     assert ContradictionDetector.detect(sql) is None
 
+def test_detects_missing_companion_pseudo_exclusion_directly():
+    """测试用例 19 (Matt 深模块原则): 直接测试 ContradictionDetector 的伴随依赖缺失 AST 原型拦截"""
+    from app.core.registry.archetype_registry import ArchetypeCategory, AuditArchetype
+    arch = AuditArchetype(
+        category=ArchetypeCategory.MISSING_COMPANION,
+        name="missing_companion",
+        display_name="伴随依赖缺失",
+        keywords=()
+    )
+    bad_sql = "SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%麻醉%' AND hilist_name NOT LIKE '%手术%'"
+    violation = ContradictionDetector.detect(bad_sql, archetypes=[arch])
+    assert violation is not None
+    assert violation.column.lower() == "hilist_name"
+    assert "伴随依赖缺失" in violation.message or "单行伪排除" in violation.message
+
+def test_passes_missing_companion_with_cross_row_directly():
+    """测试用例 20: 具有跨行子查询的伴随依赖缺失查询应当直接放行"""
+    from app.core.registry.archetype_registry import ArchetypeCategory, AuditArchetype
+    arch = AuditArchetype(
+        category=ArchetypeCategory.MISSING_COMPANION,
+        name="missing_companion",
+        display_name="伴随依赖缺失",
+        keywords=()
+    )
+    good_sql = (
+        "SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%麻醉%' "
+        "AND setl_id NOT IN (SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%手术%')"
+    )
+    violation = ContradictionDetector.detect(good_sql, archetypes=[arch])
+    assert violation is None
+
+def test_detects_split_billing_multiple_likes_directly():
+    """测试用例 21: 直接测试 ContradictionDetector 对手术分解单行多项 LIKE 匹配的 AST 拦截"""
+    from app.core.registry.archetype_registry import ArchetypeCategory, AuditArchetype
+    arch = AuditArchetype(
+        category=ArchetypeCategory.SPLIT_BILLING,
+        name="split_billing",
+        display_name="手术分解收费",
+        keywords=()
+    )
+    bad_sql = "SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%切除术%' AND hilist_name LIKE '%引流术%'"
+    violation = ContradictionDetector.detect(bad_sql, archetypes=[arch])
+    assert violation is not None
+    assert violation.column.lower() == "hilist_name"
+    assert "分解收费" in violation.message
+
+def test_passes_split_billing_with_join_directly():
+    """测试用例 22: 自连接 JOIN 的手术分解查询应当直接放行"""
+    from app.core.registry.archetype_registry import ArchetypeCategory, AuditArchetype
+    arch = AuditArchetype(
+        category=ArchetypeCategory.SPLIT_BILLING,
+        name="split_billing",
+        display_name="手术分解收费",
+        keywords=()
+    )
+    good_sql = (
+        "SELECT t1.setl_id FROM fqz_fymx_test t1 "
+        "JOIN fqz_fymx_test t2 ON t1.setl_id = t2.setl_id "
+        "WHERE t1.hilist_name LIKE '%切除术%' AND t2.hilist_name LIKE '%引流术%'"
+    )
+    violation = ContradictionDetector.detect(good_sql, archetypes=[arch])
+    assert violation is None
+
+
 
 
