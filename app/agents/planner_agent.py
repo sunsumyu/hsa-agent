@@ -44,13 +44,32 @@ class AuditPlannerAgent:
         if not user_input:
             return {"error_log": "未获取到用户审计需求", "tasks": []}
 
-        # 1. 语义缓存检查 (Action Compression)
+        # 1. 语义缓存检查 (Action Compression - Matt Pocock 确定性接缝)
         with tracer.span("CACHE_CHECK", node="PLANNER") as span:
             from app.memory.semantic_memory import action_cache_manager
             disable_cache = os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true"
-            cached_plan = None if disable_cache else action_cache_manager.search(user_input)
+            cached_plan = None
+            if not disable_cache:
+                candidate = action_cache_manager.search(user_input)
+                if candidate:
+                    # 1. 检查版本指纹
+                    target_prompt_ver = "2.0"
+                    cached_prompt_ver = candidate.get("prompt_version")
+                    if cached_prompt_ver != target_prompt_ver:
+                        logger.info(f"🔄 [Planner] 缓存版本陈旧 ({cached_prompt_ver} != {target_prompt_ver})，跳过缓存")
+                    else:
+                        # 2. 检查运行时业务契约
+                        cached_sql = candidate.get("sql", "")
+                        sql_upper = cached_sql.upper()
+                        census_keywords = ["排查", "全量", "全市", "字典", "名录", "普查", "层级", "全部"]
+                        if any(kw in user_input for kw in census_keywords) and "LIMIT" in sql_upper:
+                            logger.warning(f"⚠️ [Planner] 全量排查任务拒绝带 LIMIT 的脏缓存，执行物理淘汰: {cached_sql[:50]}")
+                            action_cache_manager.evict(candidate.get("question", user_input))
+                        else:
+                            cached_plan = candidate
+
             if cached_plan:
-                logger.success("⚡ [Planner] 命中动作链缓存，实现毫秒级路径压缩")
+                logger.success("⚡ [Planner] 契约与指纹校验通过，命中动作链缓存")
                 span.set_result("命中经验缓存")
                 return {
                     "tasks": cached_plan.get("tasks", ["执行已验证的精准 SQL"]),

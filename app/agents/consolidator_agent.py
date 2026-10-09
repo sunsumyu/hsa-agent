@@ -47,11 +47,15 @@ class AuditConsolidatorAgent:
 
             logger.info(f"✨ [Consolidator] 正在为问题「{user_input[:15]}...」执行经验沉淀...")
 
-            # 3. 语义/缓存层 (旧版兼容)
+            # 3. 语义/缓存层 (旧版兼容，增加版本指纹)
             try:
                 experience_manager.save_audit_experience(tasks, sql)
                 if user_input:
-                    action_cache_manager.save(user_input, sql, tasks=tasks, methodology=methodology)
+                    current_fingerprint = {
+                        "prompt_version": "2.0",
+                        "schema_hash": "hsa_v2_core"
+                    }
+                    action_cache_manager.save(user_input, sql, tasks=tasks, methodology=methodology, fingerprint=current_fingerprint)
             except Exception as e:
                 logger.warning(f"兼容层保存失败: {e}")
 

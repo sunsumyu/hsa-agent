@@ -229,17 +229,18 @@ class AuditCoderAgent:
                 existing_tool_calls=raw_tc
             )
             response.tool_calls = normalized.tool_calls
-            if normalized.is_synthesized:
+            if normalized.is_synthesized and normalized.synthesized_sql:
                 logger.info(f"✨ [Coder Self-Healing] 协议网关自愈合成为工具调用: {normalized.synthesized_sql[:120]}...")
 
             if not getattr(response, "tool_calls", None):
                 history_sql = state.get("sql_history", [])
-                if not history_sql:
-                    logger.warning("🚨 [Coder Mandate] 模型首轮未触发工具调用且历史无 SQL，触发单刀直入强制执行...")
+                has_valid_execution = state.get("sql_validated", False) and bool(state.get("raw_data"))
+                if not has_valid_execution:
+                    logger.warning("🚨 [Coder Mandate] 模型未触发工具调用且历史无有效执行数据，触发单刀直入强制执行...")
                     from langchain_core.messages import HumanMessage
                     retry_prompt = list(prompt) + [
                         response,
-                        HumanMessage(content="【强制执行指令】你尚未物理执行任何 SQL 审计查询！严禁仅以自然语言文本回复或反问用户。当前系统已连接真实的 ClickHouse 数据库，所有数据均在库中，请立即调用 `execute_audit_sql` 工具执行对应的物理表查询获取真实统计数据！")
+                        HumanMessage(content="【强制执行指令】你尚未物理执行任何有效 SQL 审计查询！严禁仅以自然语言文本回复或反问用户。当前系统已连接真实的 ClickHouse 数据库，所有数据均在库中，请立即调用 `execute_audit_sql` 工具执行对应的物理表查询获取真实统计数据！")
                     ]
                     retry_response = await llm_provider.chat(
                         role="coder",
@@ -256,7 +257,7 @@ class AuditCoderAgent:
                         existing_tool_calls=retry_tc
                     )
                     retry_response.tool_calls = retry_norm.tool_calls
-                    if retry_norm.is_synthesized:
+                    if retry_norm.is_synthesized and retry_norm.synthesized_sql:
                         logger.info(f"✨ [Coder Self-Healing] 强制重试自愈合成为工具调用: {retry_norm.synthesized_sql[:120]}...")
                     if getattr(retry_response, "tool_calls", None):
                         response = retry_response
@@ -266,7 +267,8 @@ class AuditCoderAgent:
                 # [V178.10] 使用 state 中已累加的全量 sql_history，确保不丢失任何轮次的 SQL
                 history_sql = state.get("sql_history", [])
                 preserved_raw_data = state.get("raw_data", "")
-                logger.info(f"🔮 [DEBUG_SQL_DIRECT] history_sql from state: {history_sql}")
+                has_valid_execution = state.get("sql_validated", False) and bool(preserved_raw_data)
+                logger.info(f"🔮 [DEBUG_SQL_DIRECT] history_sql from state: {history_sql}, has_valid={has_valid_execution}")
                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] preserved_raw_data: {preserved_raw_data[:200]}...")
                 core_sql = ""
                 if history_sql:
@@ -280,7 +282,8 @@ class AuditCoderAgent:
                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] selected core_sql: {core_sql[:100]}...")
                 return {
                     "messages": [response],
-                    "error_log": None,
+                    "error_log": None if has_valid_execution else (state.get("error_log") or "模型本轮未生成可执行的审计 SQL"),
+                    "sql_validated": has_valid_execution,
                     "execution_trace": tracer.to_legacy_list(),
                     "sql_query": core_sql,
                     "sql_history": history_sql,  # [V178.10] 返回全量 sql_history，确保不丢失

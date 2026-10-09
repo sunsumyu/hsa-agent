@@ -61,7 +61,25 @@ class ToolEvidenceExtractor:
         self.max_chars = max_chars
 
     def truncate_data(self, data: Any) -> str:
-        """截断超长数据集防止上下文溢出"""
+        """截断超长数据集防止上下文溢出，结构化数据保持 JSON 语法完整"""
+        if isinstance(data, list):
+            # 结构化保全截断：保留前 N 条完整记录，避免破坏 JSON 结构
+            total_items = len(data)
+            sampled = []
+            current_chars = 2  # '[' and ']'
+            for item in data:
+                item_str = json.dumps(item, ensure_ascii=False, default=str)
+                if current_chars + len(item_str) > self.max_chars and sampled:
+                    break
+                sampled.append(item)
+                current_chars += len(item_str) + 2
+            
+            if len(sampled) < total_items:
+                logger.warning(f"🚨 [State Safeguard] 结果集过大 ({total_items} 条)，结构化保留前 {len(sampled)} 条记录。")
+            return json.dumps(sampled, ensure_ascii=False, default=str)
+        elif isinstance(data, dict):
+            return json.dumps(data, ensure_ascii=False, default=str)
+
         data_str = str(data)
         if len(data_str) > self.max_chars:
             logger.warning(f"🚨 [State Safeguard] 结果集过大 ({len(data_str)} chars)，自动截断至 {self.max_chars} chars。")

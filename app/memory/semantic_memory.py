@@ -6,7 +6,7 @@ from datetime import datetime
 
 # [V112.0] 物理稳定性加固：防止 Windows 下多重 OpenMP 运行时冲突导致的 forrtl 错误
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-from typing import List, Dict, Any, Optional, Sequence, Union
+from typing import List, Dict, Any, Optional, Sequence, Union, Callable
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage
 from langchain_community.vectorstores import FAISS
@@ -238,12 +238,36 @@ class ActionCacheManager:
                 return json.load(f)
         return []
 
-    def save(self, question: str, sql: str, tasks: List[str] = None, methodology: str = ""):
-        if not self.engine: return
+    def _persist(self):
+        """物理持久化缓存至本地 JSON 文件"""
+        try:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
+                json.dump(self.cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"持久化缓存失败: {e}")
+
+    def evict(self, question: str):
+        """[V222.0] 物理淘汰指定脏缓存"""
         q_strip = question.strip()
-        if q_strip in self.lookup: return
-            
-        emb = self.engine.embed_query(question)
+        if q_strip in self.lookup:
+            del self.lookup[q_strip]
+        self.cache = [item for item in self.cache if item.get("question", "").strip() != q_strip]
+        self._persist()
+        try:
+            redis_manager.delete(f"action_cache:{q_strip}")
+        except Exception:
+            pass
+        logger.warning(f"🧹 [Action Cache] 契约断言未通过，已物理淘汰脏缓存: {question[:20]}...")
+
+    def save(self, question: str, sql: str, tasks: List[str] = None, methodology: str = "", fingerprint: Optional[Dict[str, str]] = None):
+        q_strip = question.strip()
+        emb = None
+        if self._engine or cognitive_memory_manager._local_engine:
+            try:
+                emb = self.engine.embed_query(question) if self.engine else None
+            except Exception:
+                emb = None
+        
         item = {
             "question": question, 
             "sql": sql, 
@@ -252,14 +276,73 @@ class ActionCacheManager:
             "embedding": emb,
             "timestamp": datetime.now().isoformat()
         }
+        if fingerprint:
+            item.update(fingerprint)
+
+        # 覆盖或追加
+        self.cache = [entry for entry in self.cache if entry.get("question", "").strip() != q_strip]
         self.cache.append(item)
         self.lookup[q_strip] = item
-        with open(self.cache_file, "w", encoding="utf-8") as f:
-            json.dump(self.cache, f, ensure_ascii=False)
+        self._persist()
         
         # [V140.2] 分布式同步
-        redis_manager.set_cache(f"action_cache:{q_strip}", json.dumps(item), expire_hours=48)
-        logger.success(f"💾 [Action Cache] 已固化审计动作链至分布式缓存: {question[:15]}...")
+        try:
+            redis_manager.set_cache(f"action_cache:{q_strip}", json.dumps(item), expire_hours=48)
+        except Exception:
+            pass
+        logger.success(f"💾 [Action Cache] 已固化审计动作链至缓存 (含指纹): {question[:15]}...")
+
+    def get_or_compute(
+        self,
+        question: str,
+        fingerprint: Optional[Dict[str, str]] = None,
+        validator: Optional[Callable[[str], bool]] = None,
+        computer: Optional[Callable[[], str]] = None
+    ) -> str:
+        """
+        [Matt Pocock 确定性接缝] 带指纹契约与自愈淘汰机制的缓存存取
+        1. 查找缓存：根据 question 匹配已有记录；
+        2. 指纹校验：比对 prompt_version、schema_hash，不一致则判定为 Miss；
+        3. 契约校验：若传入 validator(sql) 返回 False（例如全量普查场景含有 LIMIT），
+           则立即从内存 lookup、cache 列表及本地 json 文件中物理淘汰（Evict）该脏记录；
+        4. 自愈计算：Cache Miss 或 Evict 时，调用 computer() 生成全新正确 SQL，
+           绑定新指纹并写回持久化存储；
+        5. 返回有效结果。
+        """
+        q_strip = question.strip()
+        matched_item = self.lookup.get(q_strip)
+
+        if matched_item:
+            # 1. 校验指纹
+            fingerprint_valid = True
+            if fingerprint:
+                for k, v in fingerprint.items():
+                    if matched_item.get(k) != v:
+                        fingerprint_valid = False
+                        logger.info(f"🔄 [Action Cache] 缓存指纹不匹配 ({k}: {matched_item.get(k)} != {v})，判定失效")
+                        break
+
+            if fingerprint_valid:
+                cached_sql = matched_item.get("sql", "")
+                # 2. 校验读取时契约
+                if validator:
+                    if validator(cached_sql):
+                        return cached_sql
+                    else:
+                        logger.warning(f"⚠️ [Action Cache] 缓存内容未通过运行时契约校验，执行淘汰: {question[:20]}")
+                        self.evict(question)
+                else:
+                    return cached_sql
+
+        # 3. Cache Miss 或被淘汰，触发自愈计算
+        if computer:
+            logger.info(f"⚙️ [Action Cache] 触发重新生成: {question[:20]}")
+            computed_sql = computer()
+            self.save(question=question, sql=computed_sql, fingerprint=fingerprint)
+            return computed_sql
+
+        return ""
+
 
     def search(self, question: str, threshold: float = 0.85) -> Optional[Dict[str, Any]]:
         """[V159.0] 高性能语义搜索：返回完整的动作链载荷"""
