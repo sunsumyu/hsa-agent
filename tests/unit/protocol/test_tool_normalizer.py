@@ -74,3 +74,43 @@ def test_normalizer_aliases_hallucinated_tool_names():
     assert result.tool_calls[0]["name"] == "write_audit_note"
     assert result.tool_calls[1]["name"] == "read_all_audit_notes"
 
+def test_normalizer_rejects_conversational_text_with_sql_keywords():
+    """验证包含 SELECT / FROM 关键字的自然语言解释绝不会被误合成工具调用"""
+    conversational = (
+        "## 审计执行状态：受阻，本轮未产出可采信结论\n\n"
+        "1. 我先后提交了结构探查等 SELECT 语句。\n"
+        "2. 工具全部返回 status: ERROR。从 fqz_all_yy_yd 读取的结构不一致。\n"
+        "判定：工具层当前不可用，其返回不具备证据资格。"
+    )
+    result = ToolResponseNormalizer.normalize(conversational)
+    assert len(result.tool_calls) == 0
+    assert result.synthesized_sql is None
+    assert result.is_synthesized is False
+
+def test_normalizer_handles_dsml_schema_lookup():
+    raw = '''明白，我先同步真实物理蓝图，确认 `fqz_fymx_test` 及主表的真实字段。
+<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="lookup_medical_schema">
+<｜｜DSML｜｜ parameter name="table_name" string="true">fqz_fymx_test</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>'''
+    result = ToolResponseNormalizer.normalize(raw)
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0]["name"] == "lookup_medical_schema"
+    assert result.tool_calls[0]["args"] == {"table_name": "fqz_fymx_test"}
+    assert result.is_synthesized is True
+
+def test_normalizer_handles_dsml_execute_audit_sql_invoke():
+    raw = '''<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="execute_audit_sql">
+<｜｜DSML｜｜ parameter name="sql" string="true">SELECT count() FROM fqz_fymx_test WHERE det_item_fee_sumamt < 0</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>'''
+    result = ToolResponseNormalizer.normalize(raw)
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0]["name"] == "execute_audit_sql"
+    assert result.tool_calls[0]["args"]["sql"] == "SELECT count() FROM fqz_fymx_test WHERE det_item_fee_sumamt < 0"
+    assert result.synthesized_sql == "SELECT count() FROM fqz_fymx_test WHERE det_item_fee_sumamt < 0"
+    assert result.is_synthesized is True
+
+
