@@ -169,7 +169,18 @@ class AuditReportRenderer:
                         elif isinstance(raw_data_list_chunk, dict):
                             raw_data_list.append(raw_data_list_chunk)
                 except Exception as e:
-                    logger.warning(f"数据分片解析彻底失败: {e}")
+                    # [V221.0] 防御性自愈：若整串因末尾暴力截断报错，尝试逐个提取完备的对象，防止全量清零
+                    recovered = False
+                    for obj_match in re.finditer(r'\{[^{}]*\}', chunk):
+                        try:
+                            obj_candidate = ast.literal_eval(obj_match.group(0))
+                            if isinstance(obj_candidate, dict):
+                                raw_data_list.append(obj_candidate)
+                                recovered = True
+                        except Exception:
+                            continue
+                    if not recovered:
+                        logger.warning(f"数据分片解析彻底失败: {e}")
         
         # 3. 类型强转 (ISO 格式化)
         def _coerce(row):
@@ -179,7 +190,7 @@ class AuditReportRenderer:
                 for k, v in row.items()
             }
         
-        return [_coerce(r) for r in raw_data_list[:50]] if isinstance(raw_data_list, list) else []
+        return [_coerce(r) for r in raw_data_list] if isinstance(raw_data_list, list) else []
 
     def prepare_conclusion_prompt(
         self,
@@ -193,21 +204,22 @@ class AuditReportRenderer:
     ) -> str:
         """构造事实强制对齐且逻辑白盒化之 LLM Prompt [V180.0]"""
         
-        # 针对零发现场景的防御性引导
-        if hard_count == 0:
+        # 针对受限执行与零发现场景的防御性引导 (Fail-Closed & Truth Alignment)
+        if is_restricted:
             defense_instruction = (
-                "5. **【强制】时序防守深度与边缘场景数据支撑型声明**：当前核查结果为 0 条。你**绝对禁止**仅进行空洞的“推测性免责声明”。你**必须**使用真实数据事实支撑你的零异常结论（如：已物理穿透扫描底层主结算库，在当前静态时间周期内覆盖了全量结算记录，经逻辑校验均无违规行为）。并在结论的末尾追加一段高度专业的关于时间切分边缘场景的防御性审查声明，话术应与以下模板高度对齐，必须提供具体的数据分析支撑话术：\n"
-                "   “本次核查对主结算表进行了物理级全量穿透扫描，在当前指定的静态时间周期域内，最终判定异常命中记录为 0 条，证明当前区间内结算高度合规。但鉴于医疗机构欺诈常采用跨自然年/自然月边界的【骑缝购药】或利用微秒级【高频拆单】等动态手段规避静态周期聚合风控，本次基于自然周期的确定性结论存在局部时序截断风险。为保障基金绝对安全，建议后续叠加 连续 30天滑动窗口 (Sliding Window) 滚动探测及 单笔交易时间戳差值 (Lag Diff) 物理对碰分析，以增强对边缘跨期拆单的召回与监测能力。”\n"
+                "5. **【Fail-Closed 物理异常声明】（绝对红线）**：当前核查由于物理规则拦截、底层语法异常或超时导致执行受限，"
+                "你必须客观阐述执行受限的技术事实与物理断面，严禁推断业务合规！\n"
+            )
+            data_summary = "【执行受限】由于规则或执行异常，未取得有效物理查询结果集。"
+        elif hard_count == 0:
+            defense_instruction = (
+                "5. **【时序防守深度与数据支撑型声明】**：当前核查物理过滤结果为 0 条。你必须客观陈述物理全量过滤未发现违规记录的事实，并在结论末尾追加关于时序边缘场景的防御性建议。\n"
                 "   同时，你必须明确区分“全局扫描基数”与“违规命中数”。格式必须为：“本次核查对底层表进行了全量扫描，在当前严苛的审计特征过滤条件下，最终命中的违规异常明细记录为 0 条。”\n"
             )
+            data_summary = f"本次核查对底层表进行了全量扫描，最终命中的违规异常明细记录为 0 条，涉及金额 ¥{hard_sum:,.2f}"
         else:
             defense_instruction = f"5. **事实强制对齐**：当前发现 {hard_count} 条记录，结论必须明确指出违规嫌疑，严禁敷衍。\n"
-
-        data_summary = (
-            f"本次核查对底层表进行了全量扫描（扫描基数 > 0，发现违规记录 0 条），涉及金额 ¥{hard_sum:,.2f}"
-            if hard_count == 0 else
-            f"共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}"
-        )
+            data_summary = f"共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}"
 
         return (
             "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~400 字的「核查结论」。\n"

@@ -55,16 +55,16 @@ class SQLLogicValidator:
         config = SQLLogicValidator._load_governance_config()
         rules = config.get("interception_rules", [])
 
-        # 1. 基础架构校验 (主键聚合拦截)
+        # 1. 基础架构校验 (主键聚合拦截：仅针对系统底层单行流水物理 ID，如 MSG_ID, REC_ID)
         if "GROUP BY" in sql_upper and any(agg in sql_upper for agg in ["COUNT", "SUM", "AVG"]):
-            forbidden_pks = ["SETL_ID", "MSG_ID", "REC_ID"]
+            forbidden_pks = ["MSG_ID", "REC_ID"]
             gb_clause = sql_upper.split("GROUP BY")[-1]
             for delim in ["ORDER BY", "HAVING", "LIMIT", "WINDOW", "SETTINGS", ";"]:
                 if delim in gb_clause:
                     gb_clause = gb_clause.split(delim)[0]
             for pk in forbidden_pks:
                 if re.search(rf"\b{pk}\b", gb_clause):
-                    return False, f"❌ [架构拦截] 聚合查询禁止按唯一 ID `{pk}` 分组。"
+                    return False, f"❌ [架构拦截] 聚合查询禁止按唯一流水记录 ID `{pk}` 分组。"
 
         # 2. 动态业务规则拦截 (从 YAML 加载)
         for rule in rules:

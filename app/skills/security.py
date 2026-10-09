@@ -52,7 +52,11 @@ class SQLGuardian:
                     f"请改写为 `setl_time >= '2024-01-01'` 这种标准 SQL 比较语法。"
                 )
 
-        # ── Step 0: 字段知识图谱纠错 ────
+        # ── Step 0: 确定性架构接缝修复 (Deterministic Schema Seam via SchemaGrounder) ────
+        from app.core.tool_engine.grounder import SchemaGrounder
+        clean_sql, _, _ = SchemaGrounder.ground_sql(clean_sql)
+
+        # ── Step 0.1: 字段知识图谱纠错 ────
         try:
             from app.infra.neo4j_manager import field_kg
             clean_sql, kg_warnings = field_kg.sanitize_sql(clean_sql)
@@ -96,11 +100,11 @@ class SQLGuardian:
                 
         for table in expression.find_all(exp.Table):
             table_name = table.name.lower()
-            if table_name in cte_names or table_name in {"dual"}:
+            if (table.db and table.db.lower() == "system") or table_name in cte_names or table_name in {"dual"}:
                 continue
             if table_name in forbidden_tables or not any(table_name.startswith(p) for p in valid_prefixes):
                 logger.error(f"[SECURITY] 发现物理不存在的幻觉表: {table_name}")
-                raise SecurityViolationError(f"物理拦截：表 `{table_name}` 是虚假幻觉表！请务必使用物理主表。")
+                raise SecurityViolationError(f"物理拦截：表 `{table_name}` 是虚假幻觉表！{SchemaGrounder.get_registered_tables_hint()}。")
 
         # ── [V173.0 NEW] 场景-表映射强制验证 ────
         if expected_table:

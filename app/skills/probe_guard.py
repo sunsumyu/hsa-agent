@@ -95,7 +95,7 @@ def is_probe_query(sql: str) -> bool:
             logger.debug(f"[ProbeGuard] avg/sum with GROUP BY/JOIN: {sql[:80]}...")
             return False
         else:
-            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "IN(", "AND", "OR", "MULTISEARCH"]):
+            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "IN(", "AND", "OR", "MULTISEARCH", ">", "<", "=", "!=", ">=", "<=", "BETWEEN"]):
                 logger.debug(f"[ProbeGuard] aggregate with business filters: {sql[:80]}...")
                 return False
             logger.debug(f"[ProbeGuard] pure avg/sum baseline: {sql[:80]}...")
@@ -107,12 +107,17 @@ def is_probe_query(sql: str) -> bool:
 
     # 2. Simple count/boundary probes (no JOIN, no GROUP BY)
     if "JOIN" not in sql_upper and "GROUP BY" not in sql_upper:
+        # [V210.1] 目录/维表盘点豁免：纯目录/机构/字典表（药品目录、定点医药机构、行政区划）的盘点统计不属于算力探针
+        is_catalog_query = any(tbl in sql_upper for tbl in ["FQZ_DRUG_MCS_INFO_LIST", "FQZ_ALL_YY_YD", "FQZ_ADMDVS"]) and not any(trx in sql_upper for trx in ["FQZ_GZ_JZSJ", "FQZ_FYMX"])
+        if is_catalog_query:
+            return False
+
         if any(x in sql_upper for x in ["COUNT(*)", "COUNT (", "MIN(SETL_TIME)", "MAX(SETL_TIME)", "MIN (SETL_TIME)", "MAX (SETL_TIME)"]):
-            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "AND", "OR", "MULTISEARCH"]):
+            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "IN(", "AND", "OR", "MULTISEARCH", "=", ">", "<", "!=", ">=", "<=", "BETWEEN"]):
                 return False
             return True
         if sql_upper.startswith("SELECT COUNT"):
-            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "AND", "OR", "MULTISEARCH"]):
+            if "WHERE" in sql_upper and any(term in sql_upper for term in ["LIKE", "IN (", "IN(", "AND", "OR", "MULTISEARCH", "=", ">", "<", "!=", ">=", "<=", "BETWEEN"]):
                 return False
             return True
 

@@ -256,9 +256,9 @@ class ModelManager:
             llm, m_id = self.get_adaptive_llm(model_id=model_override)
         else:
             role_cfg = endpoint_pool_manager.roles.get(role)
-            # [V134.2 优化] 支持角色绑定特定端点，实现测试环境的“确定性路径”
-            if role_cfg and hasattr(role_cfg, "preferred_endpoint") and role_cfg.preferred_endpoint:
-                logger.info(f"📍 [Role-Binding] 角色 {role} 强制绑定端点: {role_cfg.preferred_endpoint}")
+            # [V134.2 优化] 支持角色绑定特定端点；若重试/熔断则降级到算力池轮询
+            if role_cfg and hasattr(role_cfg, "preferred_endpoint") and role_cfg.preferred_endpoint and retry_count == 0:
+                logger.info(f"📍 [Role-Binding] 角色 {role} 优先绑定端点: {role_cfg.preferred_endpoint}")
                 llm, m_id = self.get_adaptive_llm(model_id=role_cfg.preferred_endpoint)
             else:
                 pool_id = role_cfg.pool if role_cfg else "tier-1-chat"

@@ -5,7 +5,8 @@ from app.skills.schema_injector import schema_injector
 from app.infra.neo4j_manager import field_kg
 
 class MedicalSchemaInput(BaseModel):
-    keywords: str = Field(description="The keywords or intent to search for medical database fields (e.g., '重复住院', '总金额').")
+    keywords: Optional[str] = Field(default="", description="The keywords or intent to search for medical database fields (e.g., '重复住院', '总金额').")
+    table_name: Optional[str] = Field(default="", description="Optional target physical table name (e.g., 'fqz_fymx_test').")
 
 class MedicalSchemaSkill(BaseTool):
     name: str = "lookup_medical_schema"
@@ -16,10 +17,10 @@ class MedicalSchemaSkill(BaseTool):
     )
     args_schema: Type[BaseModel] = MedicalSchemaInput
 
-    def _run(self, keywords: str) -> str:
+    def _run(self, keywords: str = "", table_name: str = "") -> str:
         # [V90.5] 分区分层注入：根据关键词分类定表，返回目标表全量 DDL
-        # 1. 全量 DDL（主力信息源）
-        ddl_hint = schema_injector.inject(user_question=keywords, include_warning=True)
+        target = table_name or keywords or ""
+        ddl_hint = schema_injector.inject(user_question=target, include_warning=True)
 
         # 2. 知识图谱补充（别名映射、禁用字段提示）
         kg_hint = field_kg.format_for_prompt(max_fields=6)
@@ -32,5 +33,6 @@ class MedicalSchemaSkill(BaseTool):
         combined = f"{ddl_hint}\n\n{kg_hint}"
         return combined
 
-    async def _arun(self, keywords: str) -> str:
-        return self._run(keywords)
+    async def _arun(self, keywords: str = "", table_name: str = "") -> str:
+        return self._run(keywords=keywords, table_name=table_name)
+

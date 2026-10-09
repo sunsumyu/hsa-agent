@@ -140,15 +140,15 @@ def check_audit_governance() -> Dict[str, Any]:
     }
 
 @tool
-def lookup_medical_schema(keywords: str) -> str:
+def lookup_medical_schema(keywords: str = "", table_name: str = "") -> str:
     """
     [V118.1] 检索医疗数据库物理 Schema。
-    根据业务关键词（如'重复收费'、'总金额'）查询对应的物理表字段、DDL 结构及审计合规禁区。
+    根据业务关键词或表名（如 'fqz_fymx_test'、'重复收费'、'总金额'）查询对应的物理表字段、DDL 结构及审计合规禁区。
     写 SQL 前必须调用此工具以防止字段幻觉和物理拦截。
     """
     from app.skills.medical_schema import MedicalSchemaSkill
     skill = MedicalSchemaSkill()
-    return skill._run(keywords)
+    return skill._run(keywords=keywords, table_name=table_name)
 
 # ──────────────────────────────────────────────────────────
 # 规则引擎与专家知识 (M3 成果落地)

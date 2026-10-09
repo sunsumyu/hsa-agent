@@ -53,17 +53,17 @@ class LLMProvider:
         retry_count = state.get("retry_count", 0) if state else 0
         session_id = state.get("session_id", "default") if state else "default"
 
-        # 1. 获取 LLM 实例与实际模型 ID
+        # 1. 获取 LLM 实例与实际模型 ID (初始寻址使用 retry_count=0 保证首选端点绑定有效)
         llm, actual_model_id = await model_manager.get_llm_by_role(
             role, 
-            retry_count=retry_count, 
+            retry_count=0, 
             config=config
         )
 
         # 2. 运行工业级 GSSC 上下文治理流水线 (Context Engineering)
         # 仅针对需要大量外部事实经验与结构表结构的核心审计角色
         if role in ["planner_heavy", "coder", "reporter"] and state:
-            user_input = self._extract_last_user_message(messages)
+            user_input = (state.get("metadata") or {}).get("user_question") or self._extract_last_user_message(messages)
             if user_input:
                 from app.infra.endpoint_pool_manager import endpoint_pool_manager
                 from app.core.schemas import RoleConfigV2
@@ -74,9 +74,10 @@ class LLMProvider:
                 if not role_cfg:
                     role_cfg = RoleConfigV2(pool="tier-1-chat", max_input_tokens=4000, max_output_tokens=2000)
                 
-                # 构建元数据
-                target_tables = state.get("target_tables", [])
-                metadata = {"target_tables": target_tables}
+                # 构建元数据：保留已有的 metadata，不丢失 semantic_alignment 等上下文
+                metadata = dict(state.get("metadata") or {})
+                if "target_tables" not in metadata and state.get("target_tables"):
+                    metadata["target_tables"] = state.get("target_tables")
                 
                 # 动态生成黄金上下文事实层消息流 (并完成 Gather -> Select -> Structure -> Compress)
                 builder = ContextBuilder(role_cfg)

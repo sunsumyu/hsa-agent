@@ -155,6 +155,17 @@ class ContextBuilder:
                 if enforcement_hint:
                     metadata["scene_enforcement"] = enforcement_hint
                     metadata["expected_table"] = primary_table
+                    packets.append(ContextPacket(
+                        content=f"<table_selection_policy>\n{enforcement_hint.strip()}\n</table_selection_policy>",
+                        relevance_score=1.0,
+                        metadata={"type": "scene_enforcement", "priority": "high"}
+                    ))
+            elif "scene_enforcement" in metadata:
+                packets.append(ContextPacket(
+                    content=f"<table_selection_policy>\n{metadata['scene_enforcement'].strip()}\n</table_selection_policy>",
+                    relevance_score=1.0,
+                    metadata={"type": "scene_enforcement", "priority": "high"}
+                ))
 
             tables = target_tables if target_tables else [schema_registry.get_main_table()]
             for table in tables:
@@ -286,11 +297,13 @@ class ContextBuilder:
         system_msgs = [m for m in original_history if m.type == 'system']
         chat_msgs = [m for m in original_history if m.type != 'system']
         
-        schemas, memories, notes, alignments = [], [], [], []
+        schemas, memories, notes, alignments, enforcements = [], [], [], [], []
 
         for p in selected:
             t = p.metadata.get("type")
-            if t == "clickhouse_schema":
+            if t == "scene_enforcement":
+                enforcements.append(p.content)
+            elif t == "clickhouse_schema":
                 schemas.append(p.content)
             elif t == "cognitive_memory":
                 memories.append(p.content)
@@ -302,7 +315,14 @@ class ContextBuilder:
         # 构建干净的事实载荷 XML
         xml_payload = "<context_engineering_payload>\n"
         
-        # [V215.1] DDL 物理 Schema 关系到 SQL 编写的生死，必须置于 XML 最前，避免被 Compaction 截断丢失
+        # [V220.0] 强制表选择与字段契约置于最首位，消除幻觉表与错误列名
+        if enforcements:
+            xml_payload += "  <mandatory_table_enforcements>\n"
+            for enf in enforcements:
+                xml_payload += f"    {enf}\n"
+            xml_payload += "  </mandatory_table_enforcements>\n"
+        
+        # [V215.1] DDL 物理 Schema 关系到 SQL 编写的生死，必须置于 XML 前部，避免被 Compaction 截断丢失
         if schemas:
             xml_payload += "  <database_schema_context>\n"
             for schema in schemas:

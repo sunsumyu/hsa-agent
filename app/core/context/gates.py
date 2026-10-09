@@ -232,9 +232,11 @@ class QualityGate:
         # 规则2: [Task Archetype Guard] 领域任务原型不变式守卫 (基于 ArchetypeRegistry)
         has_group_by = "GROUP BY" in sql_upper
         has_limit = "LIMIT " in sql_upper or "LIMIT\n" in sql_upper or "LIMIT\t" in sql_upper
+        # 标量聚合 (如 SELECT count(*), sum(...) FROM t) 本身即为全量计算，不属于对明细流水的抽样截断
+        is_scalar_agg = any(fn in sql_upper for fn in ["COUNT(", "COUNT (", "SUM(", "SUM (", "AVG(", "AVG ("])
 
         for arch in matched_archetypes:
-            if arch.forbid_raw_limit and has_limit and not has_group_by:
+            if arch.forbid_raw_limit and has_limit and not has_group_by and not is_scalar_agg:
                 err_msg = arch.enforcement_hint or f"本任务为【{arch.display_name}】任务，必须使用 GROUP BY 进行全量统计，严禁对明细流水施加 LIMIT 采样！"
                 return {"passed": False, "error": err_msg, "warnings": warnings}
 

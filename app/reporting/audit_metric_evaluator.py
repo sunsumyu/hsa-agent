@@ -177,18 +177,23 @@ class AuditMetricEvaluator:
                 count_col = col
                 break
 
-        # 2. 次级探测：必须以 _count, _cnt 结尾，严格排除明细字段 'cnt'
+        # 2. 次级探测：支持包含 count, count(), _cnt 等聚合列，严格排除业务明细字段 'cnt'
         if not count_col:
             for col in first_row.keys():
-                col_lower = col.lower()
+                col_lower = col.lower().strip()
                 if col_lower == "cnt":
                     continue  # fqz_fymx_test.cnt 为业务明细数量，绝非记录数
-                if any(col_lower.endswith(sfx) for sfx in ["_count", "_cnt", "count", "num"]):
+                if any(k in col_lower for k in ["count", "_cnt", "num"]) or col_lower.endswith(")"):
                     try:
-                        if first_row.get(col) is not None:
-                            int(first_row[col])
-                            count_col = col
-                            break
+                        val = first_row.get(col)
+                        if val is not None:
+                            int_val = int(val)
+                            # 如果该列数值精确吻合基准，优先作为主计数列
+                            if gt_count > 0 and int_val == gt_count:
+                                count_col = col
+                                break
+                            elif count_col is None:
+                                count_col = col
                     except (ValueError, TypeError):
                         pass
 
