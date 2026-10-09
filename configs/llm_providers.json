@@ -75,14 +75,14 @@
     "model_name": "qwen2.5-72b-instruct"
   },
   "deepseek-v3": {
-    "provider": "dashscope",
-    "model_name": "deepseek-v3.2",
+    "provider": "anthropic",
+    "model_name": "deepseek-v3",
     "priority": 0,
     "tools_support": true,
     "temperature": 0.3,
-    "api_key_env": "BAILIAN_API_KEY",
-    "base_url_env": "BAILIAN_BASE_URL",
-    "daily_quota": 5000000,
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url_env": "ANTHROPIC_BASE_URL",
+    "daily_quota": 10000000,
     "input_cost_1k": 0.002,
     "output_cost_1k": 0.008
   },
@@ -252,5 +252,53 @@
     "daily_quota": 1000000,
     "input_cost_1k": 1e-05,
     "output_cost_1k": 0.0
+  },
+  "glm-5.3": {
+    "provider": "anthropic",
+    "model_name": "glm-5.3",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.2,
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url_env": "ANTHROPIC_BASE_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.001,
+    "output_cost_1k": 0.002
+  },
+  "glm-5.3-flash": {
+    "provider": "anthropic",
+    "model_name": "glm-5.3-flash",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.2,
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url_env": "ANTHROPIC_BASE_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.0005,
+    "output_cost_1k": 0.001
+  },
+  "qwen3.8-max": {
+    "provider": "anthropic",
+    "model_name": "qwen3.8-max",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.1,
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url_env": "ANTHROPIC_BASE_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.002,
+    "output_cost_1k": 0.006
+  },
+  "kimi-k3": {
+    "provider": "anthropic",
+    "model_name": "kimi-k3",
+    "priority": 0,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url_env": "ANTHROPIC_BASE_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.0015,
+    "output_cost_1k": 0.004
   }
 }
