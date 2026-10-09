@@ -121,8 +121,11 @@ class SceneTableSelector:
         scores = {}
         for table, keywords in self._mapping.items():
             score = sum(1 for kw in keywords if kw.lower() in query_lower)
+            if table.lower() in query_lower:
+                score += 50  # 显式指定物理表名，拥有绝对优先权 (Matt Pocock Deep Module Invariance)
             if score > 0:
                 scores[table] = score
+
 
         # 结合 ArchetypeRegistry 领域原型增强匹配加权
         from app.core.registry.archetype_registry import archetype_registry
@@ -173,14 +176,19 @@ class SceneTableSelector:
             table_hint = """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
 当前审计任务涉及医疗机构/药店名录普查与统计，物理主表为 `fqz_all_yy_yd`。
-机构代码为 `fixmedins_code`，机构名称为 `fixmedins_name`，机构类型为 `medins_type`。
-严禁依据外部预训练常识输出，必须直接执行 SQL 统计！
+机构代码为 `fixmedins_code`，机构名称为 `fixmedins_name`，机构类型为 `medins_type`，有效标志为 `vali_flag`。
+严禁使用 `yyjg_zzml`、`medical_institutions` 等任何虚构表名！必须直接在 `fqz_all_yy_yd` 上执行 SQL 统计！
 """
         elif primary == "fqz_admdvs":
             table_hint = """
 【⚠️ 物理表选择指引 (TABLE SELECTION HINT)】
 当前任务涉及医保行政区划字典与层级，物理主表为 `fqz_admdvs`。
-区划代码为 `admdvs_code`，区划名称为 `admdvs_name`。
+真实物理字段如下：
+- 区划代码为 `admdvs`
+- 区划名称为 `admdvs_name`
+- 区划层级为 `admdvs_lv`（1=国家级, 2=省级, 3=市级, 4=区县级）
+- 上级区划代码为 `prnt_admdvs`
+严禁探查 system.tables 或捏造外部表名！直接在 `fqz_admdvs` 上按 `admdvs_lv` 分组统计即可。
 """
         elif primary == "fqz_drug_mcs_info_list":
             table_hint = """

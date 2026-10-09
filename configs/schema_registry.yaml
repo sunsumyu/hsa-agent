@@ -33,6 +33,11 @@ scene_table_mapping:
     table: "fqz_drug_mcs_info_list"
     reason: "国家医保药品/诊疗目录限制信息库。"
 
+  - scenes: ["fqz_cgzhan_hosp_fee", "宏观费用", "月度费用", "机构费用统计", "医院费用统计", "医疗总费用金额", "月度明细", "宏观资金"]
+    table: "fqz_cgzhan_hosp_fee"
+    reason: "定点医药机构宏观费用统计表，包含各定点机构月度医疗总费用(sum_medfee_sumamt)、统筹基金(sum_hifp_pay)及总记录数。"
+
+
 # ── [V178.10] 表间关联图谱 (Table Relation Graph) ─────────────────────
 # 当主表被激活时，自动拉入关联的字典表/辅助表
 table_relation_graph:
@@ -171,8 +176,6 @@ tables:
       - { name: med_type,             type: String,   desc: "医疗类型编码 (11=门诊统筹, 21=住院, 53_04=特病门诊)" }
       - { name: fee_ocur_time,        type: String,   desc: "费用发生时间 (String)" }
       - { name: setl_time,            type: String,   desc: "结算时间 (String, 尾部带 \\t, 必须用 toDateTime(substring(trim(setl_time),1,19)) 转换)" }
-      - { name: chfpdr_name,          type: String,   desc: "医生姓名" }
-      - { name: dise_name,            type: String,   desc: "诊断名称" }
 
   - name: fqz_all_yy_yd
     alias: 定点医药机构名录表
@@ -211,3 +214,30 @@ tables:
       - { name: prodentp_name,         type: String,   desc: "生产企业名称" }
       - { name: nat_hi_druglist_memo,  type: String,   desc: "医保目录限制用药备注" }
       - { name: vali_flag,             type: String,   desc: "有效标志" }
+
+  - name: fqz_cgzhan_hosp_fee
+    alias: 定点医药机构费用宏观月报统计表
+    description: 定点医药机构宏观费用统计表，包含月度医疗总费用与基金支付汇总
+    fields:
+      - { name: timetype,              type: String,   desc: "时间统计维度 (monthly/quarterly/halfyearly/yearly)" }
+      - { name: fixmedins_code,        type: String,   desc: "定点医药机构编号" }
+      - { name: fixmedins_name,        type: String,   desc: "定点医药机构名称" }
+      - { name: med_chrgitm_type,      type: String,   desc: "医疗收费项目类型" }
+      - { name: setl_time,             type: String,   desc: "结算统计月份/时间 (YYYY-MM)" }
+      - { name: medinslv,              type: String,   desc: "机构级别 (1=一级, 2=二级, 3=三级)" }
+      - { name: hosp_natu_code,        type: String,   desc: "医院性质编码 (1=公立, 2=民营)" }
+      - { name: fix_blng_admdvs,       type: String,   desc: "机构归属医保区划" }
+      - { name: fix_blng_admdvs_city,  type: String,   desc: "机构归属地市" }
+      - { name: sum_medfee_sumamt,     type: Float64,  desc: "医疗总费用发生金额合计 (元)" }
+      - { name: sum_hifp_pay,          type: Float64,  desc: "统筹基金支出合计 (元)" }
+      - { name: sum_fund_pay_sumamt,   type: Float64,  desc: "医保基金支付总额合计 (元)" }
+      - { name: sum_acct_pay,          type: Float64,  desc: "个人账户支出合计 (元)" }
+      - { name: sum_cash_payamt,       type: Float64,  desc: "现金支付合计 (元)" }
+      - { name: sum_item_sumamt,       type: Float64,  desc: "项目费用合计" }
+      - { name: sum_item_claa_amt,     type: Float64,  desc: "甲类项目费用合计" }
+      - { name: sum_item_clab_amt,     type: Float64,  desc: "乙类项目费用合计" }
+      - { name: sum_item_ownpay_amt,   type: Float64,  desc: "自费项目费用合计" }
+      - { name: sum_item_oth_amt,      type: Float64,  desc: "其他费用合计" }
+      - { name: pct_item_sumamt,       type: Float64,  desc: "项目费用占比" }
+      - { name: etl_create_time,       type: Date,     desc: "ETL抽取创建时间" }
+
