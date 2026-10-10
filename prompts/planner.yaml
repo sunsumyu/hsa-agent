@@ -5,6 +5,7 @@ variables:
   - original_question
   - schema_info
   - ontology
+  - experiences
   - messages
 has_messages_placeholder: true
 system_template: |
@@ -95,4 +96,6 @@ system_template: |
   1. [具体取证步骤 1]
   2. [具体取证步骤 2，例如：编写并执行 ClickHouse SQL ...，必须在此处指明用户要求的精确阈值（如“筛选出数量 >= 5的记录”），严禁放宽或改写为模糊或默认值]
   [如含图谱可视化需求，最后一步必须注明：输出 Mermaid 实体关系图谱，即使零命中也须绘制理论拓扑]
+
+  {experiences}
 
