@@ -125,5 +125,32 @@ def test_fix_chinese_and_special_aliases():
     assert '"费用明细总笔数"' in cleaned or '`费用明细总笔数`' in cleaned
     assert '"医疗费用累计金额"' in cleaned or '`医疗费用累计金额`' in cleaned
 
+def test_fix_literal_alias_shadowing():
+    """验证字面量别名遮蔽物理列时，自动将 WHERE 中的物理列补齐表限定符"""
+    raw_sql = "SELECT '999999999999' AS psn_no, count(*) AS fee_record_count FROM fqz_fymx_test WHERE psn_no = '999999999999'"
+    cleaned = ToolResponseNormalizer.clean_sql_ast(raw_sql)
+    assert "fqz_fymx_test.psn_no = '999999999999'" in cleaned
+    assert "'999999999999' AS psn_no" in cleaned
+
+def test_normalizer_handles_markdown_in_dsml_parameter():
+    """验证 DSML parameter 中被 ```sql 包裹的代码块能够被正确剥离并解析为合法工具调用"""
+    raw = '''<｜｜DSML｜｜ calls>
+<｜｜DSML｜｜ invoke name="execute_audit_sql">
+<｜｜DSML｜｜ parameter name="sql" string="true">
+```sql
+SELECT '999999999999' AS psn_no, count(*) AS fee_record_count, sum(det_item_fee_sumamt) AS total_fee_amount FROM fqz_fymx_test WHERE psn_no = '999999999999'
+```
+</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>'''
+    result = ToolResponseNormalizer.normalize(raw)
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0]["name"] == "execute_audit_sql"
+    sql = result.tool_calls[0]["args"]["sql"]
+    assert "```" not in sql
+    assert "fqz_fymx_test.psn_no = '999999999999'" in sql
+    assert result.synthesized_sql == sql
+    assert result.is_synthesized is True
+
 
 

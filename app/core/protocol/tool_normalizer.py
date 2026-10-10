@@ -25,7 +25,13 @@ class ToolResponseNormalizer:
            (例如 min(setl_time) AS setl_time ... WHERE setl_time >= ...)，
            ClickHouse 会将 WHERE 中的列解析为别名（即聚合函数），从而抛出非法聚合报错。
            本方法将同名聚合别名自动重命名为 {agg_func}_{col_name}。
-        2. 修复 ClickHouse 中文/非 ASCII 标识符裸别名语法错误 (Code: 62 SYNTAX_ERROR)：
+        2. 修复 ClickHouse 字面量/非纯列别名遮蔽物理列问题 (查询结果全表匹配/逻辑失效)：
+           当 SELECT 中的别名与 WHERE/PREWHERE 子句中使用的物理列名同名，
+           且该别名并非原列直接透传 (例如 '999999999999' AS psn_no ... WHERE psn_no = '999999999999')，
+           ClickHouse 会在 WHERE 中用别名表达式替代物理列计算，导致条件恒真 (如 '999999999999' = '999999999999')。
+           自愈策略：为 WHERE/PREWHERE 中的未限定物理列补齐表限定符 (如 fqz_fymx_test.psn_no)，
+           或在无明确表名时将别名安全重命名为 target_{col_name}。
+        3. 修复 ClickHouse 中文/非 ASCII 标识符裸别名语法错误 (Code: 62 SYNTAX_ERROR)：
            大模型生成的裸中文别名 (例如 AS 费用明细总笔数) 会导致词法分析器报错。
            自动为其包裹引号转化为安全标识符。
         """
@@ -41,17 +47,39 @@ class ToolResponseNormalizer:
             for select_node in parsed.find_all(exp.Select):
                 where_node = select_node.args.get("where")
                 prewhere_node = select_node.args.get("prewhere")
+                if not where_node and not prewhere_node:
+                    for expr in select_node.selects:
+                        if isinstance(expr, exp.Alias):
+                            raw_alias = expr.alias
+                            needs_quote = any(ord(c) > 127 for c in raw_alias) or not raw_alias.isidentifier()
+                            current_ident = expr.args.get("alias")
+                            is_already_quoted = getattr(current_ident, "quoted", False)
+                            if needs_quote and not is_already_quoted:
+                                expr.set("alias", exp.to_identifier(raw_alias, quoted=True))
+                                modified = True
+                    continue
+
+                from_node = select_node.args.get("from_") or select_node.args.get("from")
+                table_target = None
+                if from_node:
+                    tbl = from_node.find(exp.Table)
+                    if tbl:
+                        table_target = tbl.alias or tbl.name
+
                 filter_cols = set()
                 for fn in (where_node, prewhere_node):
                     if fn:
                         for col in fn.find_all(exp.Column):
                             filter_cols.add(col.name.lower())
 
+                shadow_cols_to_qualify = set()
                 for expr in select_node.selects:
                     if isinstance(expr, exp.Alias):
                         raw_alias = expr.alias
                         alias_name = raw_alias.lower()
                         has_agg = bool(list(expr.find_all(exp.AggFunc)))
+                        is_literal = isinstance(expr.this, exp.Literal)
+                        is_not_plain_col = not (isinstance(expr.this, exp.Column) and expr.this.name.lower() == alias_name)
 
                         target_alias = raw_alias
                         if filter_cols and has_agg and (alias_name in filter_cols):
@@ -59,6 +87,12 @@ class ToolResponseNormalizer:
                             func_name = agg_node.key.lower() if hasattr(agg_node, "key") else "agg"
                             target_alias = f"{func_name}_{raw_alias}"
                             modified = True
+                        elif filter_cols and (alias_name in filter_cols) and (is_literal or is_not_plain_col):
+                            if table_target:
+                                shadow_cols_to_qualify.add(alias_name)
+                            else:
+                                target_alias = f"target_{raw_alias}"
+                                modified = True
 
                         needs_quote = any(ord(c) > 127 for c in target_alias) or not target_alias.isidentifier()
                         current_ident = expr.args.get("alias")
@@ -70,6 +104,14 @@ class ToolResponseNormalizer:
                             expr.set("alias", exp.to_identifier(target_alias))
                             modified = True
 
+                if shadow_cols_to_qualify and table_target:
+                    for fn in (where_node, prewhere_node):
+                        if fn:
+                            for col in fn.find_all(exp.Column):
+                                if not col.table and col.name.lower() in shadow_cols_to_qualify:
+                                    col.set("table", exp.to_identifier(table_target))
+                                    modified = True
+
             if modified:
                 return parsed.sql(dialect="clickhouse")
             return sql
@@ -78,25 +120,31 @@ class ToolResponseNormalizer:
 
     @classmethod
     def clean_sql_ast(cls, sql: str) -> str:
-        """剥离尾部残留的 XML/DSML 闭合标签与 JSON 结构杂质，严格保护 SQL 单引号字面量并修复别名遮蔽"""
+        """剥离首尾残留的 Markdown 代码块、XML/DSML 闭合标签与 JSON 结构杂质，严格保护 SQL 单引号字面量并修复别名遮蔽"""
         if not sql:
             return ""
 
-        cand = sql.strip().rstrip(';； \n\r\t')
-        # 0. 若已完全符合 ClickHouse 语法，保留原有单引号，只剔除分号空白并自愈别名遮蔽
+        cand = sql.strip()
+        # 0. 前置剥除可能包裹的 markdown 代码块标签 (```sql ... ``` 或 ``` ... ```)
+        cand = re.sub(r'^```(?:sql)?\s*', '', cand, flags=re.IGNORECASE).strip()
+        cand = re.sub(r'\s*```+$', '', cand).strip()
+        cand = cand.rstrip(';； \n\r\t')
+
+        # 1. 若已完全符合 ClickHouse 语法，保留原有单引号，只剔除分号空白并自愈别名遮蔽
         try:
             sqlglot.parse_one(cand, read="clickhouse")
             return cls.fix_shadowing_aliases(cand)
         except Exception:
             pass
 
-        # 1. 切除任何 XML / DSML / HTML 结束标签及其后内容 (匹配任意形式的 </...>)
+        # 2. 切除任何 XML / DSML / HTML 结束标签及其后内容 (匹配任意形式的 </...>)
         cand = re.split(r'</[^>]+>', cand)[0].strip()
 
-        # 2. 剥除末尾残留的 markdown 标记
-        cand = re.sub(r'```+$', '', cand).strip()
+        # 3. 剥除首尾残留的 markdown 标记
+        cand = re.sub(r'^```(?:sql)?\s*', '', cand, flags=re.IGNORECASE).strip()
+        cand = re.sub(r'\s*```+$', '', cand).strip()
 
-        # 3. 剥除末尾残留的 JSON 闭合符号与转义杂质 (严禁剥除 SQL 字符串字面量单引号 ')
+        # 4. 剥除末尾残留的 JSON 闭合符号与转义杂质 (严禁剥除 SQL 字符串字面量单引号 ')
         cand = re.sub(r'["\}\]\s]+$', '', cand).strip().rstrip(';； \n\r\t')
 
         # 再次尝试 AST 解析确认
@@ -106,7 +154,7 @@ class ToolResponseNormalizer:
         except Exception:
             pass
 
-        # 4. 容错修复：如果单引号不成对（奇数个），尝试修复末尾单引号
+        # 5. 容错修复：如果单引号不成对（奇数个），尝试修复末尾单引号
         if cand.count("'") % 2 == 1:
             if cand.endswith("'"):
                 cand_fixed = cand[:-1].strip()
