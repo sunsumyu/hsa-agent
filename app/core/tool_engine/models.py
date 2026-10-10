@@ -44,7 +44,7 @@ class AuditMedicalRuleInput(BaseModel):
     """执行静态规则引擎计算的标准入参规范。"""
     rule_id: str = Field(
         ...,
-        description="预定义的规则 ID (如 QA-CUST-26, MALE_IUD, GENDER_CONFLICT 等)。"
+        description="预定义的规则 ID (如 HIGH_FREQ_DRUG_PURCHASE, MALE_IUD, GENDER_CONFLICT 等)。"
     )
     extra_filters: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
