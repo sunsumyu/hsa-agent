@@ -173,6 +173,7 @@ tables:
       - { name: det_item_fee_sumamt,  type: Float64,  desc: "明细费用总额" }
       - { name: fixmedins_code,       type: String,   desc: "医疗机构编码" }
       - { name: fixmedins_name,       type: String,   desc: "医疗机构名称 (真实中文，可 LIKE 匹配)" }
+      - { name: insutype,             type: String,   desc: "险种类型编码 (310=职工基本医疗保险, 390=城乡居民基本医疗保险)" }
       - { name: med_type,             type: String,   desc: "医疗类型编码 (11=门诊统筹, 21=住院, 53_04=特病门诊)" }
       - { name: fee_ocur_time,        type: String,   desc: "费用发生时间 (String)" }
       - { name: setl_time,            type: String,   desc: "结算时间 (String, 尾部带 \\t, 必须用 toDateTime(substring(trim(setl_time),1,19)) 转换)" }

@@ -46,6 +46,7 @@ system_template: |
   你必须输出一段"修正指令"，告诉 Coder 下一步该如何调整。
   - 首先检查是否存在任务漂移，如有则优先纠偏回原始问题。
   - **重点提示**: 如果是因为字段/表名臆造导致的失败，请强制 Coder 先运行 `lookup_medical_schema` 工具重新同步物理蓝图。
+  - **严禁自创臆造字段**：严禁 Critic 自创假字段（如 jgmc, fyje 等）编写业务 SQL 示范！当报错涉及字段不存在或列名错误时，你的唯一有效纠偏指令是要求 Coder 查阅 Schema 或调用 `lookup_medical_schema(table_name)` 确认真实列名。
 
   ## 执行上下文：
   原始审计问题：{original_question}

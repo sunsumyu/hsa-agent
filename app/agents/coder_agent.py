@@ -451,7 +451,9 @@ class AuditCoderAgent:
                 # 刚性物理拦截：如果尚未执行过核心 SQL，禁止执行任何探针探路 SQL
                 if tc["name"] == "execute_audit_sql" and not has_run_core:
                     sql_arg = args.get("sql", "")
-                    if self._is_probe_query(sql_arg):
+                    # [Matt Pocock 深模块接缝] 元数据探查 (DESC/SHOW COLUMNS) 由 sql_tools 底层单一事实源秒级自愈，绝不拦截！
+                    is_meta_probe = bool(re.match(r"^\s*(?:DESC|DESCRIBE(?:\s+TABLE)?|SHOW\s+COLUMNS\s+FROM)\s+", (sql_arg or "").strip(), re.IGNORECASE))
+                    if not is_meta_probe and self._is_probe_query(sql_arg):
                         logger.warning(f"🚨 [PROBE_INTERCEPT] 物理算力引擎拦截了前置探针 SQL: {sql_arg}")
                         return tc, {
                             "status": "ERROR",

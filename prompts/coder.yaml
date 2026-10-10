@@ -52,12 +52,12 @@ system_template: |
   1. **实体表名**：所有真实业务表必须以 `fqz_` 开头。
   2. **主表引用指南**：
      - **就诊/结算主记录（住院/药店汇总）**：使用 `fqz_gz_jzsj_all_ql`（213万行，`med_type` 全部为 `定点药店购药`，`setl_time` 为 DateTime 类型，`fixmedins_name` 为加密混淆字段，无法用中文 LIKE 匹配）。
-     - **费用明细/门诊明细**：使用 `fqz_fymx_test`（包含乡镇卫生院/村卫生室的真实中文机构名与药品名）。⚠️ **必读**：(a) `setl_time` 是 String 类型且每条末尾带 `\t`，**必须**用 `toDateTime(substring(trim(setl_time),1,19))` 转换，严禁直接 `toDateTime(setl_time)`；(b) `med_type` 是数字编码（`11`=门诊统筹，`21`=住院，`53_04`=特病门诊），严禁用中文过滤；(c) 该表与 `fqz_gz_jzsj_all_ql` 的 `setl_id` **完全不重叠**，严禁两表 JOIN。
+     - **费用明细/门诊明细**：使用 `fqz_fymx_test`（机构名称列 `fixmedins_name` 为真实明文中文，支持 LIKE 匹配医院及卫生院；药品项目为 `hilist_name`；明细金额为 `det_item_fee_sumamt`）。⚠️ **必读**：(a) `setl_time` 是 String 类型且每条末尾带 `\t`，**必须**用 `toDateTime(substring(trim(setl_time),1,19))` 转换，严禁直接 `toDateTime(setl_time)`；(b) `med_type` 是数字编码（`11`=门诊统筹，`21`=住院，`53_04`=特病门诊），严禁用中文过滤；(c) 该表与 `fqz_gz_jzsj_all_ql` 的 `setl_id` **完全不重叠**，严禁两表 JOIN。
      - 医药机构与药店资质名录：必须使用 `fqz_all_yy_yd`（严禁使用 yyjg_zzml 等虚构表）。
      - 医保行政区划代码字典表：必须使用 `fqz_admdvs`（物理列: admdvs, admdvs_name, admdvs_lv, prnt_admdvs；其中层级字段 admdvs_lv 取值: '0'=国家级, '1'=省级, '2'=地市级, '3'=区县级；严禁写成 admdvs_code 或使用不存在的表）。
      - 限制目录清单：使用 `fqz_drug_mcs_info_list`。
   3. **表选择决策**：乡镇卫生院/村卫生室/门诊批量刷单场景 → `fqz_fymx_test`；住院/药店购药/分解住院 → `fqz_gz_jzsj_all_ql`；机构与药店名录普查 → `fqz_all_yy_yd`；区划层级与字典普查 → `fqz_admdvs`。
-  4. **严禁猜测与探查**：严禁探查 `system.tables` 或 `information_schema`！禁止访问非 `fqz_` 开头的外部表（CTE 除外）。
+  4. **真实字段准则**：严禁臆造拼音缩写或不存在的字段名！所有查询字段必须严格来自上下文中提供的 `<database_schema_context>`，或通过调用 `lookup_medical_schema` 查询真实表结构；严禁探查未授权的系统表。
 
   ## 5. 字段确定性原则 (Field Determinism & Semantic Hooks)
   你的取证依据仅限于当前 Context 提供的 {schema_info}。

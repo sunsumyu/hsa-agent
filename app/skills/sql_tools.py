@@ -79,6 +79,27 @@ async def _execute_audit_sql_logic(
     """内部物理执行逻辑 [V179.0] 增加 tenant_id 隔离 + expected_table 场景验证"""
     # [V179.0] 修复大小写不匹配：LLM 传递 'ClickHouse' (大写) 导致 SQL 无法执行
     if db_type.lower() == "clickhouse":
+        # 0. [Matt Pocock 深模块自愈] 元数据探针自动接管与自愈
+        probe_match = re.match(r"^\s*(?:DESC|DESCRIBE(?:\s+TABLE)?|SHOW\s+COLUMNS\s+FROM)\s+([a-zA-Z0-9_\.]+)", (sql or "").strip(), re.IGNORECASE)
+        if probe_match:
+            target_raw = probe_match.group(1).split(".")[-1].strip("`\"' ")
+            from app.core.registry.schema_registry import schema_registry
+            entry = schema_registry.get_table(target_raw)
+            if entry:
+                field_data = [{"column_name": f["name"], "data_type": f.get("type", "String"), "comment": f.get("desc", "")} for f in entry.fields]
+                logger.info(f"🔍 [DEEP_MODULE] 捕获元数据探针 `{sql.strip()}`，自动映射单一事实源返回结构 ({len(field_data)} 列)")
+                if return_raw:
+                    return field_data
+                return SkillResponse(
+                    status="SUCCESS",
+                    data=field_data,
+                    logic_summary=f"已成功通过 Schema 注册表解析表 `{target_raw}` 的物理字段结构。",
+                    affected_rows=len(field_data),
+                    trace_hint="Table schema resolved via SchemaRegistry deep seam.",
+                    security_verified=True,
+                    sql_logic=sql
+                ).model_dump()
+
         try:
             # 1. 物理拦截与行政区划隔离注入 + 场景-表映射验证
             safe_sql = SQLGuardian.validate_sql(sql, tenant_id=tenant_id, expected_table=expected_table)

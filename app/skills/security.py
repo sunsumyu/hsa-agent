@@ -100,7 +100,8 @@ class SQLGuardian:
                 
         for table in expression.find_all(exp.Table):
             table_name = table.name.lower()
-            if (table.db and table.db.lower() == "system") or table_name in cte_names or table_name in {"dual"}:
+            is_system_db = bool(table.db and table.db.lower() in {"system", "information_schema"})
+            if is_system_db or table_name in cte_names or table_name in {"dual"}:
                 continue
             if table_name in forbidden_tables or not any(table_name.startswith(p) for p in valid_prefixes):
                 logger.error(f"[SECURITY] 发现物理不存在的幻觉表: {table_name}")
@@ -209,13 +210,23 @@ class SQLGuardian:
         from app.core.registry.schema_registry import schema_registry
         from app.infra.neo4j_manager import field_kg
         
-        # 1. 提取当前 SQL 涉及的所有物理表 (排除 CTE 临时表)
+        # 1. 提取当前 SQL 涉及的所有物理业务表 (排除 CTE 临时表以及系统元数据库表)
         cte_names = set()
         for cte in expression.find_all(exp.CTE):
             if cte.alias:
                 cte_names.add(cte.alias.lower())
-        tables = [t.name.lower() for t in expression.find_all(exp.Table) if t.name.lower() not in cte_names]
-        
+
+        tables = []
+        for t in expression.find_all(exp.Table):
+            t_name = t.name.lower()
+            is_sys = bool(t.db and t.db.lower() in {"system", "information_schema"})
+            if not is_sys and t_name not in cte_names:
+                tables.append(t_name)
+
+        # 若纯为系统元数据表探查（如 system.columns 或 information_schema.columns），跳过业务字段对撞
+        if not tables:
+            return
+
         # 2. 构建针对当前表的“物理真理库” (通过 SchemaRegistry 统一深接缝)
         physical_columns = set()
         for t_name in tables:

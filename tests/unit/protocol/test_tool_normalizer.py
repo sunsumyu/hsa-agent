@@ -119,5 +119,11 @@ def test_fix_shadowing_aliases():
     assert "min(setl_time) AS min_setl_time" in cleaned
     assert "WHERE setl_time >=" in cleaned
 
+def test_fix_chinese_and_special_aliases():
+    raw_sql = "SELECT count(*) AS 费用明细总笔数, sum(det_item_fee_sumamt) AS 医疗费用累计金额 FROM fqz_fymx_test"
+    cleaned = ToolResponseNormalizer.clean_sql_ast(raw_sql)
+    assert '"费用明细总笔数"' in cleaned or '`费用明细总笔数`' in cleaned
+    assert '"医疗费用累计金额"' in cleaned or '`医疗费用累计金额`' in cleaned
+
 
 

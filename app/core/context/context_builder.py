@@ -174,8 +174,8 @@ class ContextBuilder:
                     detail_xml = self.selector.schema_to_xml(entry)
                     packets.append(ContextPacket(
                         content=detail_xml,
-                        relevance_score=0.9,  # 提高相关性评分
-                        metadata={"type": "clickhouse_schema", "table_name": table}
+                        relevance_score=1.0,  # 物理 Schema 拥有最高相关性与确定性
+                        metadata={"type": "clickhouse_schema", "table_name": table, "priority": "high"}
                     ))
         except Exception as e:
             logger.warning(f"⚠️ [ContextBuilder] Gather Schemas 失败: {e}")

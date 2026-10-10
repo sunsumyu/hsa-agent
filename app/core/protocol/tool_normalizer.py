@@ -19,11 +19,15 @@ class ToolResponseNormalizer:
     @classmethod
     def fix_shadowing_aliases(cls, sql: str) -> str:
         """
-        修复 ClickHouse 聚合别名遮蔽物理列问题 (Code: 184 ILLEGAL_AGGREGATION)：
-        当 SELECT 中的聚合别名与 WHERE/PREWHERE 子句中使用的物理列名同名时
-        (例如 min(setl_time) AS setl_time ... WHERE setl_time >= ...)，
-        ClickHouse 会将 WHERE 中的列解析为别名（即聚合函数），从而抛出非法聚合报错。
-        本方法将同名聚合别名自动重命名为 {agg_func}_{col_name}。
+        [AST 级物理语法自愈]
+        1. 修复 ClickHouse 聚合别名遮蔽物理列问题 (Code: 184 ILLEGAL_AGGREGATION)：
+           当 SELECT 中的聚合别名与 WHERE/PREWHERE 子句中使用的物理列名同名时
+           (例如 min(setl_time) AS setl_time ... WHERE setl_time >= ...)，
+           ClickHouse 会将 WHERE 中的列解析为别名（即聚合函数），从而抛出非法聚合报错。
+           本方法将同名聚合别名自动重命名为 {agg_func}_{col_name}。
+        2. 修复 ClickHouse 中文/非 ASCII 标识符裸别名语法错误 (Code: 62 SYNTAX_ERROR)：
+           大模型生成的裸中文别名 (例如 AS 费用明细总笔数) 会导致词法分析器报错。
+           自动为其包裹引号转化为安全标识符。
         """
         if not sql:
             return sql
@@ -43,17 +47,27 @@ class ToolResponseNormalizer:
                         for col in fn.find_all(exp.Column):
                             filter_cols.add(col.name.lower())
 
-                if not filter_cols:
-                    continue
-
                 for expr in select_node.selects:
                     if isinstance(expr, exp.Alias):
-                        alias_name = expr.alias.lower()
+                        raw_alias = expr.alias
+                        alias_name = raw_alias.lower()
                         has_agg = bool(list(expr.find_all(exp.AggFunc)))
-                        if has_agg and (alias_name in filter_cols):
+
+                        target_alias = raw_alias
+                        if filter_cols and has_agg and (alias_name in filter_cols):
                             agg_node = next(expr.find_all(exp.AggFunc))
                             func_name = agg_node.key.lower() if hasattr(agg_node, "key") else "agg"
-                            expr.set("alias", exp.to_identifier(f"{func_name}_{alias_name}"))
+                            target_alias = f"{func_name}_{raw_alias}"
+                            modified = True
+
+                        needs_quote = any(ord(c) > 127 for c in target_alias) or not target_alias.isidentifier()
+                        current_ident = expr.args.get("alias")
+                        is_already_quoted = getattr(current_ident, "quoted", False)
+                        if needs_quote and not is_already_quoted:
+                            expr.set("alias", exp.to_identifier(target_alias, quoted=True))
+                            modified = True
+                        elif target_alias != raw_alias:
+                            expr.set("alias", exp.to_identifier(target_alias))
                             modified = True
 
             if modified:
