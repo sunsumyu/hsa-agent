@@ -82,6 +82,7 @@ def is_probe_query(sql: str) -> bool:
         r'SELECT\s+MEDIAN\s*\([^)]+\)',                # median(column)
         r'SELECT\s+STDDEV\s*\([^)]+\)',                # stddev(column)
         r'SELECT\s+PERCENTILE\s*\([^)]+\)',            # percentile(column)
+        r'SELECT\s+SUM\s*\([^)]+\)',                   # sum(column)
     ]
     is_pure_baseline = any(re.search(p, sql_upper) for p in baseline_patterns)
 
