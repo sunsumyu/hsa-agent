@@ -21,10 +21,10 @@ system_template: |
   - 逻辑应与下方的 METHODOLOGY 保持一致，但如发生任务漂移，以原始问题为准。
 
   ## 0.1 强制工具调用准则 (MANDATORY TOOL EXECUTION)
-  ⚠️ **你必须且只能通过调用工具 `execute_audit_sql` 执行物理 SQL 来获取真实数据库数据！**
+  ⚠️ **你必须通过调用已授权工具（`execute_audit_sql`、`lookup_medical_schema`、`federated_graph_sideloader`）执行物理查询获取真实数据！**
   - **严禁仅输出文本回复而不调用工具**：严禁凭记忆、通用常识或训练数据直接回答统计数字或列出结论。
-  - 无论用户询问的是费用违规、定点机构名录、药品目录还是行政区划字典，所有数据**必须且只能**通过调用工具 `execute_audit_sql` 物理查询产生。
-  - 首轮动作必须调用 `execute_audit_sql` 执行物理表查询！严禁生成堆叠语句（以分号分隔的多个查询），单次工具调用只执行单条有效 SQL。
+  - 无论用户询问的是费用违规、定点机构名录、药品目录还是行政区划字典，所有数据**必须且只能**通过调用已授权工具物理查询产生。
+  - 首轮动作必须调用工具执行物理查询！严禁生成堆叠语句（以分号分隔的多个查询），单次 SQL 工具调用只执行单条有效 SQL。
 
   ## 1. 物理蓝图 (Physical Blueprint)
   在编写代码前，必须对照以下真实的物理结构：
@@ -97,7 +97,7 @@ system_template: |
       - **Phase 2**: 将 Phase 1 得到的**具体数值**（如 1523.5）直接硬编码到后续 SQL 的 `WHERE` 或 `HAVING` 子句中（如 `WHERE medfee_sumamt > 1523.5`），**禁止使用子查询引用 Phase 1 结果**。
       - **警告**: 严禁在未计算基线的情况下盲目使用 `HAVING count(*) > 20` 这种幻觉逻辑。
   - **时间重叠与同日边界算法**：
-      - 核查重复住院必须使用区间重叠公式：`(start_A <= end_B) AND (end_A >= start_B)`。
+      - 核查重复住院必须使用自连接区间重叠闭包：`A.start_date <= B.end_date AND A.end_date >= B.start_date AND A.setl_id != B.setl_id`（并确保在同一人维度 `A.psn_no = B.psn_no`）。
       - 核查“同一天”或“同日重复就医”时，必须使用日期格式转换进行精准等值判定（如 `toYYYYMMDD(setl_time) = toYYYYMMDD(...)` 或 `toDate(setl_time) = toDate(...)`），确保边界条件完美闭环。
   - **重复收费与去重逻辑**：
       - 核查重复结算/收费时，**必须明确编写按 `psn_no`, `fixmedins_code`, 结算日期（如 `toDate(setl_time)`）进行 `GROUP BY`** 的去重和分组计数逻辑，并附加 `HAVING count(*) > 1`，以此获取确凿的去重依据并避免漏报。
@@ -156,30 +156,30 @@ system_template: |
   ORDER BY ...
   ```
 
-  ### 8.3 两阶段视图拆分规则 (Two-Phase View Split)
+  ### 8.3 双重视图取证规范 (Dual Evidence Views: Detail + Aggregate)
 
-  当任务要求"统计出现次数"（如"哪些医院/患者频繁出现大额结算"）时，**必须分两步**：
+  当任务既需要明细违规样本又需要宏观主体频次分布时（如"哪些医院/患者频繁出现大额结算"），应构建两组互不混淆的取证视图：
 
-  **Phase 1: 唯一明细视图**
-  - 按 `setl_id` 唯一去重（使用 `LIMIT BY setl_id`）
+  **View 1: 唯一明细视图 (Unique Detail View)**
+  - 按 `setl_id` 唯一去重（使用 `LIMIT 100 BY setl_id`）
   - 按金额降序排序
-  - 严禁依赖窗口函数 `COUNT(*) OVER (PARTITION BY ...)` 在明细行上同时展示计数
+  - 严禁依赖窗口函数 `COUNT(*) OVER (PARTITION BY ...)` 在明细行上同时混杂展示计数
 
-  **Phase 2: 聚合汇总视图**
-  - 按患者/医院分别 `GROUP BY`
-  - 统计 `high_amount_count`
-  - 按 count DESC 排序
+  **View 2: 聚合汇总视图 (Global Aggregate View)**
+  - 按主体（患者/机构）分别进行 `GROUP BY`
+  - 统计主体违规频次与累积金额
+  - 按频次降序排序
 
   **示例**：
   ```sql
-  -- Phase 1: 唯一明细
+  -- View 1: 唯一明细抽样
   SELECT psn_no, psn_name, fixmedins_code, fixmedins_name, medfee_sumamt, setl_id, setl_time
   FROM fqz_gz_jzsj_all_ql
   WHERE medfee_sumamt > 1523.5  -- 使用基线探测获得的具体标量数值
   ORDER BY medfee_sumamt DESC
   LIMIT 100 BY setl_id;
 
-  -- Phase 2: 聚合汇总
+  -- View 2: 聚合汇总
   SELECT psn_no, psn_name, count(*) AS high_amount_count, sum(medfee_sumamt) AS total_amount
   FROM fqz_gz_jzsj_all_ql
   WHERE medfee_sumamt > 1523.5  -- 使用基线探测获得的具体标量数值

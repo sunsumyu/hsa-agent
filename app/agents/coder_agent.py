@@ -213,16 +213,8 @@ class AuditCoderAgent:
         if scene_enforcement:
             scenario_guidelines += scene_enforcement
 
-        zero_findings_rule = (
-            "\n\n【⚠️ 零发现与终止准则 (Zero-Findings & Termination Rule)】\n"
-            "1. **禁止分步查证探查**：严禁在编写核心审计 SQL 之前，通过单独执行简单的 `SELECT DISTINCT hilist_name` 或 `count(*)` 探查来预先检查项目/药品/科室是否存在！你必须直接根据审计指引，一次性编写并执行完整的、包含多表 JOIN 关联和复杂业务对碰（如按分钟重叠计算、多重过滤、高值耗材缺失 `countIf` 聚合等）的核心审计 SQL。即使执行后返回空值 `data: []` 也是完全正确和被期望的。\n"
-            "2. 当核心 SQL 执行完毕且返回空数据后，你**绝对禁止**进行任何微调重试，此时你**必须且只能执行 1 个简单的边界探针 SQL** 来获取扫描边界数据（例如查询主表总行数和时间范围：`SELECT count(*) as total_cnt, min(setl_time) as min_t, max(setl_time) as max_t FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-01-01'`）。\n"
-            "3. 边界探针 SQL 执行完后，必须**立即停止调用工具**，并在回复中写明未发现异常的结论，以便系统产出专业的零发现报告。"
-        )
         if scenario_guidelines:
-            experiences_combined = f"{experiences_combined}{scenario_guidelines}{zero_findings_rule}"
-        else:
-            experiences_combined = f"{experiences_combined}{zero_findings_rule}"
+            experiences_combined = f"{experiences_combined}\n\n{scenario_guidelines}" if experiences_combined else scenario_guidelines
 
         prompt = CODER_PROMPT.format_messages(
             original_question=user_q,
