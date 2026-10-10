@@ -84,12 +84,24 @@ class SQLLogicValidator:
                     if any(f.upper() in sql_upper for f in forbidden) and not any(m.upper() in sql_upper for m in mandatory):
                         return False, f"❌ [维度拦截] {rule.get('name')}: {rule.get('description')}"
 
-        # 3. 通用安全校验
-        if "JOIN" in sql_upper and " ON " not in sql_upper and " USING " not in sql_upper:
-             return False, "❌ [安全拦截] JOIN 语句缺失关联条件，禁止执行潜在的笛卡尔积查询。"
+        # 3. 通用安全校验 (JOIN 关联条件/笛卡尔积校验)
+        try:
+            parsed = parse_one(sql, read="clickhouse")
+            if parsed:
+                for j in parsed.find_all(exp.Join):
+                    is_cross = (getattr(j, "kind", "") or "").upper() == "CROSS"
+                    has_condition = bool(j.args.get("on") or j.args.get("using"))
+                    if not is_cross and not has_condition:
+                        return False, "❌ [安全拦截] JOIN 语句缺失关联条件，禁止执行潜在的笛卡尔积查询。"
+                    elif is_cross and not has_condition:
+                        select_parent = j.find_ancestor(exp.Select)
+                        has_where = bool(select_parent and select_parent.args.get("where"))
+                        if not has_where:
+                            return False, "❌ [安全拦截] CROSS JOIN 语句缺失 WHERE 关联过滤条件，禁止执行无界笛卡尔积查询。"
+        except Exception:
+            if "JOIN" in sql_upper and "CROSS JOIN" not in sql_upper and " ON " not in sql_upper and " USING " not in sql_upper:
+                return False, "❌ [安全拦截] JOIN 语句缺失关联条件，禁止执行潜在的笛卡尔积查询。"
 
-        return True, ""
-            
         return True, ""
 
 # Backward-compatible alias, delegates to DI container
