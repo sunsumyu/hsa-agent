@@ -158,7 +158,7 @@ class ArchetypeRegistry:
             forbid_raw_limit=False,
             enforcement_hint=(
                 "本任务为【时序冲突与重叠住院】任务，必须对同一参保人 (`psn_no`) 跨机构记录进行自连接区间重叠计算，"
-                "或比对入院出院时间 (`adm_time > dscg_time`)。"
+                "或比对入院出院时间 (`start_date > end_date`)。"
             ),
         ),
         AuditArchetype(

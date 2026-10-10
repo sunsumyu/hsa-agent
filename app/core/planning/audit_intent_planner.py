@@ -126,10 +126,10 @@ class AuditIntentPlanner:
         if any(kw in q for kw in ["入院晚于出院", "入院时间晚于出院", "入出院时序倒置", "入院时间晚于"]):
             return AuditIntent(
                 audit_subject="住院就诊记录",
-                violation_feature="入院时间晚于出院时间 (adm_time > dscg_time)",
+                violation_feature="入院时间晚于出院时间 (start_date > end_date)",
                 archetype=AuditArchetype.TEMPORAL_OVERLAP,
                 enforcement_guidance=(
-                    "【时序逻辑矛盾审计】筛选入院时间晚于出院时间的异常住院结算记录：`adm_time > dscg_time`！"
+                    "【时序逻辑矛盾审计】筛选入院时间晚于出院时间的异常住院结算记录：`start_date > end_date`！"
                 )
             )
 

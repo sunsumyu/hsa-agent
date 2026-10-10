@@ -53,7 +53,7 @@ class RuleExecutionSkill(BaseTool):
             "DECOMPOSITION_HOSPITALIZATION": "【审计方法论】分解住院侦测：通过窗口函数 (Window Function) 对比相邻住院记录。判定标准：同一患者出院与下次入院间隔时间 <= 15天 且 诊断高度相关。合规依据：《基本医疗保险定点医疗机构服务协议》关于禁止恶意分解住院的条款。",
             "CROSS_HOSPITAL_OVERLAP": "【审计方法论】跨机构重复住院核查：执行时间区间交集运算。判定标准：(A.start <= B.end) AND (A.end >= B.start) 且机构编码不一致。合规依据：医保实时结算管理规定，严禁“同时住院”挂账。",
             "REPEAT_BILLING_DETECTOR": "【审计方法论】重复收费校验：对单次就诊 (setl_id) 执行项目级明细扫描。判定标准：同一项目 (item_code) 的实收数量超过单日限额或物理操作逻辑上线。合规依据：《医疗服务价格目录》。",
-            "CONTACT_SHARING_DETECTOR": "【联邦分治强制令】针对团伙作案/共用手机号任务，严禁使用单库SQL！必须执行三阶段：Phase 1: 使用 federated_graph_sideloader 执行 Cypher (例如 MATCH (p:Patient)-[:HAS_PHONE]->(pn:Phone) WHERE pn.number ENDS WITH '8888'...)；Phase 2: 根据返回的临时表名，使用 SQLSafeExecutionSkill 执行 JOIN 汇总业务总额；Phase 3: 提取全院基线，使用 Python 或手动计算真正的统计学阈值。",
+            "CONTACT_SHARING_DETECTOR": "【联邦分治强制令】针对团伙作案/共用手机号任务，严禁使用单库SQL！必须执行三阶段：Phase 1: 使用 federated_graph_sideloader 执行 Cypher (例如 MATCH (p:Patient)-[:HAS_PHONE]->(pn:Phone) WHERE pn.number ENDS WITH '8888'...)；Phase 2: 根据返回的临时表名，使用 execute_audit_sql 执行 JOIN 汇总业务总额；Phase 3: 提取全院基线，使用 Python 或手动计算真正的统计学阈值。",
             "VIX_ANOMALY_SCAN": "【审计方法论】VIX 变异指数扫描：采用统计学离群值分析。判定标准：机构均次费用变异系数 (CV) 超过总体均值 3 个标准差。合规依据：医保基金运行监测风险预警指标体系。",
             "CLUSTER_ENCOUNTER_DETECTOR": "【审计方法论】聚集就医图谱挖掘：基于 Neo4j 执行连通分量分析。判定标准：核心节点（医生/药店/手机号）关联的参保人分布密度达到异常阈值。合规依据：医保大数据反欺诈模型规范。"
         }

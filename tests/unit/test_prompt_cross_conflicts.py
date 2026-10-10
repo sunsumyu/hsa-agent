@@ -171,3 +171,129 @@ class TestCrossPromptConflictDetection:
                 assert placeholder in template, (
                     f"【变量插槽缺失】{prompt_id}.yaml 声明了变量 '{var}'，但在 system_template 中缺少 '{placeholder}' 占位符！"
                 )
+
+    # ──────────────────────────────────────────────────────────
+    # 维度 8: Python 文件内联提示词 (Inline Prompts) 伪字段检测
+    # ──────────────────────────────────────────────────────────
+
+    def test_no_fictional_columns_in_python_inline_prompts(self):
+        """Python 代码中混入的内联提示词与指引严禁包含伪字段 (adm_date, dscg_date, adm_time, dscg_time)。"""
+        app_dir = PROMPTS_DIR.parent / "app"
+        fictional_cols = ["adm_date", "dscg_date", "adm_time", "dscg_time"]
+
+        for py_file in app_dir.rglob("*.py"):
+            # 排除已废弃兼容文件与字段别名纠错字典注册表 (包含 forbidden_aliases 定义)
+            if py_file.name in ["agent.py", "neo4j_manager.py"]:
+                continue
+            text = py_file.read_text(encoding="utf-8")
+            for col in fictional_cols:
+                # 检查是否作为 SQL 字段名或提示词指南出现（排除普通注释）
+                pattern = re.compile(rf"[`'\"]{col}[`'\"]|\b{col}\s*[><=]", re.IGNORECASE)
+                match = pattern.search(text)
+                assert not match, (
+                    f"【Python 混入伪字段提示词】在 {py_file.name} 中发现混入伪字段 '{col}' 指引: {match.group(0)}！"
+                    "真实字段必须严格使用 start_date / end_date。"
+                )
+
+    # ──────────────────────────────────────────────────────────
+    # 维度 9: Python 业务代码与配置中评测集代号泄漏检测
+    # ──────────────────────────────────────────────────────────
+
+    def test_no_benchmark_case_ids_in_python_and_configs(self):
+        """核心业务代码 (app/) 及核心配置 (configs/) 中严禁泄露具体评测集 case_id (QA-CUST-*, QA-EDGE-*)。"""
+        root_dir = PROMPTS_DIR.parent
+        target_dirs = [root_dir / "app", root_dir / "configs"]
+        benchmark_pattern = re.compile(r"QA-(CUST|EDGE|BLIND)-\d+", re.IGNORECASE)
+
+        for target_dir in target_dirs:
+            for file_path in target_dir.rglob("*"):
+                if file_path.suffix not in [".py", ".yaml", ".json"]:
+                    continue
+                # 排除历史测试桥接文件
+                if "eval" in file_path.parts or "test" in file_path.name:
+                    continue
+                text = file_path.read_text(encoding="utf-8")
+                matches = benchmark_pattern.findall(text)
+                assert len(matches) == 0, (
+                    f"【评测用例泄漏】在生产文件 {file_path.relative_to(root_dir)} 中发现残留评测代号: {matches}"
+                )
+
+    # ──────────────────────────────────────────────────────────
+    # 维度 10: 验证 CoderAgent 中不存在影子 Prompt 注入 (SSOT)
+    # ──────────────────────────────────────────────────────────
+
+    def test_no_shadow_zero_findings_injection_in_coder_agent(self):
+        """验证 coder_agent.py 中不包含影子硬编码的 zero_findings_rule，确保提示词以 YAML 为唯一事实源。"""
+        coder_agent_path = PROMPTS_DIR.parent / "app" / "agents" / "coder_agent.py"
+        content = coder_agent_path.read_text(encoding="utf-8")
+
+        assert "zero_findings_rule" not in content, (
+            "【影子提示词注入违规】coder_agent.py 仍在向 experiences 影子注入硬编码的 zero_findings_rule！"
+            "必须以此前 prompts/coder.yaml 为唯一事实源。"
+        )
+
+    # ──────────────────────────────────────────────────────────
+    # 维度 11: Python 内联提示词中工具调用协议一致性
+    # ──────────────────────────────────────────────────────────
+
+    def test_no_obsolete_tool_names_in_python_inline_prompts(self):
+        """Python 内联提示词与指引严禁包含已废弃的工具名称 (如 SQLSafeExecutionSkill)。"""
+        app_dir = PROMPTS_DIR.parent / "app"
+        obsolete_tools = ["SQLSafeExecutionSkill"]
+
+        for py_file in app_dir.rglob("*.py"):
+            # 排除已废弃兼容文件及工具类自身定义文件
+            if py_file.name in ["agent.py", "sql_execution.py"]:
+                continue
+            text = py_file.read_text(encoding="utf-8")
+            for obs_tool in obsolete_tools:
+                assert obs_tool not in text, (
+                    f"【Python 混入废弃工具提示词】在 {py_file.name} 中发现混入废弃工具名称 '{obs_tool}'！"
+                    "标准 SQL 工具必须严格使用 execute_audit_sql。"
+                )
+
+    # ──────────────────────────────────────────────────────────
+    # 维度 12: Python 内联提示词与指引中物理表名有效性
+    # ──────────────────────────────────────────────────────────
+
+    def test_python_inline_guidance_table_names_validity(self):
+        """Python 代码中内联指导提及的所有 fqz_ 前缀表名，必须属于真实存在的物理表。"""
+        app_dir = PROMPTS_DIR.parent / "app"
+        # 允许的合法物理表及临时表前缀
+        valid_tables = {
+            "fqz_fymx_test", "fqz_gz_jzsj_all_ql", "fqz_all_yy_yd", "fqz_admdvs",
+            "fqz_drug_mcs_info_list", "fqz_all_yy_yd_1"
+        }
+        fqz_pattern = re.compile(r"\b(fqz_[a-zA-Z0-9_]+)\b")
+
+        for py_file in app_dir.rglob("*.py"):
+            # 排除已废弃兼容文件及负责别名重定向的地面化模块
+            if py_file.name in ["agent.py", "grounder.py"]:
+                continue
+            text = py_file.read_text(encoding="utf-8")
+            matches = fqz_pattern.findall(text)
+            for tbl in matches:
+                if tbl.startswith("fqz_temp_sl_") or tbl.startswith("fqz_temp_"):
+                    continue  # 动态联邦侧载临时表
+                assert tbl in valid_tables, (
+                    f"【Python 混入非法表名指引】在 {py_file.name} 中发现未知表名 '{tbl}'！"
+                    f"合法表名列表为: {valid_tables}"
+                )
+
+    # ──────────────────────────────────────────────────────────
+    # 维度 13: 报告生成器结论提示词 SSOT 一致性
+    # ──────────────────────────────────────────────────────────
+
+    def test_report_renderer_uses_conclusion_prompt_ssot(self):
+        """验证 report_renderer.py 结论生成已消除硬编码模板，严格委托给 CONCLUSION_PROMPT。"""
+        renderer_path = PROMPTS_DIR.parent / "app" / "reporting" / "report_renderer.py"
+        content = renderer_path.read_text(encoding="utf-8")
+
+        assert "from app.core.prompts import CONCLUSION_PROMPT" in content, (
+            "【报告提示词非 SSOT】report_renderer.py 未从 app.core.prompts 导入 CONCLUSION_PROMPT！"
+        )
+        assert "CONCLUSION_PROMPT.format_messages" in content, (
+            "【报告提示词非 SSOT】report_renderer.py 未使用 CONCLUSION_PROMPT.format_messages 渲染结论提示词！"
+        )
+
+

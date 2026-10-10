@@ -234,19 +234,3 @@ observability:
     | quantile={quantile}
     | confidence={confidence}
     | reason={reason}
-
-# ── 测试用例预期值 (Test Case Expectations) ──────────────────
-test_expectations:
-  # QA-CUST-27: 药店大额查询
-  QA-CUST-27:
-    expected_business_type: "PHARMACY"
-    expected_strategy: "DYNAMIC_QUANTILE_P99"  # 或 RANKING_NO_THRESHOLD
-    expected_threshold_range: [100, 1000]  # 预期阈值在100-1000元之间
-    reason: "药店购药场景，金额分布低，应使用动态分位数"
-
-  # QA-CUST-26: 乡镇卫生院批量刷单
-  QA-CUST-26:
-    expected_business_type: "OUTPATIENT"
-    expected_strategy: "HARD_THRESHOLD"  # 使用固定阈值（患者数>=5）
-    expected_threshold_range: null  # 不适用金额阈值
-    reason: "批量刷单检测使用固定规则阈值"
