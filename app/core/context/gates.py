@@ -188,18 +188,23 @@ class QualityGate:
         """
         try:
             methodology = state.get("methodology", "") if isinstance(state, dict) else ""
-            original_question = state.get("original_question", "") if isinstance(state, dict) else ""
+            # [Matt Pocock Single Source of Truth] 优先从 user_input 或 original_question 获取纯净用户意图
+            original_question = (state.get("user_input") or state.get("original_question", "")) if isinstance(state, dict) else ""
             if not original_question and isinstance(state, dict) and "messages" in state:
+                # 仅回退提取首条用户消息，绝不多轮累加拼接以防上下文提示词污染
                 for m in state.get("messages", []):
+                    content = ""
                     if isinstance(m, tuple) and len(m) >= 2 and m[0] in ("user", "human"):
-                        original_question += " " + str(m[1])
+                        content = str(m[1])
                     elif hasattr(m, "type") and getattr(m, "type") == "human":
-                        original_question += " " + str(getattr(m, "content", ""))
+                        content = str(getattr(m, "content", ""))
                     elif hasattr(m, "role") and getattr(m, "role") == "user":
-                        original_question += " " + str(getattr(m, "content", ""))
+                        content = str(getattr(m, "content", ""))
                     elif isinstance(m, dict) and (m.get("role") == "user" or m.get("type") == "human"):
-                        original_question += " " + str(m.get("content", ""))
-                original_question = original_question.strip()
+                        content = str(m.get("content", ""))
+                    if content.strip():
+                        original_question = content.strip()
+                        break
         except Exception:
             methodology = ""
             original_question = ""

@@ -17,16 +17,62 @@ class ToolResponseNormalizer:
     """
     
     @classmethod
+    def fix_shadowing_aliases(cls, sql: str) -> str:
+        """
+        修复 ClickHouse 聚合别名遮蔽物理列问题 (Code: 184 ILLEGAL_AGGREGATION)：
+        当 SELECT 中的聚合别名与 WHERE/PREWHERE 子句中使用的物理列名同名时
+        (例如 min(setl_time) AS setl_time ... WHERE setl_time >= ...)，
+        ClickHouse 会将 WHERE 中的列解析为别名（即聚合函数），从而抛出非法聚合报错。
+        本方法将同名聚合别名自动重命名为 {agg_func}_{col_name}。
+        """
+        if not sql:
+            return sql
+        try:
+            from sqlglot import exp
+            parsed = sqlglot.parse_one(sql, read="clickhouse")
+            if not parsed:
+                return sql
+
+            modified = False
+            for select_node in parsed.find_all(exp.Select):
+                where_node = select_node.args.get("where")
+                prewhere_node = select_node.args.get("prewhere")
+                filter_cols = set()
+                for fn in (where_node, prewhere_node):
+                    if fn:
+                        for col in fn.find_all(exp.Column):
+                            filter_cols.add(col.name.lower())
+
+                if not filter_cols:
+                    continue
+
+                for expr in select_node.selects:
+                    if isinstance(expr, exp.Alias):
+                        alias_name = expr.alias.lower()
+                        has_agg = bool(list(expr.find_all(exp.AggFunc)))
+                        if has_agg and (alias_name in filter_cols):
+                            agg_node = next(expr.find_all(exp.AggFunc))
+                            func_name = agg_node.key.lower() if hasattr(agg_node, "key") else "agg"
+                            expr.set("alias", exp.to_identifier(f"{func_name}_{alias_name}"))
+                            modified = True
+
+            if modified:
+                return parsed.sql(dialect="clickhouse")
+            return sql
+        except Exception:
+            return sql
+
+    @classmethod
     def clean_sql_ast(cls, sql: str) -> str:
-        """剥离尾部残留的 XML/DSML 闭合标签与 JSON 结构杂质，严格保护 SQL 单引号字面量"""
+        """剥离尾部残留的 XML/DSML 闭合标签与 JSON 结构杂质，严格保护 SQL 单引号字面量并修复别名遮蔽"""
         if not sql:
             return ""
 
         cand = sql.strip().rstrip(';； \n\r\t')
-        # 0. 若已完全符合 ClickHouse 语法，保留原有单引号，只剔除分号空白
+        # 0. 若已完全符合 ClickHouse 语法，保留原有单引号，只剔除分号空白并自愈别名遮蔽
         try:
             sqlglot.parse_one(cand, read="clickhouse")
-            return cand
+            return cls.fix_shadowing_aliases(cand)
         except Exception:
             pass
 
@@ -42,7 +88,7 @@ class ToolResponseNormalizer:
         # 再次尝试 AST 解析确认
         try:
             sqlglot.parse_one(cand, read="clickhouse")
-            return cand
+            return cls.fix_shadowing_aliases(cand)
         except Exception:
             pass
 
@@ -52,18 +98,18 @@ class ToolResponseNormalizer:
                 cand_fixed = cand[:-1].strip()
                 try:
                     sqlglot.parse_one(cand_fixed, read="clickhouse")
-                    return cand_fixed
+                    return cls.fix_shadowing_aliases(cand_fixed)
                 except Exception:
                     pass
             else:
                 cand_fixed = cand + "'"
                 try:
                     sqlglot.parse_one(cand_fixed, read="clickhouse")
-                    return cand_fixed
+                    return cls.fix_shadowing_aliases(cand_fixed)
                 except Exception:
                     pass
 
-        return cand
+        return cls.fix_shadowing_aliases(cand)
 
     TOOL_ALIASES = {
         "write_audit_notes": "write_audit_note",

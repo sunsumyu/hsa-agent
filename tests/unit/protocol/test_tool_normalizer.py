@@ -113,4 +113,11 @@ def test_normalizer_handles_dsml_execute_audit_sql_invoke():
     assert result.synthesized_sql == "SELECT count() FROM fqz_fymx_test WHERE det_item_fee_sumamt < 0"
     assert result.is_synthesized is True
 
+def test_fix_shadowing_aliases():
+    raw_sql = "SELECT count() AS total_count, min(setl_time) AS setl_time FROM fqz_gz_jzsj_all_ql WHERE setl_time >= '2024-04-11 00:00:00'"
+    cleaned = ToolResponseNormalizer.clean_sql_ast(raw_sql)
+    assert "min(setl_time) AS min_setl_time" in cleaned
+    assert "WHERE setl_time >=" in cleaned
+
+
 

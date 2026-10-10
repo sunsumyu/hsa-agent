@@ -197,8 +197,13 @@ class ContextBuilder:
             logger.warning(f"⚠️ [ContextBuilder] Gather Memories 失败: {e}")
 
         # 3. Gather NoteTool 外部便签簿里程碑 (最高优先级，强保留)
+        # [V216.0 Pocock 会话隔离] 在基准测试/缓存禁用模式下，跳过全局外部便签注入，杜绝跨场景脏状态污染
+        is_isolated_mode = (
+            os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true" or
+            os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true"
+        )
         note_file = "data/audit_notes.md"
-        if os.path.exists(note_file):
+        if not is_isolated_mode and os.path.exists(note_file):
             try:
                 with open(note_file, "r", encoding="utf-8") as f:
                     note_content = f.read().strip()

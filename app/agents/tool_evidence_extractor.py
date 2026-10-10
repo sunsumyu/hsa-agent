@@ -146,7 +146,17 @@ class ToolEvidenceExtractor:
         core_sql = ""
         if accumulated_sql_history:
             audit_queries = [sql for sql in accumulated_sql_history if not is_probe_query(sql)]
-            core_sql = audit_queries[-1] if audit_queries else accumulated_sql_history[-1]
+            # 优先选择包含业务指标/金额计算的核心查询，而非纯辅助校验
+            metric_queries = [
+                s for s in audit_queries
+                if any(m in s.upper() for m in ["SUM(", "AVG(", "MEDFEE", "TOTAL", "AMT", "FEE", "ROUND(SUM"])
+            ]
+            if metric_queries:
+                core_sql = metric_queries[-1]
+            elif audit_queries:
+                core_sql = audit_queries[-1]
+            else:
+                core_sql = accumulated_sql_history[-1]
 
         has_new_core_query = any(not is_probe_query(s) for s in sql_logics)
 
@@ -168,9 +178,19 @@ class ToolEvidenceExtractor:
                             raw_data_list.append(self.truncate_data(parsed_res[field]))
                             break
 
-        new_raw_data = "\n---\n".join(raw_data_list)
-        if not has_new_core_query and not new_raw_data:
-            new_raw_data = state.get("raw_data", "")
+        # [V180.0 Pocock 证据链保全] 多轮执行采用 Append-Only 累加保全，杜绝后序辅助探针覆盖核心金额证据
+        new_chunk = "\n---\n".join(raw_data_list) if raw_data_list else ""
+        existing_raw = state.get("raw_data", "")
+
+        if existing_raw and new_chunk:
+            if new_chunk.strip() not in existing_raw:
+                new_raw_data = f"{existing_raw}\n---\n{new_chunk}"
+            else:
+                new_raw_data = existing_raw
+        elif new_chunk:
+            new_raw_data = new_chunk
+        else:
+            new_raw_data = existing_raw
 
         final_methodology = "\n\n".join(methodologies) if methodologies else state.get("methodology", "")
 

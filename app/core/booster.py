@@ -160,9 +160,19 @@ class PrecisionBooster:
 
     @staticmethod
     def detect_anomalous_consistency(rows_data: List[Dict[str, Any]]) -> Optional[str]:
-        """[V111.0] 异常一致性回溯：检测伪造数据的典型特征"""
+        """
+        [V180.0] 异常一致性回溯 (Pocock Deep Module & Provenance Pinning 架构重构)：
+        仅针对由于多表错误 JOIN / 笛卡尔积导致的【衍生计数爆炸】(如 item_count, cartesian_cnt, total_count 等) 实施防御。
+        严禁误伤医保实库中的真实物理金额/费用字段 (如 medfee_sumamt, fund_pay_sumamt 等)，
+        因为单日集中定额结算、同金额批量刷卡是真实且高频的医保欺诈特征，绝非 AI 幻觉！
+        """
         if not rows_data or len(rows_data) < 5: return None
         
+        # 医保真实物理金额/业务列名保护：这些字段在批量舞弊中常出现完全相同的定额数值，严禁拦截真实证据
+        EXEMPT_FIELD_PATTERNS = {"amt", "fee", "price", "sumamt", "pay", "rate", "money"}
+        # 仅针对明确的计数字段/派生聚合计数字段实施笛卡尔积一致性检测
+        SUSPICIOUS_COUNT_PATTERNS = {"item_count", "cartesian", "cross_join_cnt", "dup_cnt"}
+
         # 收集数值字段
         field_values = {}
         for row in rows_data:
@@ -175,12 +185,20 @@ class PrecisionBooster:
                     continue
         
         for field, values in field_values.items():
-            # 这里的逻辑是：如果一个业务字段在所有记录中都完全相同，且数值很大，通常是逻辑错误（如笛卡尔积或 AI 幻觉）
+            f_lower = field.lower()
+            # 若为真实金额或费用字段，予以豁免
+            if any(p in f_lower for p in EXEMPT_FIELD_PATTERNS):
+                continue
+
+            # 仅当字段为明确的衍生计数字段且全表恒等爆炸时，才阻断
+            is_suspicious_count = any(p in f_lower for p in SUSPICIOUS_COUNT_PATTERNS)
+            if not is_suspicious_count:
+                continue
+
             if len(values) == len(rows_data) and len(set(values)) == 1:
                 const_val = values[0]
-                if abs(const_val) > 10 and not (1900 < const_val < 2100):
-                    # 特别针对 QA-01 报告中 item_count=14848 的幻觉
-                    return f"🚨 [数据幻觉警告] 字段 `{field}` 的所有 {len(values)} 条记录数值均为完全一致的 {const_val}。这在医保审计中属于高度异常，通常由错误的 GROUP BY 或 SQL 笛卡尔积产生。请修正 SQL 逻辑，严禁提交包含‘虚假整齐’数据的报告。"
+                if abs(const_val) > 100:
+                    return f"🚨 [笛卡尔积计数异常拦截] 派生计数字段 `{field}` 在所有 {len(values)} 条记录中数值均为完全一致的 {const_val}。这通常由多表关联未正确 GROUP BY 或笛卡尔积产生，请修正 SQL 关联与去重逻辑。"
         return None
 
     @staticmethod

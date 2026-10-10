@@ -64,6 +64,31 @@ class AuditCoderAgent:
         
         retry = state.get("retry_count", 0)
         if retry >= self.max_retries:
+            # [V180.0 Pocock 状态保全] 检查前序轮次是否已有成功物理取证成果
+            preserved_raw_data = state.get("raw_data", "")
+            has_valid_execution = state.get("sql_validated", False) and bool(preserved_raw_data)
+            history_sql = state.get("sql_history", [])
+            core_sql = state.get("sql_query", "")
+            if not core_sql and history_sql:
+                audit_queries = [s for s in history_sql if not self._is_probe_query(s)]
+                metric_queries = [
+                    s for s in audit_queries
+                    if any(m in s.upper() for m in ["SUM(", "AVG(", "MEDFEE", "TOTAL", "AMT", "FEE", "ROUND(SUM"])
+                ]
+                core_sql = metric_queries[-1] if metric_queries else (audit_queries[-1] if audit_queries else history_sql[-1])
+
+            if has_valid_execution:
+                logger.info("✨ [Coder State Safeguard] 达到最大重试次数，但前序已成功物理取证，保全成果完成交付")
+                return {
+                    "error_log": None,
+                    "sql_validated": True,
+                    "sql_query": core_sql,
+                    "sql_history": history_sql,
+                    "raw_data": preserved_raw_data,
+                    "retry_count": retry,
+                    "execution_trace": tracer.to_legacy_list()
+                }
+
             return {
                 "error_log": "REACHED_MAX_RETRIES",
                 "retry_count": retry + 1
@@ -272,13 +297,17 @@ class AuditCoderAgent:
                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] preserved_raw_data: {preserved_raw_data[:200]}...")
                 core_sql = ""
                 if history_sql:
-                    audit_queries = []
-                    for s in history_sql:
-                        is_probe = self._is_probe_query(s)
-                        logger.info(f"🔮 [DEBUG_SQL_DIRECT] checking query: is_probe={is_probe} for {s[:100]}...")
-                        if not is_probe:
-                            audit_queries.append(s)
-                    core_sql = audit_queries[-1] if audit_queries else history_sql[-1]
+                    audit_queries = [s for s in history_sql if not self._is_probe_query(s)]
+                    metric_queries = [
+                        s for s in audit_queries
+                        if any(m in s.upper() for m in ["SUM(", "AVG(", "MEDFEE", "TOTAL", "AMT", "FEE", "ROUND(SUM"])
+                    ]
+                    if metric_queries:
+                        core_sql = metric_queries[-1]
+                    elif audit_queries:
+                        core_sql = audit_queries[-1]
+                    else:
+                        core_sql = history_sql[-1]
                 logger.info(f"🔮 [DEBUG_SQL_DIRECT] selected core_sql: {core_sql[:100]}...")
                 return {
                     "messages": [response],
@@ -301,9 +330,30 @@ class AuditCoderAgent:
                             gate_error = validation_res.get("error") or "SQL 语义审查校验失败"
                             logger.warning(f"🚨 [Gate 2 SQL Semantics Intercept] {gate_error}")
                             span.fail(gate_error)
+                            
+                            history_sql = state.get("sql_history", [])
+                            preserved_raw_data = state.get("raw_data", "")
+                            has_valid_execution = state.get("sql_validated", False) and bool(preserved_raw_data)
+                            
+                            # 若已有前序成功取证的有效数据，且本次拦截的是辅助采样，保全数据与验证状态
+                            if has_valid_execution:
+                                logger.info("✨ [Gate 2 State Safeguard] 检测到已存在验证通过的有效审计数据，保全已有取证成果")
+                                return {
+                                    "error_log": None,
+                                    "sql_validated": True,
+                                    "sql_query": history_sql[-1] if history_sql else sql_arg,
+                                    "sql_history": history_sql,
+                                    "raw_data": preserved_raw_data,
+                                    "messages": [response],
+                                    "retry_count": retry,
+                                    "execution_trace": tracer.to_legacy_list()
+                                }
+                            
                             return {
                                 "error_log": gate_error,
                                 "sql_query": sql_arg,
+                                "sql_history": history_sql,
+                                "raw_data": preserved_raw_data,
                                 "messages": [response],
                                 "retry_count": retry + 1,
                                 "execution_trace": tracer.to_legacy_list()
@@ -362,6 +412,11 @@ class AuditCoderAgent:
                 logger.info("未执行 SQL 查询，跳过质量门控")
                 span.set_result("跳过质量门控")
 
+        # [V180.0 Pocock 单调保全] 若前序已成功物理取证，后序辅助探针的偶发错误不能撤销已获得的取证资格
+        prev_validated = state.get("sql_validated", False) and bool(state.get("raw_data"))
+        final_validated = (not processed["has_error"]) or prev_validated
+        final_error_log = None if prev_validated else (processed["error_msg"] if processed["has_error"] else None)
+
         return {
             "raw_data": processed["raw_data"],
             "sql_query": processed["sql_query"],
@@ -369,8 +424,8 @@ class AuditCoderAgent:
             "methodology": processed["methodology"],
             "messages": [response] + processed["tool_msgs"],
             "retry_count": retry + 1 if (processed["has_error"] or has_duplicate_sql) else retry,
-            "sql_validated": not processed["has_error"],
-            "error_log": processed["error_msg"] if processed["has_error"] else None,
+            "sql_validated": final_validated,
+            "error_log": final_error_log,
             "execution_trace": tracer.to_legacy_list(),
             "temp_table": state.get("temp_table")
         }

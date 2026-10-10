@@ -154,6 +154,22 @@ async def _execute_audit_sql_logic(
                         # 无法自愈，直接报错
                         logger.error(f"[SQL_EXEC_ERROR] {err_str}")
                         return {"status": "ERROR", "error_message": err_str, "sql_logic": safe_sql}
+                # [V180.0] Code 184 自愈：别名遮蔽物理列导致 ILLEGAL_AGGREGATION
+                elif "Code: 184" in err_str or "ILLEGAL_AGGREGATION" in err_str or "is found in WHERE in query" in err_str:
+                    from app.core.protocol.tool_normalizer import ToolResponseNormalizer
+                    healed = ToolResponseNormalizer.fix_shadowing_aliases(safe_sql)
+                    if healed != safe_sql:
+                        try:
+                            result = await _run_sql(healed)
+                            safe_sql = healed
+                            logger.info("[SQL_HEALER] Code 184 别名遮蔽自愈成功，重试通过")
+                        except SqlExecError as retry_err:
+                            final_err = str(retry_err)
+                            logger.error(f"[SQL_EXEC_ERROR] Code 184 自愈失败: {final_err}")
+                            return {"status": "ERROR", "error_message": final_err, "sql_logic": healed}
+                    else:
+                        logger.error(f"[SQL_EXEC_ERROR] {err_str}")
+                        return {"status": "ERROR", "error_message": err_str, "sql_logic": safe_sql}
                 else:
                     # 其他错误，单一记录并返回
                     if "404" in err_str or "Connection refused" in err_str or "无法建立" in err_str:

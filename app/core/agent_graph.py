@@ -194,14 +194,17 @@ async def reporter_node(state: AuditState, config: RunnableConfig):
     # [V2.1] 识别执行是否受限/逃生舱激活
     error_log = state.get("error_log") or ""
     is_restricted = False
-    if (
-        state.get("retry_count", 0) >= MAX_RETRIES 
-        or "降级报告模式" in error_log 
-        or "REACHED_MAX_RETRIES" in error_log
-        or (not state.get("sql_validated") and not raw_data_list)
-    ):
-        is_restricted = True
-        logger.warning("🚨 [REPORTER] 检测到执行受限/逃生舱触发，开启受限核查渲染模式。")
+    # [V180.0 Pocock 证据优先接缝] 若已获取真实物理证据且存在对应 SQL，物理取证已成功，绝不开启受限核查
+    has_valid_evidence = bool(raw_data_list) and bool(state.get("sql_query"))
+    if not has_valid_evidence:
+        if (
+            state.get("retry_count", 0) >= MAX_RETRIES 
+            or "降级报告模式" in error_log 
+            or "REACHED_MAX_RETRIES" in error_log
+            or not state.get("sql_validated")
+        ):
+            is_restricted = True
+            logger.warning("🚨 [REPORTER] 检测到执行受限/逃生舱触发，开启受限核查渲染模式。")
 
     user_question = (state.get("metadata") or {}).get("user_question") or "医保专项审计"
     
