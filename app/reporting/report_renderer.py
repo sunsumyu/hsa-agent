@@ -221,21 +221,16 @@ class AuditReportRenderer:
             defense_instruction = f"5. **事实强制对齐**：当前发现 {hard_count} 条记录，结论必须明确指出违规嫌疑，严禁敷衍。\n"
             data_summary = f"共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}"
 
-        return (
-            "你是一名极其严谨的医保基金稽核专家。根据以下审计取证信息，撰写 150~400 字的「核查结论」。\n"
-            "要求：\n"
-            "1. **逻辑白盒化与阈值透明化**：你必须在结论中清晰展示你的判定标准 and 所采用的「具体阈值」（例如：如果提问涉及“大额”，请说明判定大额的具体金额，如 10,000 元以上；如果是重复收费，说明单日限额；如果是共用联系方式，说明量化判定标准）。\n"
-            "2. **多维证据链**：如果是复杂任务（如性别冲突），必须明确提到对科室、诊断和费用的交叉核查结果。\n"
-            "3. **专业引用**：必须且仅能引用具体的 ICD-10 编码或“审计方法论”中给出的精准政策条文。严禁凭空虚构或编造任何其他法规、通知字号、模糊占位符（如‘医保发〔2023〕X号’或带有‘X号’字样），确保所有政策依据100%真实权威。\n"
-            "4. **【对齐原则】（绝对红线）**：你的文字解释必须与执行轨迹中实际所写的 SQL 语法绝对一致！如果 SQL 中使用了 toDate() 按自然日去重或聚合，你必须精确描述为“按自然日（天）去重”，绝对禁止任意夸大或错误描述为“在24小时内（精确至秒）去重”或“精确至秒”。\n"
-            "5. **完整性**：请确保输出完整的段落，严禁在句子中间截断。\n"
-            + defense_instruction +
-            "\n"
-            f"审计任务：{rewritten_question or user_question}\n\n"
-            f"审计方法论：{methodology[:600]}\n\n"
-            f"执行轨迹：{'; '.join(execution_trace[-5:]) if execution_trace else '已完成全路径核查'}\n\n"
-            f"数据摘要：{data_summary}"
+        from app.core.prompts import CONCLUSION_PROMPT
+        
+        prompt_msgs = CONCLUSION_PROMPT.format_messages(
+            user_question=rewritten_question or user_question,
+            methodology=methodology[:600],
+            execution_trace='; '.join(execution_trace[-5:]) if execution_trace else '已完成全路径核查',
+            data_summary=data_summary,
+            defense_instruction=defense_instruction,
         )
+        return str(prompt_msgs[0].content) if prompt_msgs else ""
 
     def _extract_boundary_from_raw_data(self, raw_data_str: Any) -> tuple[int, str, str]:
         """从 raw_data 中提取探针物理基数和时间范围 [V215.0]"""
