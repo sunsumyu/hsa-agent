@@ -482,3 +482,4 @@ class AuditCoderAgent:
         return None
 
 coder_agent = AuditCoderAgent()
+CoderAgent = AuditCoderAgent

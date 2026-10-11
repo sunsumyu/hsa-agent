@@ -148,7 +148,7 @@ class AuditMetricEvaluator:
         rows = db_rows or []
         det_count = cls._extract_detected_count(rows, gt_count, gt_sum)
 
-        if eval_type == "zero_findings":
+        if eval_type in ("zero_findings", "negative_compliance"):
             return cls._evaluate_zero_findings(det_count, report_text, gt_sum)
         elif eval_type == "security_gate":
             return cls._evaluate_security_gate(det_count, gt_sum)
@@ -249,8 +249,8 @@ class AuditMetricEvaluator:
                 det_count=det_count,
                 tp=0,
                 fp=det_count,
-                fn=0,
-                recall_pct=100.0,
+                fn=1,
+                recall_pct=0.0,
                 precision_pct=0.0,
                 f1_score=0.0
             )
