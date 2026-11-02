@@ -93,6 +93,7 @@ def get_langfuse_prompt(prompt_name: str, fallback: Any) -> Any:
 
 
 from app.core.observability.pii_sanitizer import PIISanitizer
+from app.core.observability.adaptive_sampler import AdaptiveSampler
 
 __all__ = [
     "init_observability",
@@ -102,4 +103,5 @@ __all__ = [
     "build_obs_config",
     "get_langfuse_prompt",
     "PIISanitizer",
+    "AdaptiveSampler",
 ]
