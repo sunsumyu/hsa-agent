@@ -9,12 +9,13 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 from typing import List, Dict, Any, Optional, Sequence, Union, Callable
 from pydantic import BaseModel, Field
 from langchain_core.messages import BaseMessage
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from loguru import logger
 from app.core.memory import memory_hub
 from app.infra.redis_client import redis_manager
+from app.memory.decay_scoring import compute_decayed_score
+from app.memory.vector_adapter_factory import get_vector_adapter
 # from sentence_transformers import SentenceTransformer, util - Lazy loaded below
 
 # ============================================================
@@ -90,9 +91,10 @@ class WorkingMemory:
 
 class SemanticMemory:
     """[语义记忆]：跨会话的审计经验库（核心策略、SQL 模板）"""
-    def __init__(self, storage_path: str, embeddings):
+    def __init__(self, storage_path: str, embeddings, adapter=None):
         self.storage_path = os.path.join(storage_path, "semantic")
         self._embeddings = embeddings
+        self._adapter = adapter or get_vector_adapter()
         os.makedirs(self.storage_path, exist_ok=True)
 
     def learn_experience(self, topic: str, content: Any, metadata: Dict[str, Any] = None):
@@ -101,20 +103,14 @@ class SemanticMemory:
             content = " ".join([str(i) for i in content])
         elif not isinstance(content, str):
             content = str(content)
-            
+
         doc = Document(page_content=content, metadata={"topic": topic, **(metadata or {})})
-        index_path = self.storage_path
-        try:
-            if os.path.exists(os.path.join(index_path, "index.faiss")):
-                vector_store = FAISS.load_local(index_path, self._embeddings, allow_dangerous_deserialization=True)
-                vector_store.add_documents([doc])
-            else:
-                vector_store = FAISS.from_documents([doc], self._embeddings)
-            vector_store.save_local(index_path)
+        success = self._adapter.add_document(self.storage_path, self._embeddings, doc)
+        if success:
             logger.info(f"💡 [经验学习] 已成功沉淀审计经验: {topic}")
-        except Exception as e:
-            logger.error(f"经验学习失败: {e}")
-        
+        else:
+            logger.warning(f"💡 [经验学习] 写入向量存储已跳过或异常: {topic}")
+
         # [V140.2] 同时同步至 Redis L1 缓存，加速后续热点查询
         redis_manager.set_cache(f"exp:{topic}", content, expire_hours=72)
 
@@ -126,45 +122,32 @@ class SemanticMemory:
             logger.success(f"⚡ [REDIS] 命中专家经验缓存: {query[:15]}...")
             return [Document(page_content=cached)]
 
-        if not os.path.exists(os.path.join(self.storage_path, "index.faiss")): return []
-        
-        try:
-            vector_store = FAISS.load_local(self.storage_path, self._embeddings, allow_dangerous_deserialization=True)
-            # 使用带评分的搜索
-            results_with_score = vector_store.similarity_search_with_score(query, k=k*2)
-            
-            # 2. 应用时间衰减 (Time Decay)
-            # Score = Similarity * exp(-decay_rate * days_passed)
-            # 注意：FAISS score 是 L2 距离，越小越相似，此处逻辑需适配
-            scored_docs = []
-            now = datetime.now()
-            for doc, raw_score in results_with_score:
-                # 转换 L2 为相似度近似值 (0~1)
-                similarity = 1.0 / (1.0 + raw_score)
-                
-                # 计算时间衰减
-                ts = doc.metadata.get("timestamp")
-                if ts:
-                    if isinstance(ts, str): ts = datetime.fromisoformat(ts)
-                    days_passed = (now - ts).days
-                    time_weight = np.exp(-decay_rate * days_passed)
-                else:
-                    time_weight = 0.8 # 无时间戳降权
-                
-                final_score = similarity * time_weight
-                scored_docs.append((doc, final_score))
-            
-            # 按最终得分排序并取前 K
-            scored_docs.sort(key=lambda x: x[1], reverse=True)
-            final_results = [d for d, s in scored_docs[:k]]
-
-            if final_results:
-                redis_manager.set_cache(f"exp_query:{query}", final_results[0].page_content)
-            return final_results
-            
-        except Exception as e:
-            logger.error(f"专家经验检索失败: {e}")
+        # 2. 向量检索与时间衰减评分
+        results_with_score = self._adapter.search_with_score(
+            self.storage_path, self._embeddings, query, k=k * 2
+        )
+        if not results_with_score:
             return []
+
+        now = datetime.now()
+        scored_docs = []
+        for doc, raw_score in results_with_score:
+            ts = doc.metadata.get("timestamp")
+            final_score = compute_decayed_score(
+                raw_l2_score=raw_score,
+                timestamp=ts,
+                decay_rate=decay_rate,
+                now=now,
+            )
+            scored_docs.append((doc, final_score))
+
+        # 按最终得分降序并取 Top K
+        scored_docs.sort(key=lambda x: x[1], reverse=True)
+        final_results = [d for d, _ in scored_docs[:k]]
+
+        if final_results:
+            redis_manager.set_cache(f"exp_query:{query}", final_results[0].page_content)
+        return final_results
 
 class CognitiveMemoryManager:
     """[V47.7] 本地化认知记忆中心"""
@@ -214,181 +197,13 @@ cognitive_memory_manager = CognitiveMemoryManager()
 semantic_memory_manager = cognitive_memory_manager
 
 # ============================================================
-# 4. 动作压缩与语义缓存层 (Action Compression)
+# 4. 动作压缩与语义缓存层 (委托至 action_cache 深模块)
 # ============================================================
-class ActionCacheManager:
-    def __init__(self, cache_file="data/action_cache.json"):
-        self.cache_file = cache_file
-        self.cache = self._load()
-        # [V159.0] 物理优化：构建精确匹配索引
-        self.lookup = {item["question"].strip(): item for item in self.cache}
-        self._engine = None
-
-    @property
-    def engine(self):
-        if self._engine is None:
-            if not cognitive_memory_manager._local_engine:
-                cognitive_memory_manager._init_components()
-            self._engine = cognitive_memory_manager._local_engine
-        return self._engine
-
-    def _load(self):
-        if os.path.exists(self.cache_file):
-            with open(self.cache_file, "r", encoding="utf-8-sig") as f:
-                return json.load(f)
-        return []
-
-    def _persist(self):
-        """物理持久化缓存至本地 JSON 文件"""
-        try:
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(self.cache, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"持久化缓存失败: {e}")
-
-    def evict(self, question: str):
-        """[V222.0] 物理淘汰指定脏缓存"""
-        q_strip = question.strip()
-        if q_strip in self.lookup:
-            del self.lookup[q_strip]
-        self.cache = [item for item in self.cache if item.get("question", "").strip() != q_strip]
-        self._persist()
-        try:
-            redis_manager.delete(f"action_cache:{q_strip}")
-        except Exception:
-            pass
-        logger.warning(f"🧹 [Action Cache] 契约断言未通过，已物理淘汰脏缓存: {question[:20]}...")
-
-    def save(self, question: str, sql: str, tasks: List[str] = None, methodology: str = "", fingerprint: Optional[Dict[str, str]] = None):
-        q_strip = question.strip()
-        emb = None
-        if self._engine or cognitive_memory_manager._local_engine:
-            try:
-                emb = self.engine.embed_query(question) if self.engine else None
-            except Exception:
-                emb = None
-        
-        item = {
-            "question": question, 
-            "sql": sql, 
-            "tasks": tasks or [], 
-            "methodology": methodology,
-            "embedding": emb,
-            "timestamp": datetime.now().isoformat()
-        }
-        if fingerprint:
-            item.update(fingerprint)
-
-        # 覆盖或追加
-        self.cache = [entry for entry in self.cache if entry.get("question", "").strip() != q_strip]
-        self.cache.append(item)
-        self.lookup[q_strip] = item
-        self._persist()
-        
-        # [V140.2] 分布式同步
-        try:
-            redis_manager.set_cache(f"action_cache:{q_strip}", json.dumps(item), expire_hours=48)
-        except Exception:
-            pass
-        logger.success(f"💾 [Action Cache] 已固化审计动作链至缓存 (含指纹): {question[:15]}...")
-
-    def get_or_compute(
-        self,
-        question: str,
-        fingerprint: Optional[Dict[str, str]] = None,
-        validator: Optional[Callable[[str], bool]] = None,
-        computer: Optional[Callable[[], str]] = None
-    ) -> str:
-        """
-        [Matt Pocock 确定性接缝] 带指纹契约与自愈淘汰机制的缓存存取
-        1. 查找缓存：根据 question 匹配已有记录；
-        2. 指纹校验：比对 prompt_version、schema_hash，不一致则判定为 Miss；
-        3. 契约校验：若传入 validator(sql) 返回 False（例如全量普查场景含有 LIMIT），
-           则立即从内存 lookup、cache 列表及本地 json 文件中物理淘汰（Evict）该脏记录；
-        4. 自愈计算：Cache Miss 或 Evict 时，调用 computer() 生成全新正确 SQL，
-           绑定新指纹并写回持久化存储；
-        5. 返回有效结果。
-        """
-        q_strip = question.strip()
-        matched_item = self.lookup.get(q_strip)
-
-        if matched_item:
-            # 1. 校验指纹
-            fingerprint_valid = True
-            if fingerprint:
-                for k, v in fingerprint.items():
-                    if matched_item.get(k) != v:
-                        fingerprint_valid = False
-                        logger.info(f"🔄 [Action Cache] 缓存指纹不匹配 ({k}: {matched_item.get(k)} != {v})，判定失效")
-                        break
-
-            if fingerprint_valid:
-                cached_sql = matched_item.get("sql", "")
-                # 2. 校验读取时契约
-                if validator:
-                    if validator(cached_sql):
-                        return cached_sql
-                    else:
-                        logger.warning(f"⚠️ [Action Cache] 缓存内容未通过运行时契约校验，执行淘汰: {question[:20]}")
-                        self.evict(question)
-                else:
-                    return cached_sql
-
-        # 3. Cache Miss 或被淘汰，触发自愈计算
-        if computer:
-            logger.info(f"⚙️ [Action Cache] 触发重新生成: {question[:20]}")
-            computed_sql = computer()
-            self.save(question=question, sql=computed_sql, fingerprint=fingerprint)
-            return computed_sql
-
-        return ""
-
-
-    def search(self, question: str, threshold: float = 0.85) -> Optional[Dict[str, Any]]:
-        """[V159.0] 高性能语义搜索：返回完整的动作链载荷"""
-        if not self.cache: return None
-        
-        q_strip = question.strip()
-        # A. 内存字典匹配 (L0)
-        if q_strip in self.lookup:
-            logger.success(f"⚡ [Action Cache] 字典精确命中: {question[:15]}...")
-            return self.lookup[q_strip]
-        
-        # B. Redis 分布式缓存匹配 (L1)
-        cached_json = redis_manager.get_cache(f"action_cache:{q_strip}")
-        if cached_json:
-            logger.success(f"🚀 [REDIS] 动作链缓存命中: {question[:15]}...")
-            return json.loads(cached_json)
-                
-        # 2. 语义相似度匹配
-        if not self.engine: return None
-        
-        query_emb = np.array(self.engine.embed_query(question))
-        query_norm = np.linalg.norm(query_emb)
-        
-        best_score = 0
-        best_item = None
-        
-        for item in self.cache:
-            if "embedding" in item:
-                target_emb = np.array(item["embedding"])
-                if len(target_emb) != len(query_emb): continue
-                
-                dot_product = np.dot(query_emb, target_emb)
-                target_norm = np.linalg.norm(target_emb)
-                score = dot_product / (query_norm * target_norm) if (query_norm * target_norm) != 0 else 0
-                
-                if score > best_score:
-                    best_score = score
-                    best_item = item
-                
-        if best_score >= threshold:
-            logger.success(f"🔍 [Action Cache] 语义命中 (Score: {best_score:.2f}): {question[:15]}...")
-            return best_item
-        return None
-
-sql_cache_manager = ActionCacheManager()
-action_cache_manager = sql_cache_manager
+from app.memory.action_cache import (
+    ActionCacheManager,
+    action_cache_manager,
+    sql_cache_manager,
+)
 
 # [V164.1] 挂载至统一记忆中枢
 from app.core.memory import memory_hub

@@ -189,6 +189,16 @@ class QdrantVectorAdapter:
             logger.error(f"[QdrantVectorAdapter] 检索向量异常 ({col_name}): {e}")
             return []
 
+    def search(
+        self,
+        storage_path: str,
+        embeddings: Any,
+        query: str,
+        k: int = 4,
+    ) -> List[Document]:
+        scored = self.search_with_score(storage_path, embeddings, query, k=k)
+        return [doc for doc, _ in scored]
+
     def delete_documents(self, storage_path: str, ids: List[str]) -> bool:
         client = self._get_client()
         if not client or not ids:
