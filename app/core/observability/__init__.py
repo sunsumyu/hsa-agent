@@ -96,6 +96,7 @@ from app.core.observability.pii_sanitizer import PIISanitizer
 from app.core.observability.adaptive_sampler import AdaptiveSampler
 from app.core.observability.hardened_tracer import HardenedTracer
 from app.core.observability.session_manager import SessionContextManager
+from app.core.observability.feedback_collector import FeedbackCollector
 
 __all__ = [
     "init_observability",
@@ -108,4 +109,5 @@ __all__ = [
     "AdaptiveSampler",
     "HardenedTracer",
     "SessionContextManager",
+    "FeedbackCollector",
 ]
