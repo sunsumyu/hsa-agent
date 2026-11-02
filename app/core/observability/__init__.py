@@ -95,6 +95,7 @@ def get_langfuse_prompt(prompt_name: str, fallback: Any) -> Any:
 from app.core.observability.pii_sanitizer import PIISanitizer
 from app.core.observability.adaptive_sampler import AdaptiveSampler
 from app.core.observability.hardened_tracer import HardenedTracer
+from app.core.observability.session_manager import SessionContextManager
 
 __all__ = [
     "init_observability",
@@ -106,4 +107,5 @@ __all__ = [
     "PIISanitizer",
     "AdaptiveSampler",
     "HardenedTracer",
+    "SessionContextManager",
 ]
