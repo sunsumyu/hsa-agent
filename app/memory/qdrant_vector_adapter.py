@@ -60,14 +60,16 @@ class QdrantVectorAdapter:
         if not QDRANT_AVAILABLE:
             logger.warning("[QdrantVectorAdapter] qdrant-client 未安装")
             return None
+        url = self.url or os.getenv("QDRANT_URL")
+        api_key = self.api_key or os.getenv("QDRANT_API_KEY")
         if self._client is None:
-            if not self.url:
+            if not url:
                 logger.warning("[QdrantVectorAdapter] QDRANT_URL 未配置")
                 return None
             try:
                 self._client = QdrantClient(
-                    url=self.url,
-                    api_key=self.api_key,
+                    url=url,
+                    api_key=api_key,
                     timeout=self.timeout,
                 )
             except Exception as e:
