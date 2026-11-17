@@ -2,6 +2,11 @@ import os
 import asyncio
 import sys
 
+# [V211.1 Windows 兼容性修复] 必须在任何事件循环创建前设置 SelectorEventLoopPolicy，
+# 否则 uvicorn.run(..., loop="asyncio") 与 psycopg AsyncConnectionPool 会因 ProactorEventLoop 报错。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # [V13.0 系统级避灾] 强制避开 Windows 4311-4410 保留端口段
 os.environ["PHOENIX_GRPC_PORT"] = "4517"
 os.environ["PHOENIX_COLLECTOR_GRPC_PORT"] = "4517"
@@ -116,11 +121,12 @@ if __name__ == "__main__":
     _host = os.getenv("UVICORN_HOST", "127.0.0.1")
     _port = int(os.getenv("UVICORN_PORT", "18883"))
     
-    # [V211.1 Windows 兼容性修复] 使用 SelectorEventLoop 避免 WinError 10014
+    # [V211.1 Windows 兼容性修复] loop="none" 防止 uvicorn 覆盖为 ProactorEventLoop，
+    # 由 asyncio.Runner(loop_factory=SelectorEventLoop) 直接驱动以兼容 psycopg 异步连接池。
     if sys.platform == "win32":
-        import asyncio
-        loop = asyncio.SelectorEventLoop()
-        asyncio.set_event_loop(loop)
-        uvicorn.run(app, host=_host, port=_port, loop="asyncio")
+        config = uvicorn.Config(app, host=_host, port=_port, loop="none")
+        server = uvicorn.Server(config)
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            runner.run(server.serve())
     else:
         uvicorn.run(app, host=_host, port=_port)
