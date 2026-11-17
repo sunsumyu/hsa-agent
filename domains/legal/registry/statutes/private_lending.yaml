@@ -1,0 +1,32 @@
+cause_of_action: "民间借贷纠纷"
+governing_laws:
+  - code: "PRC_CIVIL_CODE_679"
+    name: "中华人民共和国民法典"
+    article: "第六百七十九条"
+    title: "自然人之间借款合同的成立"
+  - code: "SPC_LENDING_INTERPRETATION_2020"
+    name: "最高人民法院关于审理民间借贷案件适用法律若干问题的规定"
+    article: "第二十五条"
+    title: "民间借贷利率上限与LPR4倍红线"
+essential_elements:
+  - element_id: "consensus"
+    name: "借贷合意"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["借条", "欠条", "借款协议", "微信聊天记录", "短信记录"]
+  - element_id: "actual_delivery"
+    name: "款项实际交付"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["银行转账凭证", "网银流水", "现金收据", "第三方支付电子回单"]
+  - element_id: "due_date_or_demand"
+    name: "还款期限届满或催告"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["借条到期条款", "催告还款记录", "律师函送达凭证"]
+  - element_id: "interest_rate"
+    name: "利息合规性"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    ceiling_rule: "4_times_lpr"
+    accepted_evidence_types: ["利息约定条款", "支付利息记录"]
