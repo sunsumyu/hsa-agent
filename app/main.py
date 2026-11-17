@@ -15,7 +15,7 @@ import app.core.logging_config # [V41.6] 物理链路可跳转配置
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from app.core.checkpointer import create_checkpointer
 
 from app.infra.model_manager import model_manager
 from app.infra.usage_tracker import usage_tracker
@@ -27,19 +27,10 @@ async def lifespan(app: FastAPI):
     # [V211.0] Register all services into the DI container before anything else
     register_services()
 
-    # 针对 LangGraph 0.2.x 与 aiosqlite 的性能/兼容性修复
-    async with AsyncSqliteSaver.from_conn_string("audit_checkpoints.db") as saver_instance:
-        # 兼容性补丁：处理可能的属性缺失 (针对 aio-sqlite 连接对象)
-        target = None
-        if hasattr(saver_instance, "conn"): target = saver_instance.conn
-        elif hasattr(saver_instance, "connection"): target = saver_instance.connection
-        
-        if target and not hasattr(target, "is_alive"):
-            logger.debug(">>> [兼容性补丁] 注入异步连接 is_alive 属性")
-            target.is_alive = lambda: True
-            
+    # [V220.0] 统一状态持久化层抽象工厂 (支持 SQLite / Postgres / Memory 配置切换)
+    async with create_checkpointer() as saver_instance:
         app.state.saver = saver_instance
-        logger.info(">>> [系统启动] 异步持久化层 (AsyncSqliteSaver) 已就绪")
+        logger.info(f">>> [系统启动] 状态持久化层已就绪: {saver_instance.__class__.__name__}")
         
         # [V4.9.8] 初始化双重观测栈 (Langfuse & Phoenix)
         init_observability()
@@ -56,7 +47,15 @@ async def lifespan(app: FastAPI):
         from app.core.observability import shutdown_observability
         shutdown_observability()
 
+        # [Matt Pocock Deep Module] 释放所有受管单例服务的外部连接与资源
+        from app.core.container import ServiceProvider
+        ServiceProvider.dispose_all()
+
 app = FastAPI(title="Argus - Medical Audit Agent", lifespan=lifespan)
+
+# [Matt Pocock Deep Module] 注入统一 API 响应信封与全局异常拦截器
+from app.api.envelope import register_api_exception_handlers
+register_api_exception_handlers(app)
 
 # [重构 V10.0] 路由分组: palace / misc 端点已提取到 app/routes/
 from app.routes.palace import router as palace_router
@@ -66,6 +65,7 @@ from app.routes.chat import router as chat_router
 from app.routes.memory import router as memory_router
 from app.routes.usage import router as usage_router
 from app.routes.prompts import router as prompts_router # [V192.0] 提示词版本管理
+from app.routes.legal_chat import router as legal_chat_router # [Legal Agent] 法律辩法多轮流式路由
 app.include_router(palace_router)
 app.include_router(misc_router)
 app.include_router(graph_state_router)
@@ -73,6 +73,7 @@ app.include_router(chat_router)
 app.include_router(memory_router)
 app.include_router(usage_router)
 app.include_router(prompts_router) # [V192.0]
+app.include_router(legal_chat_router) # [Legal Agent]
 
 # 跨域配置: 从环境变量读取允许的来源, 默认仅本地开发
 # 生产环境必须设置 CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
