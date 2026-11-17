@@ -45,36 +45,42 @@ def test_models_endpoint_contains_legal_agent(api_client):
 
 
 def test_chat_stream_explicit_legal_model(api_client):
-    """验证前端选择 legal-agent 发起对话时的完整 SSE 协议流"""
-    payload = {
+    """验证前端选择 legal-agent 发起对话时的 HITL 中断补证 + 恢复出庭心证全链路"""
+    headers = {
+        "X-Session-Id": "test-legal-fe-session-hitl-1",
+        "X-Tenant-Id": "test-tenant",
+    }
+
+    # 第 1 轮：仅有借条无转账凭证，且未实际提交原件 -> 主动触发 HITL 人工补证中断
+    payload_turn1 = {
         "input": "张三向李四借款10万元并出具借条，约定年利率36%，借期1年，已逾期3年半未催告。",
         "modelId": "legal-agent",
     }
-    headers = {
-        "X-Session-Id": "test-legal-fe-session-1",
-        "X-Tenant-Id": "test-tenant",
+    resp1 = api_client.post("/agent/chat", json=payload_turn1, headers=headers)
+    assert resp1.status_code == 200
+    raw1 = resp1.text
+
+    assert "[[[ENGINE:Argus-Legal-Agent]]]" in raw1
+    assert "[[[STATUS:" in raw1
+    assert "### 📋 一、涉案案情事实认定与证据审查" in raw1
+    assert "### 🎯 二、法定构成要件与争议焦点" in raw1
+    assert "### ⚔️ 三、法庭红蓝攻防对抗推演" in raw1
+    assert "### 🛡️ 四、神经符号法理门禁审查" in raw1
+    assert "法理门禁刚性拦截" in raw1 or "款项交付" in raw1
+    assert "人工介入核验" in raw1
+    assert "跳过" in raw1
+    assert "[[[RESOURCE:" in raw1
+
+    # 第 2 轮：用户补充提交转账回单原件 -> 自动从挂起点恢复，重新审查并通过门禁，出具法官心证
+    payload_turn2 = {
+        "input": "已补充提交招行银行转账电子回单及借条原件，收款人张三，金额10万元。",
+        "modelId": "legal-agent",
     }
-    resp = api_client.post("/agent/chat", json=payload, headers=headers)
-    assert resp.status_code == 200
-    raw_text = resp.text
-
-    # 1. 验证前端引擎身份与状态标识
-    assert "[[[ENGINE:Argus-Legal-Agent]]]" in raw_text
-    assert "[[[STATUS:" in raw_text
-
-    # 2. 验证事实认定、争议焦点、红蓝对抗与心证意见书
-    assert "### 📋 一、涉案案情事实认定与证据审查" in raw_text
-    assert "### 🎯 二、法定构成要件与争议焦点" in raw_text
-    assert "### ⚔️ 三、法庭红蓝攻防对抗推演" in raw_text
-    assert "### 🛡️ 四、神经符号法理门禁审查" in raw_text
-    assert "【法官心证评判】" in raw_text
-
-    # 3. 验证神经符号门禁刚性拦截警告 (交付凭证/诉讼时效/4倍LPR等)
-    assert "法理门禁刚性拦截" in raw_text or "款项交付" in raw_text or "诉讼时效" in raw_text or "超过一年期LPR四倍" in raw_text
-
-    # 4. 验证算力 HUD 资源数据包
-    assert "[[[RESOURCE:" in raw_text
-    assert "JUDGE" in raw_text
+    resp2 = api_client.post("/agent/chat", json=payload_turn2, headers=headers)
+    assert resp2.status_code == 200
+    raw2 = resp2.text
+    assert "已提交原件/核验" in raw2
+    assert "【法官心证评判】" in raw2
 
 
 def test_chat_stream_auto_routing_legal_keywords(api_client):

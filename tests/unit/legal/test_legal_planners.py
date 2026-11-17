@@ -7,7 +7,17 @@ def test_fact_extractor_parses_evidence_and_facts():
     facts, evidence = extractor.extract(user_input)
     assert len(evidence) >= 1
     assert any("转账" in e.title for e in evidence)
+    assert all(e.submission_status == "仅口头陈述提及（待提交）" for e in evidence)
+    assert all(e.authenticity_level == "存疑" for e in evidence)
     assert len(facts) >= 1
+
+
+def test_fact_extractor_does_not_hallucinate_negated_evidence():
+    extractor = FactExtractor()
+    user_input = "王五持有借条，但没有转账记录和流水，无法提供回单。"
+    facts, evidence, missing = extractor.extract_with_missing(user_input)
+    assert not any("转账" in e.title for e in evidence)
+    assert len(missing) >= 1
 
 def test_focus_planner_generates_foci():
     planner = FocusPlanner()

@@ -9,7 +9,8 @@ class EvidenceItem(BaseModel):
     content_summary: str
     proof_date: Optional[str] = None
     amount: Optional[float] = None
-    authenticity_level: Literal["高", "中", "存疑"] = "中"
+    authenticity_level: Literal["高", "中", "存疑"] = "存疑"
+    submission_status: Literal["已提交原件/核验", "仅口头陈述提及（待提交）", "缺失/待补充"] = "仅口头陈述提及（待提交）"
 
 class CaseFact(BaseModel):
     fact_id: str
@@ -50,3 +51,4 @@ class LegalCaseState(BaseCognitiveState):
     active_focus_id: Optional[str]
     dialectic_history: List[DialecticTurn]
     final_disposition: Optional[str]
+    missing_evidence: List[str]
