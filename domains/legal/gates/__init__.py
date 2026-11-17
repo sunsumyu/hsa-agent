@@ -7,9 +7,11 @@ from domains.legal.gates.usury_evaluator import (
 from domains.legal.gates.estoppel_detector import (
     EstoppelDetector, EstoppelEvaluationResult
 )
+from domains.legal.gates.legal_logic_gate import LegalLogicGate
 
 __all__ = [
     "LimitationCalculator", "LimitationEvaluationResult",
     "UsuryEvaluator", "UsuryEvaluationResult",
-    "EstoppelDetector", "EstoppelEvaluationResult"
+    "EstoppelDetector", "EstoppelEvaluationResult",
+    "LegalLogicGate"
 ]
