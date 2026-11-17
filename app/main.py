@@ -114,7 +114,7 @@ if __name__ == "__main__":
         sys.exit(0) # 本阶段我们仅需逻辑占位，真正的检查已在之前的替换中通过
 
     _host = os.getenv("UVICORN_HOST", "127.0.0.1")
-    _port = int(os.getenv("UVICORN_PORT", "18882"))
+    _port = int(os.getenv("UVICORN_PORT", "18883"))
     
     # [V211.1 Windows 兼容性修复] 使用 SelectorEventLoop 避免 WinError 10014
     if sys.platform == "win32":
