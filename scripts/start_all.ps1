@@ -55,31 +55,54 @@ $BackendCmd = "cd /d `"$BackendDir`" && title Argus-Backend (18883) && `"$Python
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $BackendCmd -WorkingDirectory $BackendDir
 
 # 3. 启动前端窗口 (端口 8888)
-Write-Host "[2/2] 正在启动前端服务 (http://localhost:8888)..." -ForegroundColor Green
-$FrontendCmd = "cd /d `"$FrontendDir`" && title Argus-Frontend (8888) && trunk serve --port 8888"
+Write-Host "[2/2] 正在启动前端服务 (http://127.0.0.1:8888)..." -ForegroundColor Green
+$FrontendNotice = "echo [提示] 前端服务启动中... 注意：请勿用鼠标点击此黑框(否则Windows会进入选择暂停模式，若误点请按键盘 Esc 键解除)"
+$FrontendCmd = "cd /d `"$FrontendDir`" && title Argus-Frontend (8888) && $FrontendNotice && trunk serve --port 8888 --address 127.0.0.1 --disable-address-lookup --skip-version-check"
 Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $FrontendCmd -WorkingDirectory $FrontendDir
 
-# 4. 等待就绪并打开浏览器
+# 4. 等待后端与前端就绪并打开浏览器
 if (-not $NoBrowser) {
-    Write-Host "正在等待服务就绪 (最多 30 秒)..." -ForegroundColor Gray
-    $ready = $false
+    Write-Host "正在等待服务完全就绪 (等待期间请勿点击黑框)..." -ForegroundColor Gray
+    
+    # 4.1 等待后端 (18883)
+    $backendReady = $false
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
         try {
             $r = Invoke-WebRequest -Uri "http://127.0.0.1:18883/agent/models" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
             if ($r.StatusCode -eq 200) {
-                $ready = $true
+                $backendReady = $true
+                break
+            }
+        } catch {}
+    }
+    if ($backendReady) {
+        Write-Host "✅ [1/2] 后端服务已就绪 (http://127.0.0.1:18883)" -ForegroundColor Green
+    } else {
+        Write-Host "⚠️ 后端服务初始化中..." -ForegroundColor Yellow
+    }
+
+    # 4.2 等待前端 (8888) 监听
+    Write-Host "正在等待前端服务响应 (8888 端口)..." -ForegroundColor Gray
+    $frontendReady = $false
+    for ($i = 0; $i -lt 45; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            $rf = Invoke-WebRequest -Uri "http://127.0.0.1:8888/" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+            if ($rf.StatusCode -eq 200) {
+                $frontendReady = $true
                 break
             }
         } catch {}
     }
 
-    if ($ready) {
-        Write-Host "✅ 后端已就绪，正在打开浏览器: http://localhost:8888/legal" -ForegroundColor Green
+    if ($frontendReady) {
+        Write-Host "✅ [2/2] 前端服务已就绪 (8888)，正在打开浏览器: http://localhost:8888/legal" -ForegroundColor Green
+        Start-Process "http://localhost:8888/legal"
     } else {
-        Write-Host "⚠️ 后端仍在初始化中，已先打开浏览器（若页面提示连接中请稍等几秒刷新）" -ForegroundColor Yellow
+        Write-Host "⚠️ 前端 8888 启动超时，自动通过后端备用端点打开: http://localhost:18883/legal" -ForegroundColor Yellow
+        Start-Process "http://localhost:18883/legal"
     }
-    Start-Process "http://localhost:8888/legal"
 }
 
-Write-Host "启动完成！关闭弹出的两个控制台窗口即可停止服务。" -ForegroundColor Cyan
+Write-Host "启动流程已完成！关闭弹出的两个控制台窗口即可停止服务。" -ForegroundColor Cyan

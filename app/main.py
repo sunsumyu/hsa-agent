@@ -106,6 +106,20 @@ app.add_middleware(
 )
 logger.info(f"[CORS] allowed_origins={_cors_origins} allow_credentials={_allow_credentials}")
 
+# [Frontend Static Files] 若前端已构建 dist 目录，挂载到 FastAPI 作为统一或备用访问点 (http://127.0.0.1:18883/legal)
+_frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "argus-frontend", "dist"))
+if os.path.exists(_frontend_dist):
+    from fastapi.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+    
+    @app.get("/legal")
+    @app.get("/legal/")
+    async def serve_legal_page():
+        return FileResponse(os.path.join(_frontend_dist, "index.html"))
+        
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend_static")
+    logger.info(f"[Frontend] 前端静态资源已就绪: http://127.0.0.1:18883/legal (源目录: {_frontend_dist})")
+
 if __name__ == "__main__":
     import uvicorn
     import sys
