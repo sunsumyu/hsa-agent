@@ -14,13 +14,17 @@ from domains.legal.agents.llm_client import ainvoke_legal_json
 
 
 _NEGATION_RE = re.compile(r"(?:无|没有|未|缺少|缺失|丢失|无法提供|拿不出)[^，。；,.]{0,8}")
-_SUBMITTED_HINTS = ("已提交", "已上传", "已补充", "补充提交", "附上", "附有", "提交了原件", "经质证", "已核验")
+_SUBMITTED_HINTS = (
+    "已提交", "已上传", "已补充", "补充提交", "附上", "附有", "提交了原件", "经质证", "已核验",
+    "【证据", "【借条", "【欠条", "【银行", "电子回单", "回单编号", "签字捺印", "送货签收单", "转账附言",
+    "聊天记录", "单据编号"
+)
 
-_FACT_SYSTEM_PROMPT = """你是一名严谨的中国民商事审判书记员与证据审查专家。请从当事人的陈述中抽取客观事实与证据状态，并严格遵守防幻觉规则：
-1. 只能抽取文本中明确陈述的事实，严禁脑补未提及的时间、金额或凭证。
-2. 严格区分"口头陈述提及"与"已实际提交"：
-   - 如果用户仅口头说"有借条""留有银行回单""有转账记录"，但未说明已上传/提交原件或经质证，必须将 submission_status 设为 "仅口头陈述提及（待提交）"，authenticity_level 设为 "存疑"。
-   - 仅当用户明确表示"已提交/已上传/附原件/经质证确认"时，submission_status 才可设为 "已提交原件/核验"，authenticity_level 设为 "高" 或 "中"。
+_FACT_SYSTEM_PROMPT = """你是一名严谨的中国民商事审判书记员与证据审查专家。请从当事人的陈述与出具的凭证文本中抽取客观事实与证据状态，并严格遵守防幻觉规则：
+1. 只能抽取文本中明确陈述或出具的事实，严禁脑补未提及的时间、金额或凭证。
+2. 严格区分"仅口头陈述提及"与"已出具/提交证据文本"：
+   - 如果用户仅口头单方主张"有借条""留有银行回单""双方有转账记录"，但并未出具具体的凭证文本内容，必须将 submission_status 设为 "仅口头陈述提及（待提交）"，authenticity_level 设为 "存疑"。
+   - 如果用户出具了具体的票据凭证文本（如载有出借人/借款人、借款条款、签字捺印的借条文本，或载有回单编号、付款人、收款人、转账金额与附言的银行电子回单，或微信催款记录文本，或送货签收单等），或明确表示"已提交原件/出具凭证文本/经质证确认"，必须将 submission_status 设为 "已提交原件/核验"，authenticity_level 设为 "高"，并提取其关键证明要素。
 3. 遇到否定句（如"没有转账记录""无借条""无法提供收条""拿不出合伙协议"），严禁生成该证据项！必须将该项列入 missing_evidence。
 
 请严格返回如下 JSON 格式：
@@ -30,15 +34,15 @@ _FACT_SYSTEM_PROMPT = """你是一名严谨的中国民商事审判书记员与�
   ],
   "evidence": [
     {
-      "title": "证据名称（如：当事人陈述提及的借条）",
+      "title": "证据名称（如：招商银行电子回单、借条原件文本）",
       "evidence_type": "书证|电子数据|视听资料|证人证言|当事人陈述",
-      "content_summary": "待证明内容",
+      "content_summary": "待证明内容及关键记载（如收款人、金额、附言、借款人签字）",
       "amount": null,
       "authenticity_level": "存疑|中|高",
       "submission_status": "仅口头陈述提及（待提交）|已提交原件/核验|缺失/待补充"
     }
   ],
-  "missing_evidence": ["缺失或需补充提交的关键凭证清单"]
+  "missing_evidence": ["缺失或需补充提交的关键凭证清单（若已提交相应凭证原件文本，此处应为空数组）"]
 }"""
 
 
@@ -85,6 +89,26 @@ class FactExtractor:
             ))
         elif any(k in text for k in ("借条", "欠条", "协议", "合同")):
             missing_list.append("借条 / 书面合同原件")
+
+        if _has_keyword_affirmatively(text, ("微信", "聊天记录", "催款")):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title="微信催款及债务确认记录",
+                evidence_type="电子数据",
+                content_summary="当事人沟通记录（证明还款催告与诉讼时效中断）",
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
+
+        if _has_keyword_affirmatively(text, ("送货", "签收", "收货单", "入库单")):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title="物资送货签收单",
+                evidence_type="书证",
+                content_summary="买卖合同履行（货物送达及收货方盖章签收）",
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
 
         if not is_submitted and evidence_list:
             missing_list.append("上述陈述提及凭证的扫描件/原件核验材料")
