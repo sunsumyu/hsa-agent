@@ -65,9 +65,14 @@ class AuditJudge:
             raw_data=sanitized_data
         )
         
-        # 使用最高逻辑能力的模型进行终审
-        llm, _ = model_manager.get_llm_by_role(“planner_heavy”) 
-        response = await llm.ainvoke(prompt)
+        # 使用最高逻辑能力的模型进行终审 (经由统一供给层，注入可观测性与韧性监控)
+        from app.core.llm_provider import llm_provider
+        from langchain_core.messages import HumanMessage
+        response = await llm_provider.chat(
+            role="planner_heavy",
+            messages=[HumanMessage(content=prompt)],
+            config={"metadata": {"role": "judge", "target": "evaluate_finding"}}
+        )
         
         try:
             # [V60.0] Step 2: 更健壮的 JSON 提取

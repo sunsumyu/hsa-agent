@@ -141,3 +141,39 @@ def test_transitional_factory_functions():
     m3 = EnrichedChatAnthropic(model_name="claude-3-5-sonnet-20241022", anthropic_api_key="fake-key", endpoint_id="ep-3")
     assert isinstance(m3, ResilientChatModel)
     assert m3.endpoint_id == "ep-3"
+
+
+class KwargsCapturingChatModel(MockBaseChatModel):
+    """记录底层 _generate 收到的 kwargs，用于验证 bind_tools 绑定的参数是否真正下发。"""
+    seen_kwargs: dict = {}
+
+    def bind_tools(self, tools, **kwargs):
+        return self.bind(tools=tools, **kwargs)
+
+    def _generate(self, messages, stop=None, **kwargs):
+        self.seen_kwargs = dict(kwargs)
+        return super()._generate(messages, stop=stop, **kwargs)
+
+
+_TOOL = {"type": "function", "function": {"name": "f", "description": "d",
+                                          "parameters": {"type": "object", "properties": {}}}}
+
+
+@pytest.mark.asyncio
+async def test_resilient_model_bind_tools_forwards_tools_async():
+    """回归：bind_tools 后 tools 必须下发到底层模型 (BFCL 评测发现的静默丢参 bug)"""
+    from app.infra.enriched_llm import ResilientChatModel
+    mock = KwargsCapturingChatModel(response_text="ok")
+    wrapper = ResilientChatModel(inner_model=mock, endpoint_id="test-tools-node").bind_tools([_TOOL])
+
+    await wrapper.ainvoke([HumanMessage(content="查询违规")])
+    assert mock.seen_kwargs.get("tools") == [_TOOL]
+
+
+def test_resilient_model_bind_tools_forwards_tools_sync():
+    from app.infra.enriched_llm import ResilientChatModel
+    mock = KwargsCapturingChatModel(response_text="ok")
+    wrapper = ResilientChatModel(inner_model=mock, endpoint_id="test-tools-node").bind_tools([_TOOL])
+
+    wrapper.invoke([HumanMessage(content="查询违规")])
+    assert mock.seen_kwargs.get("tools") == [_TOOL]

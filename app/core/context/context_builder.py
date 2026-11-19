@@ -9,6 +9,7 @@ app/core/context_builder.py
 """
 
 import os
+import re
 import math
 import datetime
 from dataclasses import dataclass, field
@@ -19,42 +20,33 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AI
 from app.core.schemas import RoleConfigV2
 from app.core.context.context_selector import AdaptiveSelector
 
+from app.core.context.turn_history_compactor import (
+    estimate_tokens as _estimate_tokens_fn,
+    compact_past_turns as _compact_past_turns_fn,
+    compress_messages_by_budget as _compress_messages_by_budget_fn,
+)
+from app.core.context.context_budget_scheduler import ContextBudgetScheduler, context_budget_scheduler
+from app.core.context.context_payload_renderer import ContextPayloadRenderer, context_payload_renderer
+
 @dataclass
 class ContextPacket:
     """[V210.0] 候选信息包 ── 统一管理异构审计证据"""
     content: str
     timestamp: datetime.datetime = field(default_factory=datetime.datetime.now)
     token_count: int = 0
-    relevance_score: float = 0.5
+    relevance_score: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.relevance_score = max(0.0, min(1.0, self.relevance_score))
+        if self.relevance_score is not None:
+            self.relevance_score = max(0.0, min(1.0, self.relevance_score))
         if self.token_count <= 0:
             self.token_count = self.estimate_tokens(self.content)
 
     @staticmethod
     def estimate_tokens(text: Any) -> int:
-        """中英混合高精度 Token 估算器"""
-        if not text:
-            return 0
-        if isinstance(text, list):
-            # 处理多模态/结构化消息内容列表 [{'type': 'text', 'text': '...'}]
-            text_parts = []
-            for item in text:
-                if isinstance(item, str):
-                    text_parts.append(item)
-                elif isinstance(item, dict) and "text" in item:
-                    text_parts.append(str(item["text"]))
-                else:
-                    text_parts.append(str(item))
-            text = " ".join(text_parts)
-        elif not isinstance(text, str):
-            text = str(text)
-
-        chinese_chars = sum(1 for ch in text if isinstance(ch, str) and '\u4e00' <= ch <= '\u9fff')
-        english_words = len([w for w in text.split() if w])
-        return int(chinese_chars + english_words * 1.3)
+        """中英混合高精度 Token 估算器（委托至 turn_history_compactor 深模块）"""
+        return _estimate_tokens_fn(text)
 
 
 @dataclass
@@ -73,12 +65,17 @@ class ContextConfig:
 
 
 class ContextBuilder:
-    def __init__(self, role_config: RoleConfigV2):
+    def __init__(self, role_config: Optional[RoleConfigV2] = None):
+        if role_config is None:
+            from app.core.schemas import RoleConfigV2
+            role_config = RoleConfigV2(pool="primary", max_input_tokens=4000)
         self.role_config = role_config
         # 弹性 Token 采样上限
         self.max_input_tokens = getattr(role_config, 'max_input_tokens', 4000)
         self.config = ContextConfig(max_tokens=self.max_input_tokens)
         self.selector = AdaptiveSelector()
+        self.budget_scheduler = ContextBudgetScheduler(config=self.config)
+        self.payload_renderer = context_payload_renderer
 
     async def build_optimal_context(
         self, 
@@ -167,15 +164,29 @@ class ContextBuilder:
                     metadata={"type": "scene_enforcement", "priority": "high"}
                 ))
 
-            tables = target_tables if target_tables else [schema_registry.get_main_table()]
-            for table in tables:
+            # [V227.0 Cache-Alignment] 确定性表排序：主表固化居首，辅助表按表名字母升序排列，实现跨查询 DDL 前缀字节级 100% 对齐
+            main_tbl = schema_registry.get_main_table()
+            candidate_tables = target_tables if target_tables else [main_tbl]
+            sorted_tables = []
+            if main_tbl in candidate_tables:
+                sorted_tables.append(main_tbl)
+            for t in sorted(set(candidate_tables)):
+                if t != main_tbl:
+                    sorted_tables.append(t)
+            tables = sorted_tables
+
+            for idx, table in enumerate(tables):
                 entry = schema_registry.get_table(table)
                 if entry:
-                    detail_xml = self.selector.schema_to_xml(entry)
+                    # [V226.0 弹性分级] 前 2 张核心表注入完备字段；辅助表仅注入轻量头描述，节省 3000+ Tokens
+                    if idx < 2:
+                        detail_xml = self.selector.schema_to_xml(entry)
+                    else:
+                        detail_xml = self.selector.schema_to_header_only(entry)
                     packets.append(ContextPacket(
                         content=detail_xml,
-                        relevance_score=1.0,  # 物理 Schema 拥有最高相关性与确定性
-                        metadata={"type": "clickhouse_schema", "table_name": table, "priority": "high"}
+                        relevance_score=1.0 if idx == 0 else 0.8,
+                        metadata={"type": "clickhouse_schema", "table_name": table, "priority": "high" if idx == 0 else "medium"}
                     ))
         except Exception as e:
             logger.warning(f"⚠️ [ContextBuilder] Gather Schemas 失败: {e}")
@@ -202,284 +213,50 @@ class ContextBuilder:
             os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true" or
             os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true"
         )
-        note_file = "data/audit_notes.md"
-        if not is_isolated_mode and os.path.exists(note_file):
-            try:
-                with open(note_file, "r", encoding="utf-8") as f:
-                    note_content = f.read().strip()
-                if note_content:
-                    # [V215.0] 为了防止 Token 爆炸和跨任务交叉污染，我们只加载最近的 3 条便签线索
-                    note_parts = [p.strip() for p in note_content.split("---") if p.strip()]
-                    recent_notes = note_parts[-3:] if len(note_parts) > 3 else note_parts
-                    note_content_cleaned = "\n\n---\n\n".join(recent_notes)
-                    
-                    logger.info("📓 [ContextBuilder] 成功 Gather 最近 3 条外部审计便签线索")
-                    packets.append(ContextPacket(
-                        content=note_content_cleaned,
-                        relevance_score=1.0,
-                        metadata={"type": "note_evidence", "priority": "high"}
-                    ))
-            except Exception as e:
-                logger.warning(f"读取外部便签失败: {e}")
+        if not is_isolated_mode:
+            from app.skills.audit_note_store import audit_note_store
+            recent_notes = audit_note_store.read_relevant_notes(query=query, limit=3)
+            if recent_notes:
+                note_content_cleaned = "\n\n---\n\n".join(recent_notes)
+                logger.info("📓 [ContextBuilder] 成功 Gather 高优/相关外部审计便签线索")
+                packets.append(ContextPacket(
+                    content=note_content_cleaned,
+                    relevance_score=1.0,
+                    metadata={"type": "note_evidence", "priority": "high"}
+                ))
 
         return packets
 
     def _select_packets(self, packets: List[ContextPacket], query: str, budget: int) -> List[ContextPacket]:
-        # 分离高优先级指令/便签和评估池
-        high_priority = [p for p in packets if p.metadata.get("priority") == "high"]
-        evaluate_pool = [p for p in packets if p.metadata.get("priority") != "high"]
-
-        high_tokens = sum(p.token_count for p in high_priority)
-        remaining_budget = budget - high_tokens
-
-        if remaining_budget <= 0:
-            logger.warning("🚨 [ContextBuilder] 高优先级指令/便签已满额物理预算！")
-            return high_priority
-
-        scored_pool = []
-        for p in evaluate_pool:
-            # 1. 关键词 Jaccard 相关度
-            rel = self._calculate_jaccard(p.content, query)
-            p.relevance_score = rel
-            # 2. 指数时间衰减新近度
-            rec = self._calculate_time_decay(p.timestamp)
-            
-            # 综合评分 = 0.7 * 相似度 + 0.3 * 新近度
-            combined = self.config.relevance_weight * rel + self.config.recency_weight * rec
-            
-            if rel >= self.config.min_relevance or p.metadata.get("type") == "clickhouse_schema":
-                scored_pool.append((combined, p))
-
-        # 降序排列
-        scored_pool.sort(key=lambda x: x[0], reverse=True)
-
-        # 贪心装载
-        selected = high_priority.copy()
-        current_tokens = high_tokens
-
-        for score, p in scored_pool:
-            if current_tokens + p.token_count <= budget:
-                selected.append(p)
-                current_tokens += p.token_count
-            else:
-                # 触发 ClickHouse 表结构的弹性退化降级机制！
-                if p.metadata.get("type") == "clickhouse_schema":
-                    try:
-                        from app.core.registry.schema_registry import schema_registry
-                        entry = schema_registry.get_table(p.metadata["table_name"])
-                        if entry:
-                            header_xml = self.selector.schema_to_header_only(entry)
-                            header_t = ContextPacket.estimate_tokens(header_xml)
-                            if current_tokens + header_t <= budget:
-                                selected.append(ContextPacket(
-                                    content=header_xml,
-                                    relevance_score=p.relevance_score,
-                                    metadata=p.metadata
-                                ))
-                                current_tokens += header_t
-                    except Exception as schema_degrade_err:
-                        logger.warning(f"Schema 降级处理失败: {schema_degrade_err}")
-                else:
-                    # 预算饱和，优雅舍弃后续包
-                    break
-
-        return selected
+        """[V210.0 Deep Module] 预算评分排序与贪心装载（委托至 ContextBudgetScheduler 深模块）"""
+        return self.budget_scheduler.schedule(
+            packets=packets,
+            query=query,
+            budget=budget,
+            schema_selector=self.selector,
+        )
 
     def _calculate_jaccard(self, text: str, query: str) -> float:
-        w_text = set(text.lower().split())
-        w_query = set(query.lower().split())
-        if not w_query:
-            return 0.0
-        return len(w_text & w_query) / len(w_text | w_query)
+        """计算词法 Jaccard 相似度（向后兼容委托）"""
+        return self.budget_scheduler._calculate_jaccard(text, query)
 
     def _calculate_time_decay(self, timestamp: datetime.datetime) -> float:
-        age_hours = (datetime.datetime.now() - timestamp).total_seconds() / 3600
-        decay_factor = 0.1
-        return max(0.1, min(1.0, math.exp(-decay_factor * age_hours)))
+        """计算新近度时间衰减（向后兼容委托）"""
+        return self.budget_scheduler._calculate_time_decay(timestamp)
 
     def _structure_into_messages(self, selected: List[ContextPacket], original_history: List[BaseMessage]) -> List[BaseMessage]:
-        # 分离出 System 消息和历史聊天记录 (保留消息的原有对象和绝对自然顺序，防止 API 400 校验失效)
-        system_msgs = [m for m in original_history if m.type == 'system']
-        chat_msgs = [m for m in original_history if m.type != 'system']
-        
-        schemas, memories, notes, alignments, enforcements = [], [], [], [], []
+        """[V210.0 Deep Module] 事实载荷 XML 组装与前缀缓存装配（委托至 ContextPayloadRenderer 深模块）"""
+        return self.payload_renderer.render(selected, original_history)
 
-        for p in selected:
-            t = p.metadata.get("type")
-            if t == "scene_enforcement":
-                enforcements.append(p.content)
-            elif t == "clickhouse_schema":
-                schemas.append(p.content)
-            elif t == "cognitive_memory":
-                memories.append(p.content)
-            elif t == "note_evidence":
-                notes.append(p.content)
-            elif t == "semantic_alignment":
-                alignments.append(p.content)
-
-        # 构建干净的事实载荷 XML
-        xml_payload = "<context_engineering_payload>\n"
-        
-        # [V220.0] 强制表选择与字段契约置于最首位，消除幻觉表与错误列名
-        if enforcements:
-            xml_payload += "  <mandatory_table_enforcements>\n"
-            for enf in enforcements:
-                xml_payload += f"    {enf}\n"
-            xml_payload += "  </mandatory_table_enforcements>\n"
-        
-        # [V215.1] DDL 物理 Schema 关系到 SQL 编写的生死，必须置于 XML 前部，避免被 Compaction 截断丢失
-        if schemas:
-            xml_payload += "  <database_schema_context>\n"
-            for schema in schemas:
-                xml_payload += f"    {schema}\n"
-            xml_payload += "  </database_schema_context>\n"
-
-        if alignments:
-            for align in alignments:
-                xml_payload += f"  {align}\n"
-        
-        if memories:
-            xml_payload += "  <experiential_context>\n"
-            for mem in memories:
-                xml_payload += f"    {mem}\n"
-            xml_payload += "  </experiential_context>\n"
-
-        if notes:
-            xml_payload += "  <structured_audit_notes>\n"
-            for note in notes:
-                xml_payload += f"    {note}\n"
-            xml_payload += "  </structured_audit_notes>\n"
-            
-        xml_payload += "</context_engineering_payload>"
-
-        # 组装最终消息链
-        final_messages = []
-        # 1. 填入初始 System 指令
-        final_messages.extend(system_msgs)
-        # 2. 将 XML 事实载荷物理隔离地注入系统指令后方 (前置载荷)
-        final_messages.append(SystemMessage(content=f"【当前审计黄金上下文载荷 (GSSC 动态精选渲染版)】：\n{xml_payload}"))
-        # 3. 填入完整的历史聊天记录 (保证绝对自然顺序留在最尾部)
-        final_messages.extend(chat_msgs)
-        
-        return final_messages
+    def _compact_past_turns(self, chat_msgs: List[BaseMessage]) -> List[BaseMessage]:
+        """[V228.0 SPEC-227] 会话级长链上下文治理（委托至 turn_history_compactor 深模块）"""
+        return _compact_past_turns_fn(chat_msgs)
 
     async def _compress_messages_budget(self, messages: List[BaseMessage]) -> List[BaseMessage]:
-        # 对整个消息流执行结构化兜底截断压缩，并应用 Model-Driven Compaction (摘要重置) 机制
-        total_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in messages)
-        if total_tokens <= self.config.max_tokens:
-            return messages
-
-        logger.warning(f"⚠️ [ContextBuilder] 整合后消息流超限 ({total_tokens} > {self.config.max_tokens})，触发 Model-Driven Compaction 摘要重置！")
-        
-        # 区分消息类型
-        system_msgs = []
-        gssc_msg = None
-        chat_msgs = []
-
-        for m in messages:
-            if isinstance(m, SystemMessage) and "【当前审计黄金上下文载荷" in str(getattr(m, "content", "")):
-                gssc_msg = m
-            elif m.type == 'system':
-                system_msgs.append(m)
-            else:
-                chat_msgs.append(m)
-
-        # 优先保留:
-        # 1. 初始 System 消息
-        # 2. 最新的 10 个聊天记录 (确保 Agent 的即时交互记忆不丢失)
-        keep_recent_count = 10
-        recent_chat_msgs = chat_msgs[-keep_recent_count:] if len(chat_msgs) > keep_recent_count else chat_msgs
-        older_chat_msgs = chat_msgs[:-keep_recent_count] if len(chat_msgs) > keep_recent_count else []
-
-        # 计算已保留消息的 token
-        retained_base = system_msgs + recent_chat_msgs
-        base_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in retained_base)
-
-        # 预算分配 (预留约 400 给摘要生成)
-        budget_for_others = self.config.max_tokens - base_tokens - 400
-        
-        gssc_tokens = ContextPacket.estimate_tokens(gssc_msg.content) if gssc_msg else 0
-
-        retained_others = []
-        truncated = []
-
-        if gssc_msg:
-            if gssc_tokens <= budget_for_others:
-                retained_others.append(gssc_msg)
-                budget_for_others -= gssc_tokens
-            else:
-                # GSSC 载荷太大，物理截断它
-                truncated_gssc = SystemMessage(
-                    content=str(gssc_msg.content)[:4000] + "\n\n[⚠️ GSSC 载荷过长，部分内容已被物理截断]"
-                )
-                retained_others.append(truncated_gssc)
-                budget_for_others = 0
-
-        # 对 older_chat_msgs 进行装载或截断
-        for m in older_chat_msgs:
-            m_t = ContextPacket.estimate_tokens(m.content)
-            if m_t <= budget_for_others:
-                retained_others.append(m)
-                budget_for_others -= m_t
-            else:
-                truncated.append(m)
-
-        if not truncated:
-            final_msgs = system_msgs.copy()
-            gssc_added = None
-            for m in retained_others:
-                if m == gssc_msg or "[⚠️ GSSC" in str(getattr(m, "content", "")):
-                    final_msgs.append(m)
-                    gssc_added = m
-                    break
-            for m in retained_others:
-                if m != gssc_added:
-                    final_msgs.append(m)
-            final_msgs.extend(recent_chat_msgs)
-            return final_msgs
-
-        # 收集被截断消息的文本内容进行摘要蒸馏
-        truncated_text = "\n".join(f"[{m.type}]: {str(m.content)[:500]}" for m in truncated)
-        
-        summary_content = "[⚠️ 较早的历史事实载荷超出预算，已被物理截断]"
-        try:
-            from app.core.llm_provider import llm_provider
-            summary_prompt = (
-                f"你是一个资深的医保稽核审计专家。以下部分较早的审计线索和对话历史因为 Token 预算超限即将被物理截断。\n"
-                f"请你用最精简、凝练的语言（不超过 150 字），总结这段被截断历史中的**核心 SQL 语句、查询表名、核心核查规则及中间结论**，以便智能体恢复审计状态：\n\n"
-                f"【被截断的历史事实】：\n{truncated_text}\n\n"
-                f"请直接给出高保真审计摘要，不要有任何客套话："
-            )
-            # 使用快速轻量级模型进行高速摘要生成
-            response = await llm_provider.chat(
-                role="reporter", 
-                messages=[HumanMessage(content=summary_prompt)],
-                model_id="LIGHT"
-            )
-            summary_content = f"📋 [被截断历史事实的高保真 Compaction 摘要]：\n{str(response.content).strip()}"
-            logger.info("⚡ [ContextBuilder] 成功完成 Model-Driven Compaction 历史摘要重置！")
-        except Exception as summary_err:
-            logger.warning(f"⚠️ [ContextBuilder] 摘要蒸馏失败，降级为物理截断: {summary_err}")
-            # 降级截断处理
-            summary_content = f"[⚠️ 较早数据超出预算，已被物理降级截断] (截断内容包含: {', '.join(m.type for m in truncated[:3])} 等)"
-
-        # 拼装最终结果：
-        # system_msgs -> GSSC (或截断GSSC) -> 摘要 -> 剩下的 older 消息 -> recent_chat_msgs
-        final_msgs = system_msgs.copy()
-        
-        gssc_added = None
-        for m in retained_others:
-            if m == gssc_msg or "[⚠️ GSSC" in getattr(m, "content", ""):
-                final_msgs.append(m)
-                gssc_added = m
-                break
-                
-        final_msgs.append(SystemMessage(content=summary_content))
-        
-        for m in retained_others:
-            if m != gssc_added:
-                final_msgs.append(m)
-                
-        final_msgs.extend(recent_chat_msgs)
-        return final_msgs
+        """对整个消息流执行结构化兜底截断压缩（委托至 turn_history_compactor 深模块）"""
+        return _compress_messages_by_budget_fn(
+            messages=messages,
+            max_tokens=self.config.max_tokens,
+            estimate_fn=ContextPacket.estimate_tokens,
+        )
 

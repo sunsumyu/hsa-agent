@@ -127,6 +127,11 @@ class AuditDomainContext(TypedDict, total=False):
     audit_feedback: Optional[AuditFeedback]
     methodology: str
     temp_table: Optional[str]
+    # [V227.0 SPEC-227] 多轮状态机解耦与长链上下文治理字段
+    current_turn_query: Optional[str]
+    accumulated_findings: Annotated[List[Dict[str, Any]], _overwrite_list]
+    turn_type: Optional[str]
+    audit_notes: Annotated[List[str], _overwrite_list]
 
 
 # ── 组合: 最终 State ──────────────────────────────────────────
@@ -134,3 +139,12 @@ class AuditDomainContext(TypedDict, total=False):
 class AuditState(WorkflowState, TaskArtifacts, AuditDomainContext):
     """完整的医保稽核 Agent 状态, 由三层组合而成。"""
     pass
+
+
+# ── 状态生命周期与清洗标准化导出 (Matt Pocock Deep Module) ─────────
+from app.core.state_governance import (
+    build_initial_audit_state,
+    create_turn_reset_patch,
+    filter_state_for_logging,
+)
+

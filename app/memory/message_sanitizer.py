@@ -31,6 +31,13 @@ from __future__ import annotations
 import re as _re
 from typing import List, Any, Optional, Dict
 
+# [Matt Pocock Deep Module] Tool call protocol pairing, compactor, and pruning
+from app.memory.tool_protocol_guard import (
+    compress_tool_content,
+    ensure_tool_pairing,
+    prune_past_turn_tools,
+)
+
 
 def sanitize_for_thinking_mode(
     messages: List[Any],
@@ -214,73 +221,6 @@ def dedup_messages(messages: List[Any]) -> List[Any]:
     return result
 
 
-def compress_tool_content(messages: List[Any], max_len: int = 2000) -> List[Any]:
-    """
-    [V134.0 P1-优化] 智能 ToolMessage 摘要压缩器（审计证据摘要模式）。
-    
-    原版：简单截断到 max_len=2000 字符（保留了大量 SQL 原始数据进入历史）。
-    新版：
-      - 提取核心审计指标（记录数、关键金额字段、状态）生成 ~150 字符的审计摘要。
-      - 原始完整内容存入 ToolMessage 的 additional_kwargs['_raw_content']，
-        后续 Booster/Reporter 需要时可按需读取，但不进入 LLM context。
-      - 压缩倍数：1500 tokens → 30~50 tokens（压缩比 ~30x）。
-    """
-    compressed = []
-    for m in messages:
-        msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type == "tool":
-            content = str(getattr(m, "content", "") or "")
-            if len(content) > 400:
-                # ── 生成审计摘要 ──────────────────────────────
-                import json as _j, re as _r
-                summary_parts = []
-                
-                # 尝试解析结构化结果
-                try:
-                    data = _j.loads(content)
-                    if isinstance(data, dict):
-                        status = data.get("status", "")
-                        msg = data.get("message", "")
-                        records = data.get("records_sample", [])
-                        if status:
-                            summary_parts.append(f"[{status}]")
-                        if msg:
-                            summary_parts.append(msg[:60])
-                        if isinstance(records, list) and records:
-                            # 提取核心金额字段
-                            fee_keys = [k for k in records[0].keys()
-                                        if any(x in k.lower() for x in ["fee", "amt", "pay", "sum"])]
-                            key_sample = ", ".join(list(records[0].keys())[:5])
-                            summary_parts.append(f"核心字段: {key_sample}")
-                except (ValueError, TypeError, AttributeError):
-                    pass
-                
-                # fallback：正则提取关键数字
-                if not summary_parts:
-                    nums = _r.findall(r'\d+(?:\.\d+)?', content[:500])
-                    row_match = _r.search(r'(\d+)\s*(?:条|rows?|records?)', content)
-                    if row_match:
-                        summary_parts.append(f"{row_match.group(1)}条记录")
-                    elif nums:
-                        summary_parts.append(f"含数值: {', '.join(nums[:5])}")
-                    summary_parts.append(content[:80])
-                
-                audit_digest = "📋 [工具执行摘要] " + " | ".join(summary_parts)
-                
-                try:
-                    from langchain_core.messages import ToolMessage as _TM
-                    new_msg = _TM(
-                        content=audit_digest[:300],
-                        tool_call_id=getattr(m, "tool_call_id", ""),
-                        additional_kwargs={"_raw_content": content[:3000]}  # 保留原始数据备用
-                    )
-                    compressed.append(new_msg)
-                    continue
-                except ImportError:
-                    pass
-        compressed.append(m)
-    return compressed
-
 
 def trim_overflow(messages: List[Any], max_total: int = 12, keep_head: int = 2, keep_tail: int = 6) -> List[Any]:
     """
@@ -292,84 +232,6 @@ def trim_overflow(messages: List[Any], max_total: int = 12, keep_head: int = 2, 
     return messages[:keep_head] + messages[-keep_tail:]
 
 
-def ensure_tool_pairing(messages: List[Any]) -> List[Any]:
-    """
-    [V90.6] 配对完整性校验：确保每条 ToolMessage 前方存在对应的 AIMessage(tool_calls)。
-
-    API 约束（百炼/OpenAI 通用）：
-        messages with role "tool" must be a response to a preceding message with "tool_calls"
-
-    本函数在所有裁剪/去重/降级之后执行，作为最终安全网：
-        1. 收集所有 AIMessage 中声明的 tool_call_id
-        2. 移除任何找不到对应 tool_call_id 的孤儿 ToolMessage
-        3. 移除/修正所有 tool_calls 对应的 ToolMessage 被移除的 AIMessage 中的 tool_calls 声明
-    """
-    # Pass 1: 收集所有 AI 消息声明的 tool_call_id → set
-    declared_ids: set = set()
-    for m in messages:
-        msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type in ("ai", "aimessagechunk", "assistant"):
-            for tc in getattr(m, "tool_calls", []) or []:
-                tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                if tid:
-                    declared_ids.add(tid)
-
-    # Pass 2: 收集实际存在的 ToolMessage 的 tool_call_id
-    present_tool_ids: set = set()
-    result = []
-    for m in messages:
-        msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type in ("tool", "toolmessagechunk", "toolmessage"):
-            tid = getattr(m, "tool_call_id", None)
-            if tid and tid not in declared_ids:
-                # 孤儿 ToolMessage：前方无对应 AI tool_calls → 丢弃
-                continue
-            if tid:
-                present_tool_ids.add(tid)
-        result.append(m)
-
-    # Pass 3: 修正 AI 消息中的 tool_calls 声明并清理空壳 AI — 如果 AI tool_calls 的对应 ToolMessage 都不存在
-    final = []
-    for m in result:
-        msg_type = getattr(m, "type", m.__class__.__name__).lower()
-        if msg_type in ("ai", "aimessagechunk", "assistant"):
-            tc_list = getattr(m, "tool_calls", []) or []
-            if tc_list:
-                # 仅保留对应的 ToolMessage 实际存在的 tool_calls
-                valid_tc = []
-                for tc in tc_list:
-                    tid = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                    if tid in present_tool_ids:
-                        valid_tc.append(tc)
-                
-                # 如果有 tool_calls 被丢弃（例如在 trim_overflow 中被裁剪），重新构造全新、干净的 AIMessage
-                if len(valid_tc) != len(tc_list):
-                    from langchain_core.messages import AIMessage as _AM
-                    new_additional_kwargs = m.additional_kwargs.copy() if hasattr(m, "additional_kwargs") and m.additional_kwargs else {}
-                    # 移除 additional_kwargs 中的 tool_calls 声明以防 API 混淆
-                    if "tool_calls" in new_additional_kwargs:
-                        new_additional_kwargs.pop("tool_calls")
-                    
-                    new_kwargs = {
-                        "content": m.content,
-                        "additional_kwargs": new_additional_kwargs,
-                        "response_metadata": m.response_metadata.copy() if hasattr(m, "response_metadata") and m.response_metadata else {},
-                        "tool_calls": valid_tc
-                    }
-                    if hasattr(m, "id"):
-                        new_kwargs["id"] = m.id
-                    
-                    # 重新构造为普通 AIMessage (抛弃所有 AIMessageChunk 的流式字段和 frozen 属性)
-                    m = _AM(**new_kwargs)
-
-                content = str(getattr(m, "content", "") or "").strip()
-                if not getattr(m, "tool_calls", []) and not content:
-                    # 空壳 AI：只有 tool_calls 但无任何响应也无文本内容 → 丢弃
-                    continue
-        final.append(m)
-
-    return final
-
 
 def trim_and_sanitize(
     left: List[Any],
@@ -378,17 +240,21 @@ def trim_and_sanitize(
     keep_head: int = 2,
     keep_tail: int = 6,
     ai_label_prefix: str = "[Agent历史分析结果]",
+    sanitize_thinking: bool = False,
 ) -> List[Any]:
     """
     [V90.6] 企业级消息合并 reducer。
 
-    六个独立阶段：
-        1. 去噪 (remove_noise)          — 删除所有无意义消息
-        2. 去重 (dedup_messages)         — 删除所有重复消息
-        3. 压缩 (compress_tool_content)  — 截断过长的 ToolMessage
-        4. 净化 (sanitize_for_thinking_mode) — Thinking Mode 兼容
-        5. 裁剪 (trim_overflow)          — 仅在超限时裁剪非关键中间消息
-        6. 配对校验 (ensure_tool_pairing) — 确保 ToolMessage 有对应的 AI tool_calls
+    独立治理阶段：
+        1. 格式统一 (Role Map)           — tuple 转 Message 对象
+        2. 无条件去噪 (remove_noise)      — 删除空白与探活噪音
+        3. 无条件去重 (dedup_messages)     — 删除完全重复消息
+        4. 历史修剪 (prune_past_turn_tools) — 清理已结算轮次的中间 Tool 碎片
+        5. 压缩 (compress_tool_content)  — 截断当前活跃轮次过长的 ToolMessage
+        6. 净化 (sanitize_for_thinking_mode) — 仅在显式声明时开启 Thinking Mode 兼容
+        7. 裁剪 (trim_overflow)          — 仅在超限时裁剪非关键中间消息
+        8. 配对校验 (ensure_tool_pairing) — 确保 ToolMessage 有对应的 AI tool_calls
+        9. 内容脱敏 (sanitize_audit_content) — 脱敏 PII 并移除多余 SQL trace
     """
     combined = list(left or []) + list(right or [])
 
@@ -408,8 +274,12 @@ def trim_and_sanitize(
 
     combined = remove_noise(combined)
     combined = dedup_messages(combined)
-    # [V134.0 Bypass] Skip compressing tool content to preserve tool_call_ids and raw evidence 100% intact.
-    combined = sanitize_for_thinking_mode(combined, ai_label_prefix=ai_label_prefix)
+    # [SPEC-227 状态防腐] 历史轮次内部工具修剪，防止跨轮次工具残留与上下文腐化
+    combined = prune_past_turn_tools(combined)
+    # [V228.0 瘦身] 压缩过长 ToolMessage，保留 tool_call_id 与原始数据指针，防止历史 ToolMessage 撑爆 Token
+    combined = compress_tool_content(combined)
+    if sanitize_thinking:
+        combined = sanitize_for_thinking_mode(combined, ai_label_prefix=ai_label_prefix)
     combined = trim_overflow(combined, max_total=max_total, keep_head=keep_head, keep_tail=keep_tail)
     combined = ensure_tool_pairing(combined)
     # [V166.0] 阶段 7：内容脱敏与 SQL 净化
@@ -438,59 +308,9 @@ def count_message_tokens_estimate(messages: List[Any]) -> int:
     return total
 
 
-def _apply_pii_masking(text: str) -> str:
-    """内部工具：执行正则打码 (V169.1)"""
-    import re as _r
-    # 掩码身份证 (保留前6后4)
-    text = _r.sub(r'\b\d{15}(\d{2}[0-9xX])?\b', lambda m: m.group()[:6] + "********" + m.group()[-4:], text)
-    # 掩码电话 (保留前3后4)
-    text = _r.sub(r'\b1[3-9]\d{9}\b', lambda m: m.group()[:3] + "****" + m.group()[-4:], text)
-    # 掩码姓名 (针对“姓名：张三”模式，强制要求有冒号或空格分隔符，防止“患者产生妇科”等学术词被误伤打码)
-    text = _r.sub(r'(?<=患者|姓名)[：: ]+([\u4e00-\u9fa5]{2,3})', lambda m: m.group(1)[0] + "*" * (len(m.group(1)) - 1), text)
-    return text
-
-
-def sanitize_audit_content(messages: List[Any]) -> List[Any]:
-    """
-    [V166.0] 企业级隐私脱敏与 SQL 冗余清除插件。
-    """
-    import re as _r
-    for m in messages:
-        content = getattr(m, "content", "")
-        if content and isinstance(content, str):
-            # 如果是最终审计报告，保留其中的 SQL 代码块以保障 Success & Interpretability 评分与可审计性！
-            if "医保专项稽核报告" in content or "## 一、审计任务" in content:
-                # 只进行 PII 脱敏，不移除 SQL
-                content = _apply_pii_masking(content)
-            else:
-                # 1. 移除冗余 SQL 代码块
-                content = _r.sub(r'```sql\s*(.*?)\s*```', '[SQL EXEC_TRACE_REMOVED]', content, flags=_r.DOTALL)
-                # 2. 执行 PII 脱敏
-                content = _apply_pii_masking(content)
-            m.content = content.strip()
-    return messages
-
-
-def mask_audit_data(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    [V179.5] 针对医保结算数据列表的动态脱敏接口（增强版）。
-    针对 psn_name, psn_no, setl_id 等敏感字段执行深度打码。
-    """
-    # [V179.5] 扩展敏感字段集合，覆盖医保核心敏感数据
-    pii_fields = {
-        # 个人身份信息
-        "psn_name", "psn_cert_no", "tel", "addr", "certno", "brdy", "contact_tel",
-        # 医保核心标识
-        "psn_no", "setl_id", "setl_id_str",
-        # 机构信息
-        "fixmedins_code", "fixmedins_name",
-        # 诊断信息（可能包含敏感疾病）
-        "dise_name", "adm_dept_name", "dscg_dept_name",
-        # 医生信息
-        "chfpdr_name", "chfpdr_code",
-    }
-    for item in data:
-        for field in pii_fields:
-            if field in item and item[field]:
-                item[field] = _apply_pii_masking(str(item[field]))
-    return data
+# [Matt Pocock Deep Module] 委托至专职的医保隐私合规与 PII 脱敏深模块
+from app.core.security.data_masker import (
+    apply_pii_masking as _apply_pii_masking,
+    sanitize_audit_content,
+    mask_audit_data,
+)

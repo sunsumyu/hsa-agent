@@ -75,12 +75,12 @@ class TestSceneTableSelector:
         assert "toDateTime(substring(trim(setl_time),1,19))" in hint
 
     def test_no_enforcement_hint_for_main_table(self):
-        """住院场景不应生成强制提示（使用默认主表）"""
+        """住院场景主表应生成 fqz_gz_jzsj_all_ql 引导提示"""
         selector = SceneTableSelector()
         query = "核查住院天数异常"
         hint = selector.get_enforcement_hint(query)
-        # 住院场景使用默认主表，不需要强制提示
-        assert hint is None
+        assert hint is not None
+        assert "fqz_gz_jzsj_all_ql" in hint
 
     def test_multiple_keywords_higher_score(self):
         """多关键词匹配应得到更高分数"""
@@ -192,16 +192,36 @@ class TestSceneTableSelectorIntegration:
             entry = schema_registry.get_table(primary)
             assert entry is not None, f"表 {primary} 不在 SchemaRegistry 中"
 
-    def test_scene_table_mapping_loaded(self):
-        """场景映射应从配置文件加载且包含五大核心表"""
+    def test_macro_hospital_fee_scenario(self):
+        """定点医药机构宏观月度费用统计场景应路由至 fqz_cgzhan_hosp_fee"""
         selector = SceneTableSelector()
-        # 检查映射是否已加载 5 张核心表
-        assert len(selector._mapping) >= 5
+        query = "请对定点医药机构宏观月度费用统计报表进行分析，统计全库纳管费用记录总期数"
+        primary, tables = selector.select_tables(query)
+        assert primary == "fqz_cgzhan_hosp_fee"
+        assert "fqz_cgzhan_hosp_fee" in tables
+
+    def test_enforcement_hint_for_cgzhan_hosp_fee(self):
+        """宏观费用场景应生成 fqz_cgzhan_hosp_fee 指引并包含真实字段 setl_time 与 sum_medfee_sumamt"""
+        selector = SceneTableSelector()
+        query = "核查定点医药机构宏观月度费用统计报表"
+        hint = selector.get_enforcement_hint(query)
+        assert hint is not None
+        assert "fqz_cgzhan_hosp_fee" in hint
+        assert "sum_medfee_sumamt" in hint
+        assert "setl_time" in hint
+        assert "`mon`" not in hint
+
+    def test_scene_table_mapping_loaded(self):
+        """场景映射应从配置文件加载且包含六大核心表"""
+        selector = SceneTableSelector()
+        # 检查映射是否已加载 6 张核心表
+        assert len(selector._mapping) >= 6
         assert "fqz_fymx_test" in selector._mapping
         assert "fqz_gz_jzsj_all_ql" in selector._mapping
         assert "fqz_all_yy_yd" in selector._mapping
         assert "fqz_admdvs" in selector._mapping
         assert "fqz_drug_mcs_info_list" in selector._mapping
+        assert "fqz_cgzhan_hosp_fee" in selector._mapping
 
 
 if __name__ == "__main__":

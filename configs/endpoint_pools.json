@@ -6,6 +6,51 @@
       "fallback_pool": "tier-2-chat",
       "endpoints": [
         {
+          "id": "ppio-premium",
+          "family": "glm",
+          "platform": "anthropic",
+          "provider": "anthropic",
+          "model_name": "zai-org/glm-5.3-flash",
+          "api_key_env": "PPIO_LLM_API_KEY",
+          "base_url_env": "PPIO_LLM_API_URL",
+          "weight": 300,
+          "daily_quota": 10000000,
+          "rpm_limit": 1000,
+          "tpm_limit": 100000,
+          "input_cost_1k": 0.0000694,
+          "output_cost_1k": 0.0001389
+        },
+        {
+          "id": "ppio-lightweight",
+          "family": "deepseek",
+          "platform": "anthropic",
+          "provider": "anthropic",
+          "model_name": "deepseek/deepseek-v4.1-flash",
+          "api_key_env": "PPIO_LLM_API_KEY",
+          "base_url_env": "PPIO_LLM_API_URL",
+          "weight": 280,
+          "daily_quota": 10000000,
+          "rpm_limit": 1000,
+          "tpm_limit": 100000,
+          "input_cost_1k": 0.0000972,
+          "output_cost_1k": 0.0001944
+        },
+        {
+          "id": "ppio-mimo",
+          "family": "mimo",
+          "platform": "anthropic",
+          "provider": "anthropic",
+          "model_name": "xiaomimimo/mimo-v2.6-pro",
+          "api_key_env": "PPIO_LLM_API_KEY",
+          "base_url_env": "PPIO_LLM_API_URL",
+          "weight": 260,
+          "daily_quota": 10000000,
+          "rpm_limit": 1000,
+          "tpm_limit": 100000,
+          "input_cost_1k": 0.0001389,
+          "output_cost_1k": 0.0002778
+        },
+        {
           "id": "kimi-k3",
           "family": "kimi",
           "platform": "anthropic",
@@ -65,10 +110,10 @@
           "model_name": "claude-3-5-sonnet-20241022",
           "api_key_env": "ANTHROPIC_API_KEY",
           "base_url_env": "ANTHROPIC_BASE_URL",
-          "weight": 150,
-          "daily_quota": 10000000,
-          "rpm_limit": 1000,
-          "tpm_limit": 100000
+          "weight": 0,
+          "daily_quota": 0,
+          "rpm_limit": 0,
+          "tpm_limit": 0
         },
         {
           "id": "doubao-1-5-pro",

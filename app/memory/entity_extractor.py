@@ -1,29 +1,17 @@
 """
-[V4.9.6] MemPalace 证据实体抽取器 (Entity Extractor)
+[V4.9.6] MemPalace 证据实体抽取与图谱管理深模块 (EvidenceKnowledgeGraphManager)
 
-将 Agent 推演产生的 Findings 文本列表，解析为图谱节点和连接边，
-供前端 ECharts 图谱组件直接消费。
+将 Agent 推演产生的 Findings 文本列表，解析为知识图谱节点和连接边，
+供前端 ECharts 图谱组件直接消费；同时支持多会话隔离、冲突检测聚合与平滑降级。
 """
+from __future__ import annotations
+
 import re
 import hashlib
-import logging
-from typing import List, Dict, Any, Tuple
+import threading
+from collections import OrderedDict
+from typing import List, Dict, Any, Optional
 from loguru import logger
-
-# [V47.6] 引入 spaCy 混合识别：本地小模型实体提取方案
-_NLP = None
-def get_nlp():
-    global _NLP
-    if _NLP is None:
-        try:
-            import spacy
-            # 优先加载中文小模型，用于发现正则无法覆盖的机构和人名
-            _NLP = spacy.load("zh_core_web_sm")
-            logger.info("✅ spaCy (zh_core_web_sm) 加载成功，开启混合实体识别模式。")
-        except Exception:
-            logger.warning("⚠️ spaCy 或 zh_core_web_sm 未就绪，系统降级为纯正则识别模式。")
-            _NLP = False
-    return _NLP
 
 # ── 类别定义 ───────────────────────────────────────────────────────────────────
 CATEGORIES = [
@@ -38,7 +26,7 @@ CAT_INDEX = {c["name"]: i for i, c in enumerate(CATEGORIES)}
 
 # ── 正则模式 ───────────────────────────────────────────────────────────────────
 HOSPITAL_PATTERNS = [
-    r"([\u4e00-\u9fff]{2,12}(?:医院|诊所|卫生院|卫生室|门诊|医疗|中心))",
+    r"([\u4e00-\u9fff]{2,12}(?:医院|诊所|卫生院|保健院|卫生室|门诊|医疗|中心))",
 ]
 PATIENT_PATTERNS = [
     r"(?:患者|社保号|psn_no)[：:]\s*([A-Z0-9_\-]{4,20})",
@@ -60,164 +48,252 @@ RECORD_PATTERNS = [
 ]
 
 
-def _stable_id(text: str, prefix: str) -> str:
-    """用短哈希生成稳定的节点 ID，避免重复"""
-    h = hashlib.md5(text.encode()).hexdigest()[:8]
-    return f"{prefix}_{h}"
+class EvidenceKnowledgeGraphManager:
+    """
+    [Matt Pocock Deep Module]
+    医保证据知识图谱与线索管理器：
+    1. 实体抽取与图谱生成（纯逻辑计算，支持正则与 spaCy 混合识别）；
+    2. 多会话线程安全状态存储（LRU 隔离不同 session_id）；
+    3. 冲突检测联动（统一向 conflict_detector 委托）；
+    4. 兜底回退自愈（空实体占位、spaCy 缺失降级）。
+    """
+
+    def __init__(self, max_sessions: int = 500):
+        self._nlp = None
+        self._nlp_checked = False
+        self._max_sessions = max_sessions
+        self._session_findings: OrderedDict[str, List[str]] = OrderedDict()
+        self._latest_session_id: str = ""
+        self._lock = threading.Lock()
+
+    def get_nlp(self):
+        """惰性加载 spaCy 中文模型，加载失败时优雅降级并缓存状态"""
+        if not self._nlp_checked:
+            try:
+                import spacy
+                self._nlp = spacy.load("zh_core_web_sm")
+                logger.info("✅ spaCy (zh_core_web_sm) 加载成功，开启混合实体识别模式。")
+            except Exception:
+                logger.warning("⚠️ spaCy 或 zh_core_web_sm 未就绪，系统降级为纯正则识别模式。")
+                self._nlp = False
+            self._nlp_checked = True
+        return self._nlp
+
+    @staticmethod
+    def _stable_id(text: str, prefix: str) -> str:
+        """用短哈希生成稳定的节点 ID，避免重复"""
+        h = hashlib.md5(text.encode()).hexdigest()[:8]
+        return f"{prefix}_{h}"
+
+    @staticmethod
+    def _extract_by_patterns(text: str, patterns: List[str]) -> List[str]:
+        results = []
+        for p in patterns:
+            found = re.findall(p, text)
+            for f in found:
+                clean = f.strip().rstrip("，。；")
+                if clean and len(clean) >= 2:
+                    results.append(clean)
+        return list(dict.fromkeys(results))  # unique-preserve-order
+
+    def extract_graph(self, findings: List[str]) -> Dict[str, Any]:
+        """
+        核心方法：将 Findings 文本列表转换为 ECharts graph 数据。
+        """
+        try:
+            from app.skills.conflict_detector import get_filtered_findings
+            findings = get_filtered_findings(findings)
+        except ImportError:
+            pass
+
+        nodes: Dict[str, Dict[str, Any]] = {}
+        edges: List[Dict[str, str]] = []
+        finding_ids: List[str] = []
+
+        def add_node(node_id: str, name: str, category: str, value: float = 1.0, tooltip: str = "") -> str:
+            if node_id not in nodes:
+                nodes[node_id] = {
+                    "id": node_id,
+                    "name": name[:24],
+                    "category": CAT_INDEX.get(category, 5),
+                    "value": value,
+                    "symbolSize": max(20, min(60, value * 2)),
+                    "tooltip": tooltip or name,
+                }
+            return node_id
+
+        def add_edge(src: str, dst: str, label: str):
+            edges.append({"source": src, "target": dst, "label": label})
+
+        for idx, finding in enumerate(findings):
+            if not finding or len(finding.strip()) < 5:
+                continue
+
+            text = finding.strip()
+            fid = self._stable_id(text, "F")
+            add_node(fid, f"发现 #{idx+1}", "finding", value=1.0, tooltip=text[:120])
+            finding_ids.append(fid)
+
+            # 1. 医疗机构
+            hospitals = self._extract_by_patterns(text, HOSPITAL_PATTERNS)
+            nlp = self.get_nlp()
+            if nlp:
+                try:
+                    doc = nlp(text)
+                    for ent in doc.ents:
+                        if ent.label_ in ("FAC", "ORG"):
+                            if ent.text not in hospitals and len(ent.text) >= 4:
+                                hospitals.append(ent.text)
+                except Exception as e:
+                    logger.debug(f"[EvidenceGraph] spaCy 机构提取跳过: {e}")
+
+            for hosp in hospitals:
+                hid = self._stable_id(hosp, "H")
+                add_node(hid, hosp, "hospital", value=3.0)
+                add_edge(hid, fid, "涉及")
+
+            # 2. 患者识别与脱敏
+            patients = self._extract_by_patterns(text, PATIENT_PATTERNS)
+            if nlp:
+                try:
+                    doc = nlp(text)
+                    for ent in doc.ents:
+                        if ent.label_ == "PERSON":
+                            p_name = ent.text
+                            masked_name = p_name[0] + "**" if len(p_name) > 1 else p_name + "*"
+                            pid = self._stable_id(p_name, "P")
+                            add_node(pid, masked_name, "patient", value=2.0)
+                            add_edge(pid, fid, "关联")
+                except Exception as e:
+                    logger.debug(f"[EvidenceGraph] spaCy 人名提取跳过: {e}")
+
+            for pat in patients:
+                pid = self._stable_id(pat, "P")
+                add_node(pid, f"患者 {pat[:10]}", "patient", value=2.0)
+                add_edge(pid, fid, "关联")
+                for hosp in hospitals:
+                    hid = self._stable_id(hosp, "H")
+                    add_edge(pid, hid, "就诊于")
+
+            # 3. 政策违规
+            policies = self._extract_by_patterns(text, POLICY_PATTERNS)
+            for pol in policies:
+                pol_id = self._stable_id(pol, "PL")
+                add_node(pol_id, pol[:20], "policy", value=2.5)
+                add_edge(fid, pol_id, "违反")
+
+            # 4. 金额
+            amounts = self._extract_by_patterns(text, AMOUNT_PATTERNS)
+            for amt_str in amounts[:2]:
+                try:
+                    clean_amt = re.sub(r"[，,]", "", amt_str)
+                    amt_val = float(clean_amt)
+                    if amt_val < 0.01:
+                        continue
+                    aid = self._stable_id(amt_str + str(idx), "A")
+                    add_node(aid, f"¥ {amt_val:,.0f}", "amount", value=max(1.5, amt_val / 10000))
+                    add_edge(fid, aid, "金额")
+                except (ValueError, AttributeError):
+                    pass
+
+            # 5. 记录单号
+            records = self._extract_by_patterns(text, RECORD_PATTERNS)
+            for rec in records:
+                rid = self._stable_id(rec, "R")
+                add_node(rid, f"记录 {rec}", "record", value=1.5)
+                add_edge(fid, rid, "依据")
+                for hosp in hospitals:
+                    hid = self._stable_id(hosp, "H")
+                    add_edge(rid, hid, "属于")
+
+        # 降级占位：若无明确业务实体，挂载稽核中心
+        if len(nodes) <= len(finding_ids) and finding_ids:
+            summary_id = "CENTER"
+            add_node(summary_id, "稽核中心", "policy", value=5.0)
+            for fid in finding_ids:
+                add_edge(summary_id, fid, "包含")
+
+        return {
+            "nodes": list(nodes.values()),
+            "edges": edges,
+            "categories": CATEGORIES,
+            "total": len(nodes),
+        }
+
+    def record_session_findings(self, session_id: str, findings: List[str]) -> None:
+        """记录会话线索（线程安全，支持容量淘汰）"""
+        with self._lock:
+            sid = session_id or "default_session"
+            if sid in self._session_findings:
+                self._session_findings.move_to_end(sid)
+            self._session_findings[sid] = list(findings or [])
+            self._latest_session_id = sid
+
+            while len(self._session_findings) > self._max_sessions:
+                self._session_findings.popitem(last=False)
+
+            global _latest_findings, _latest_session_id
+            _latest_findings = self._session_findings[sid]
+            _latest_session_id = sid
+
+    def get_session_findings(self, session_id: Optional[str] = None) -> List[str]:
+        """获取指定会话（或最新会话）的 findings 列表"""
+        with self._lock:
+            if session_id:
+                return list(self._session_findings.get(session_id, []))
+            if self._latest_session_id and self._latest_session_id in self._session_findings:
+                return list(self._session_findings[self._latest_session_id])
+            return list(_latest_findings)
+
+    def get_session_graph(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """获取指定会话（或最新会话）的可视化图谱"""
+        target_session = session_id
+        with self._lock:
+            if not target_session:
+                target_session = self._latest_session_id
+            if target_session and target_session not in self._session_findings:
+                return {
+                    "nodes": [],
+                    "edges": [],
+                    "categories": CATEGORIES,
+                    "total": 0,
+                    "message": f"会话 {target_session} 的图谱尚未生成，请先发起稽核推演",
+                }
+            findings = self._session_findings.get(target_session, _latest_findings)
+
+        return self.extract_graph(findings)
+
+    def detect_session_conflicts(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """检测指定会话（或最新会话）中的逻辑冲突"""
+        findings = self.get_session_findings(session_id)
+        from app.skills.conflict_detector import detect_conflicts
+        return detect_conflicts(findings)
+
+    def clear(self) -> None:
+        """清空所有会话缓存（单元测试重置）"""
+        with self._lock:
+            self._session_findings.clear()
+            self._latest_session_id = ""
+            global _latest_findings, _latest_session_id
+            _latest_findings = []
+            _latest_session_id = ""
 
 
-def _extract_by_patterns(text: str, patterns: List[str]) -> List[str]:
-    results = []
-    for p in patterns:
-        found = re.findall(p, text)
-        for f in found:
-            clean = f.strip().rstrip("，。；")
-            if clean and len(clean) >= 2:
-                results.append(clean)
-    return list(dict.fromkeys(results))  # unique-preserve-order
+# ── 全局单例与向后兼容接口 ────────────────────────────────────────────────────────
+evidence_graph_manager = EvidenceKnowledgeGraphManager()
 
+_NLP = None
+def get_nlp():
+    return evidence_graph_manager.get_nlp()
+
+_latest_findings: List[str] = []
+_latest_session_id: str = ""
 
 def extract_graph(findings: List[str]) -> Dict[str, Any]:
-    """
-    核心函数：将 Findings 文本列表转换为 ECharts graph 数据。
-
-    Returns:
-        {"nodes": [...], "edges": [...], "categories": [...]}
-    """
-    try:
-        from app.skills.conflict_detector import get_filtered_findings
-        findings = get_filtered_findings(findings)
-    except ImportError:
-        pass
-
-    nodes: Dict[str, Dict] = {}
-    edges: List[Dict]      = []
-    finding_ids: List[str] = []
-
-    def add_node(node_id: str, name: str, category: str, value: float = 1.0,
-                 tooltip: str = "") -> str:
-        if node_id not in nodes:
-            nodes[node_id] = {
-                "id":       node_id,
-                "name":     name[:24],  # 限制显示长度
-                "category": CAT_INDEX.get(category, 5),
-                "value":    value,
-                "symbolSize": max(20, min(60, value * 2)),
-                "tooltip":  tooltip or name,
-            }
-        return node_id
-
-    def add_edge(src: str, dst: str, label: str):
-        edges.append({"source": src, "target": dst, "label": label})
-
-    # ── 处理每条 Finding ──────────────────────────────────────────────────────
-    for idx, finding in enumerate(findings):
-        if not finding or len(finding.strip()) < 5:
-            continue
-
-        text = finding.strip()
-        fid  = _stable_id(text, "F")
-        add_node(fid, f"发现 #{idx+1}", "finding", value=1.0, tooltip=text[:120])
-        finding_ids.append(fid)
-
-        # -- 提取医疗机构 --
-        hospitals = _extract_by_patterns(text, HOSPITAL_PATTERNS)
-        
-        # [V47.6] spaCy 语义补充：识别非标准结尾的机构名
-        nlp = get_nlp()
-        if nlp:
-            doc = nlp(text)
-            for ent in doc.ents:
-                if ent.label_ == "FAC" or ent.label_ == "ORG":
-                    if ent.text not in hospitals and len(ent.text) >= 4:
-                        hospitals.append(ent.text)
-        
-        for hosp in hospitals:
-            hid = _stable_id(hosp, "H")
-            add_node(hid, hosp, "hospital", value=3.0)
-            add_edge(hid, fid, "涉及")
-
-        # -- 提取患者 ID --
-        patients = _extract_by_patterns(text, PATIENT_PATTERNS)
-        
-        # [V47.6] spaCy 脱敏补充：识别报告中的真实人名并强制脱敏
-        if nlp:
-            doc = nlp(text)
-            for ent in doc.ents:
-                if ent.label_ == "PERSON":
-                    p_name = ent.text
-                    # 只有当正则没抓到 ID 时，才用 spaCy 抓到的人名，且强制脱敏
-                    masked_name = p_name[0] + "**" if len(p_name) > 1 else p_name + "*"
-                    pid = _stable_id(p_name, "P")
-                    add_node(pid, masked_name, "patient", value=2.0)
-                    add_edge(pid, fid, "关联")
-        for pat in patients:
-            pid = _stable_id(pat, "P")
-            add_node(pid, f"患者 {pat[:10]}", "patient", value=2.0)
-            add_edge(pid, fid, "关联")
-            # 患者与机构连接
-            for hosp in hospitals:
-                hid = _stable_id(hosp, "H")
-                add_edge(pid, hid, "就诊于")
-
-        # -- 提取政策/违规类型 --
-        policies = _extract_by_patterns(text, POLICY_PATTERNS)
-        for pol in policies:
-            pol_id = _stable_id(pol, "PL")
-            add_node(pol_id, pol[:20], "policy", value=2.5)
-            add_edge(fid, pol_id, "违反")
-
-        # -- 提取金额 --
-        amounts = _extract_by_patterns(text, AMOUNT_PATTERNS)
-        for amt_str in amounts[:2]:  # 最多取2个金额，避免噪音
-            try:
-                clean_amt = re.sub(r"[，,]", "", amt_str)
-                amt_val = float(clean_amt)
-                if amt_val < 0.01: continue
-                aid = _stable_id(amt_str + str(idx), "A")
-                add_node(aid, f"¥ {amt_val:,.0f}", "amount", value=max(1.5, amt_val / 10000))
-                add_edge(fid, aid, "金额")
-            except (ValueError, AttributeError):
-                pass
-
-        # -- 提取结算记录编号 --
-        records = _extract_by_patterns(text, RECORD_PATTERNS)
-        for rec in records:
-            rid = _stable_id(rec, "R")
-            add_node(rid, f"记录 {rec}", "record", value=1.5)
-            add_edge(fid, rid, "依据")
-            for hosp in hospitals:
-                hid = _stable_id(hosp, "H")
-                add_edge(rid, hid, "属于")
-
-    # ── 如无任何实体，生成摘要占位节点 ───────────────────────────────────────
-    if len(nodes) <= len(finding_ids) and finding_ids:
-        summary_id = "CENTER"
-        add_node(summary_id, "稽核中心", "policy", value=5.0)
-        for fid in finding_ids:
-            add_edge(summary_id, fid, "包含")
-
-    return {
-        "nodes":      list(nodes.values()),
-        "edges":      edges,
-        "categories": CATEGORIES,
-        "total":      len(nodes),
-    }
-
-
-# ── 全局缓存：存储最新推演的 findings（由 agent_graph 写入）────────────────────
-_latest_findings: List[str] = []
-_latest_session_id: str     = ""
+    return evidence_graph_manager.extract_graph(findings)
 
 def update_latest_findings(session_id: str, findings: List[str]):
-    """由 agent_graph 在每次推演完成后调用，更新证据缓存"""
-    global _latest_findings, _latest_session_id
-    _latest_findings   = findings
-    _latest_session_id = session_id
+    evidence_graph_manager.record_session_findings(session_id, findings)
 
 def get_latest_graph(session_id: str = None) -> Dict[str, Any]:
-    """获取最新推演图谱（或指定会话的图谱）"""
-    if session_id and session_id != _latest_session_id:
-        return {"nodes": [], "edges": [], "categories": CATEGORIES, "total": 0,
-                "message": f"会话 {session_id} 的图谱尚未生成，请先发起稽核推演"}
-    return extract_graph(_latest_findings)
+    return evidence_graph_manager.get_session_graph(session_id)

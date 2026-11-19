@@ -26,9 +26,10 @@ def test_should_sample_obeys_sample_rate():
 
 def test_network_reachability_probe():
     sampler = AdaptiveSampler()
-    # 模拟探测成功
-    with patch("socket.create_connection") as mock_conn:
-        assert sampler.is_network_reachable("https://api.smith.langchain.com") is True
-    # 模拟探测失败触发熔断
-    with patch("socket.create_connection", side_effect=OSError("Timeout")):
-        assert sampler.is_network_reachable("https://unreachable.smith.com") is False
+    # 模拟探测成功（清理环境代理干扰）
+    with patch.dict("os.environ", {"HTTPS_PROXY": "", "https_proxy": "", "ALL_PROXY": ""}, clear=True):
+        with patch("socket.create_connection") as mock_conn:
+            assert sampler.is_network_reachable("https://api.smith.langchain.com") is True
+        # 模拟探测失败触发熔断
+        with patch("socket.create_connection", side_effect=OSError("Timeout")):
+            assert sampler.is_network_reachable("https://unreachable.smith.com") is False

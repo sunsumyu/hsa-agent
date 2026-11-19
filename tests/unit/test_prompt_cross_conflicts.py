@@ -17,7 +17,8 @@ from typing import Dict, Any, Set
 import pytest
 import yaml
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+PROMPTS_DIR = REPO_ROOT / "configs" / "prompts"
 
 
 def _load_all_prompts() -> Dict[str, Dict[str, Any]]:
@@ -178,31 +179,32 @@ class TestCrossPromptConflictDetection:
 
     def test_no_fictional_columns_in_python_inline_prompts(self):
         """Python 代码中混入的内联提示词与指引严禁包含伪字段 (adm_date, dscg_date, adm_time, dscg_time)。"""
-        app_dir = PROMPTS_DIR.parent / "app"
+        search_dirs = [d for d in (REPO_ROOT / "app", REPO_ROOT / "cores", REPO_ROOT / "domains") if d.exists()]
         fictional_cols = ["adm_date", "dscg_date", "adm_time", "dscg_time"]
 
-        for py_file in app_dir.rglob("*.py"):
-            # 排除已废弃兼容文件与字段别名纠错字典注册表 (包含 forbidden_aliases 定义)
-            if py_file.name in ["agent.py", "neo4j_manager.py"]:
-                continue
-            text = py_file.read_text(encoding="utf-8")
-            for col in fictional_cols:
-                # 检查是否作为 SQL 字段名或提示词指南出现（排除普通注释）
-                pattern = re.compile(rf"[`'\"]{col}[`'\"]|\b{col}\s*[><=]", re.IGNORECASE)
-                match = pattern.search(text)
-                assert not match, (
-                    f"【Python 混入伪字段提示词】在 {py_file.name} 中发现混入伪字段 '{col}' 指引: {match.group(0)}！"
-                    "真实字段必须严格使用 start_date / end_date。"
-                )
+        for s_dir in search_dirs:
+            for py_file in s_dir.rglob("*.py"):
+                # 排除已废弃兼容文件与字段别名纠错字典注册表 (包含 forbidden_aliases 定义)
+                if py_file.name in ["agent.py", "neo4j_manager.py", "field_knowledge_graph.py", "field_alias_catalog.py"]:
+                    continue
+                text = py_file.read_text(encoding="utf-8")
+                for col in fictional_cols:
+                    # 检查是否作为 SQL 字段名或提示词指南出现（排除普通注释）
+                    pattern = re.compile(rf"[`'\"]{col}[`'\"]|\b{col}\s*[><=]", re.IGNORECASE)
+                    match = pattern.search(text)
+                    assert not match, (
+                        f"【Python 混入伪字段提示词】在 {py_file.name} 中发现混入伪字段 '{col}' 指引: {match.group(0)}！"
+                        "真实字段必须严格使用 start_date / end_date。"
+                    )
 
     # ──────────────────────────────────────────────────────────
     # 维度 9: Python 业务代码与配置中评测集代号泄漏检测
     # ──────────────────────────────────────────────────────────
 
     def test_no_benchmark_case_ids_in_python_and_configs(self):
-        """核心业务代码 (app/) 及核心配置 (configs/) 中严禁泄露具体评测集 case_id (QA-CUST-*, QA-EDGE-*)。"""
-        root_dir = PROMPTS_DIR.parent
-        target_dirs = [root_dir / "app", root_dir / "configs"]
+        """核心业务代码 (app/, cores/, domains/) 及核心配置 (configs/) 中严禁泄露具体评测集 case_id (QA-CUST-*, QA-EDGE-*)。"""
+        root_dir = REPO_ROOT
+        target_dirs = [d for d in (root_dir / "app", root_dir / "cores", root_dir / "domains", root_dir / "configs") if d.exists()]
         benchmark_pattern = re.compile(r"QA-(CUST|EDGE|BLIND)-\d+", re.IGNORECASE)
 
         for target_dir in target_dirs:
@@ -224,7 +226,13 @@ class TestCrossPromptConflictDetection:
 
     def test_no_shadow_zero_findings_injection_in_coder_agent(self):
         """验证 coder_agent.py 中不包含影子硬编码的 zero_findings_rule，确保提示词以 YAML 为唯一事实源。"""
-        coder_agent_path = PROMPTS_DIR.parent / "app" / "agents" / "coder_agent.py"
+        coder_agent_path = next(
+            p for p in (
+                REPO_ROOT / "domains" / "hsa" / "agents" / "coder_agent.py",
+                REPO_ROOT / "app" / "agents" / "coder_agent.py",
+            )
+            if p.exists()
+        )
         content = coder_agent_path.read_text(encoding="utf-8")
 
         assert "zero_findings_rule" not in content, (
@@ -238,19 +246,20 @@ class TestCrossPromptConflictDetection:
 
     def test_no_obsolete_tool_names_in_python_inline_prompts(self):
         """Python 内联提示词与指引严禁包含已废弃的工具名称 (如 SQLSafeExecutionSkill)。"""
-        app_dir = PROMPTS_DIR.parent / "app"
+        search_dirs = [d for d in (REPO_ROOT / "app", REPO_ROOT / "cores", REPO_ROOT / "domains") if d.exists()]
         obsolete_tools = ["SQLSafeExecutionSkill"]
 
-        for py_file in app_dir.rglob("*.py"):
-            # 排除已废弃兼容文件及工具类自身定义文件
-            if py_file.name in ["agent.py", "sql_execution.py"]:
-                continue
-            text = py_file.read_text(encoding="utf-8")
-            for obs_tool in obsolete_tools:
-                assert obs_tool not in text, (
-                    f"【Python 混入废弃工具提示词】在 {py_file.name} 中发现混入废弃工具名称 '{obs_tool}'！"
-                    "标准 SQL 工具必须严格使用 execute_audit_sql。"
-                )
+        for s_dir in search_dirs:
+            for py_file in s_dir.rglob("*.py"):
+                # 排除已废弃兼容文件及工具类自身定义文件
+                if py_file.name in ["agent.py", "sql_execution.py"]:
+                    continue
+                text = py_file.read_text(encoding="utf-8")
+                for obs_tool in obsolete_tools:
+                    assert obs_tool not in text, (
+                        f"【Python 混入废弃工具提示词】在 {py_file.name} 中发现混入废弃工具名称 '{obs_tool}'！"
+                        "标准 SQL 工具必须严格使用 execute_audit_sql。"
+                    )
 
     # ──────────────────────────────────────────────────────────
     # 维度 12: Python 内联提示词与指引中物理表名有效性
@@ -258,42 +267,52 @@ class TestCrossPromptConflictDetection:
 
     def test_python_inline_guidance_table_names_validity(self):
         """Python 代码中内联指导提及的所有 fqz_ 前缀表名，必须属于真实存在的物理表。"""
-        app_dir = PROMPTS_DIR.parent / "app"
+        search_dirs = [d for d in (REPO_ROOT / "app", REPO_ROOT / "cores", REPO_ROOT / "domains") if d.exists()]
         # 允许的合法物理表及临时表前缀
         valid_tables = {
             "fqz_fymx_test", "fqz_gz_jzsj_all_ql", "fqz_all_yy_yd", "fqz_admdvs",
-            "fqz_drug_mcs_info_list", "fqz_all_yy_yd_1"
+            "fqz_drug_mcs_info_list", "fqz_all_yy_yd_1", "fqz_cgzhan_hosp_fee"
         }
         fqz_pattern = re.compile(r"\b(fqz_[a-zA-Z0-9_]+)\b")
 
-        for py_file in app_dir.rglob("*.py"):
-            # 排除已废弃兼容文件及负责别名重定向的地面化模块
-            if py_file.name in ["agent.py", "grounder.py"]:
-                continue
-            text = py_file.read_text(encoding="utf-8")
-            matches = fqz_pattern.findall(text)
-            for tbl in matches:
-                if tbl.startswith("fqz_temp_sl_") or tbl.startswith("fqz_temp_"):
-                    continue  # 动态联邦侧载临时表
-                assert tbl in valid_tables, (
-                    f"【Python 混入非法表名指引】在 {py_file.name} 中发现未知表名 '{tbl}'！"
-                    f"合法表名列表为: {valid_tables}"
-                )
+        for s_dir in search_dirs:
+            for py_file in s_dir.rglob("*.py"):
+                # 排除已废弃兼容文件及负责别名重定向的地面化模块
+                if py_file.name in ["agent.py", "grounder.py"]:
+                    continue
+                text = py_file.read_text(encoding="utf-8")
+                matches = fqz_pattern.findall(text)
+                for tbl in matches:
+                    if tbl.startswith("fqz_temp_sl_") or tbl.startswith("fqz_temp_"):
+                        continue  # 动态联邦侧载临时表
+                    assert tbl in valid_tables, (
+                        f"【Python 混入非法表名指引】在 {py_file.name} 中发现未知表名 '{tbl}'！"
+                        f"合法表名列表为: {valid_tables}"
+                    )
 
     # ──────────────────────────────────────────────────────────
     # 维度 13: 报告生成器结论提示词 SSOT 一致性
     # ──────────────────────────────────────────────────────────
 
     def test_report_renderer_uses_conclusion_prompt_ssot(self):
-        """验证 report_renderer.py 结论生成已消除硬编码模板，严格委托给 CONCLUSION_PROMPT。"""
-        renderer_path = PROMPTS_DIR.parent / "app" / "reporting" / "report_renderer.py"
-        content = renderer_path.read_text(encoding="utf-8")
+        """验证结论生成已消除硬编码模板，严格委托给 CONCLUSION_PROMPT。"""
+        reporting_dir = next(
+            p for p in (
+                REPO_ROOT / "domains" / "hsa" / "reporting",
+                REPO_ROOT / "app" / "reporting",
+            )
+            if p.exists()
+        )
+        renderer_path = reporting_dir / "report_renderer.py"
+        builder_path = reporting_dir / "conclusion_prompt_builder.py"
+        content = (renderer_path.read_text(encoding="utf-8") + "\n" +
+                   (builder_path.read_text(encoding="utf-8") if builder_path.exists() else ""))
 
         assert "from app.core.prompts import CONCLUSION_PROMPT" in content, (
-            "【报告提示词非 SSOT】report_renderer.py 未从 app.core.prompts 导入 CONCLUSION_PROMPT！"
+            "【报告提示词非 SSOT】未从 app.core.prompts 导入 CONCLUSION_PROMPT！"
         )
         assert "CONCLUSION_PROMPT.format_messages" in content, (
-            "【报告提示词非 SSOT】report_renderer.py 未使用 CONCLUSION_PROMPT.format_messages 渲染结论提示词！"
+            "【报告提示词非 SSOT】未使用 CONCLUSION_PROMPT.format_messages 渲染结论提示词！"
         )
 
 

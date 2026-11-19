@@ -10,6 +10,7 @@ app.core.registry.schema_registry — 数据库 Schema 单一事实源
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -17,7 +18,11 @@ import yaml
 from loguru import logger
 
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent.parent / "configs" / "schema_registry.yaml"
+_REPO_ROOT = next(
+    (p for p in Path(__file__).resolve().parents if (p / "configs").is_dir()),
+    Path(__file__).resolve().parent.parent.parent.parent,
+)
+_CONFIG_PATH = _REPO_ROOT / "configs" / "schema_registry.yaml"
 
 
 class SchemaRegistryEntry:
@@ -58,6 +63,8 @@ class SchemaRegistry:
         self._config: Dict = {}
         self._tables: Dict[str, SchemaRegistryEntry] = {}
         self._loaded = False
+        # 保护首次加载与 reload 的互斥; 快路径读取不持锁
+        self._lock = threading.Lock()
 
     # ── 公共 API ──────────────────────────────────────────────
 
@@ -162,38 +169,57 @@ class SchemaRegistry:
         return sorted(cols)
 
     def reload(self) -> None:
-        """强制重新加载配置。"""
-        self._tables.clear()
-        self._config.clear()
-        self._loaded = False
-        self._ensure_loaded()
+        """强制重新加载配置。
+
+        与首次加载共用同一把锁; 先在锁内构建完整新状态再整体替换,
+        因此并发读取方要么看到完整旧配置, 要么看到完整新配置,
+        不会读到中途被清空的空配置。
+        """
+        with self._lock:
+            self._load_locked()
+            self._loaded = True
 
     # ── 内部逻辑 ──────────────────────────────────────────────
 
     def _ensure_loaded(self) -> None:
+        """惰性加载守卫 (双重检查锁 Double-Checked Locking)。
+
+        快路径无锁读 _loaded, 已加载则零开销返回; 仅在未命中时加锁,
+        并在锁内二次检查, 保证并发首次调用只真正执行一次加载。
+        """
         if self._loaded:
             return
 
+        with self._lock:
+            if self._loaded:
+                return
+            self._load_locked()
+            self._loaded = True
+
+    def _load_locked(self) -> None:
+        """实际加载逻辑; 调用方必须持有 self._lock。"""
         if not self._path.exists():
             logger.warning(
                 f"[SchemaRegistry] Config not found at {self._path}, using defaults."
             )
-            self._config = self._get_defaults()
+            config = self._get_defaults()
         else:
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
-                    self._config = yaml.safe_load(f) or {}
+                    config = yaml.safe_load(f) or {}
                 logger.info(f"[SchemaRegistry] Loaded config from {self._path}")
             except Exception as e:
                 logger.error(f"[SchemaRegistry] Failed to load config: {e}")
-                self._config = self._get_defaults()
+                config = self._get_defaults()
 
-        # 解析表定义
-        for table_data in self._config.get("tables", []):
+        # 解析表定义到局部字典, 构建完成后整体替换, 避免读取方看到半成品状态
+        tables: Dict[str, SchemaRegistryEntry] = {}
+        for table_data in config.get("tables", []):
             entry = SchemaRegistryEntry(table_data)
-            self._tables[entry.name] = entry
+            tables[entry.name] = entry
 
-        self._loaded = True
+        self._config = config
+        self._tables = tables
 
     @staticmethod
     def _get_defaults() -> Dict:

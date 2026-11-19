@@ -11,7 +11,7 @@ app/core/llm_provider.py
 
 from typing import Dict, Any, List, Optional, Union
 from loguru import logger
-from langchain_core.messages import BaseMessage, SystemMessage, AIMessage
+from langchain_core.messages import BaseMessage, SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 import time
 
@@ -61,53 +61,23 @@ class LLMProvider:
         )
 
         # 2. 运行工业级 GSSC 上下文治理流水线 (Context Engineering)
-        # 仅针对需要大量外部事实经验与结构表结构的核心审计角色
-        if role in ["planner_heavy", "coder", "reporter"] and state:
-            user_input = (state.get("metadata") or {}).get("user_question") or self._extract_last_user_message(messages)
-            if user_input:
-                from app.infra.endpoint_pool_manager import endpoint_pool_manager
-                from app.core.schemas import RoleConfigV2
-                from app.core.context.context_builder import ContextBuilder
-                
-                # 获取或初始化角色预算配置
-                role_cfg = endpoint_pool_manager.roles.get(role)
-                if not role_cfg:
-                    role_cfg = RoleConfigV2(pool="tier-1-chat", max_input_tokens=4000, max_output_tokens=2000)
-                
-                # 构建元数据：保留已有的 metadata，不丢失 semantic_alignment 等上下文
-                metadata = dict(state.get("metadata") or {})
-                if "target_tables" not in metadata and state.get("target_tables"):
-                    metadata["target_tables"] = state.get("target_tables")
-                
-                # 动态生成黄金上下文事实层消息流 (并完成 Gather -> Select -> Structure -> Compress)
-                builder = ContextBuilder(role_cfg)
-                messages = await builder.build_optimal_context(
-                    user_query=user_input,
-                    history=messages,
-                    metadata=metadata
-                )
+        messages = await self._enrich_context_if_needed(role, messages, state)
 
-        # 3. 绑定工具
+        # 3. 动态参数与工具绑定 (锁定输出预算，严防长篇累牍与 Token 膨胀)
         if tools:
             llm = llm.bind_tools(tools)
+        max_tokens_val = kwargs.get("max_tokens")
+        if max_tokens_val:
+            llm = llm.bind(max_tokens=int(max_tokens_val))
 
         # 4. 构建可观测性配置
         obs_config = build_obs_config(config, role, state or {})
+        
+        # 5. [Protocol Guard] 协议防御与归一化 (深模块收口工具配对、多 System 归一、角色交替折叠、用户消息兜底)
+        from app.core.protocol.dialogue_sanitizer import sanitize_dialogue_protocol
+        messages = sanitize_dialogue_protocol(messages)
 
-        # 5. [Pairing Safety Guard] 确保工具调用配对 100% 完整，绝对防爆 400 Bad Request
-        from app.memory.message_sanitizer import ensure_tool_pairing
-        messages = ensure_tool_pairing(messages)
-
-        # [Anthropic/OpenAI Safety Guard] 若消息链全为 SystemMessage 或无用户消息，自动追加一条 HumanMessage 防止 400 报错
-        from langchain_core.messages import HumanMessage
-        has_user_msg = any(
-            isinstance(m, HumanMessage) or getattr(m, "type", "") in ("human", "user") or (isinstance(m, tuple) and m[0] in ("human", "user"))
-            for m in messages
-        )
-        if not has_user_msg:
-            messages = list(messages) + [HumanMessage(content="请根据系统提示与当前上下文执行审计分析并给出输出。")]
-
-        # 6. 执行调用
+        # 6. 执行调用与重试
         start_time = time.time()
         max_attempts = 3
         
@@ -116,41 +86,14 @@ class LLMProvider:
                 # 打印消息链结构，抓取 pairing 漏洞
                 logger.info(f"🐛 [LLM Debug] 消息链结构: " + ", ".join(f"{getattr(m, 'type', m.__class__.__name__)}(has_tc={bool(getattr(m, 'tool_calls', None))})" for m in messages))
                 
-                # [V300.0] 彻底解决伪流式问题：若模型支持流式，使用 astream 以实时分发 on_chat_model_stream 事件
-                if getattr(llm, "streaming", False):
-                    chunks = []
-                    async for chunk in llm.astream(messages, config=obs_config):
-                        chunks.append(chunk)
-                    if chunks:
-                        response = chunks[0]
-                        for chunk in chunks[1:]:
-                            response += chunk
-                    else:
-                        from langchain_core.messages import AIMessage
-                        response = AIMessage(content="")
-                else:
-                    response = await llm.ainvoke(messages, config=obs_config)
-                
-                # [Claude/Thinking Guard] 归一化 response.content 为纯文本字符串，防止 downstream 解析崩溃
-                if isinstance(response.content, list):
-                    text_parts = []
-                    for item in response.content:
-                        if isinstance(item, str):
-                            if item: text_parts.append(item)
-                        elif isinstance(item, dict):
-                            if item.get("type") == "text" and item.get("text"):
-                                text_parts.append(item["text"])
-                            elif "text" in item and item["text"]:
-                                text_parts.append(item["text"])
-                    if text_parts or not getattr(response, "tool_calls", None):
-                        response.content = "\n".join(text_parts).strip()
+                response = await self._execute_model_call(llm, messages, obs_config)
                 
                 latency_ms = (time.time() - start_time) * 1000
                 
-                # 6. 计费与用量追踪
+                # 7. 计费与用量追踪
                 self._record_usage(role, response, actual_model_id, messages, latency_ms=latency_ms)
                 
-                # 7. 注入审计元数据 (Audit Metadata Injection)
+                # 8. 注入审计元数据 (Audit Metadata Injection)
                 if hasattr(response, "additional_kwargs"):
                     response.additional_kwargs.update({
                         "audit_latency_ms": latency_ms,
@@ -159,7 +102,7 @@ class LLMProvider:
                         "audit_timestamp": time.time()
                     })
                 
-                # 8. 更新认知记忆
+                # 9. 更新认知记忆
                 cognitive_memory_manager.add_message(session_id, response)
                 
                 return response
@@ -176,6 +119,85 @@ class LLMProvider:
                 else:
                     logger.error("💥 [LLMProvider] 算力池彻底枯竭或网络瘫痪，放弃重试。")
                     raise e
+
+    async def _enrich_context_if_needed(
+        self, 
+        role: str, 
+        messages: List[BaseMessage], 
+        state: Optional[Dict[str, Any]]
+    ) -> List[BaseMessage]:
+        """
+        [Context Engineering] 运行工业级 GSSC 上下文治理流水线。
+        仅针对需要外部事实经验与物理库表结构(DDL)的代码生成与复杂规划角色。
+        """
+        if role not in ["planner_heavy", "coder"] or not state:
+            return messages
+
+        user_input = (
+            state.get("current_turn_query") 
+            or self._extract_last_user_message(messages) 
+            or (state.get("metadata") or {}).get("user_question")
+        )
+        if not user_input:
+            return messages
+
+        from app.infra.endpoint_pool_manager import endpoint_pool_manager
+        from app.core.schemas import RoleConfigV2
+        from app.core.context.context_builder import ContextBuilder
+
+        role_cfg = endpoint_pool_manager.roles.get(role)
+        if not role_cfg:
+            role_cfg = RoleConfigV2(pool="tier-1-chat", max_input_tokens=4000, max_output_tokens=2000)
+
+        metadata = dict(state.get("metadata") or {})
+        if "target_tables" not in metadata and state.get("target_tables"):
+            metadata["target_tables"] = state.get("target_tables")
+
+        builder = ContextBuilder(role_cfg)
+        return await builder.build_optimal_context(
+            user_query=user_input,
+            history=messages,
+            metadata=metadata
+        )
+
+    async def _execute_model_call(
+        self, 
+        llm: Any, 
+        messages: List[BaseMessage], 
+        obs_config: Any
+    ) -> AIMessage:
+        """
+        执行模型物理调用（适配 streaming 与 非流式），并解包 Response Content。
+        """
+        from app.core.protocol.dialogue_sanitizer import unpack_response_content
+
+        if getattr(llm, "streaming", False):
+            chunks = []
+            async for chunk in llm.astream(messages, config=obs_config):
+                chunks.append(chunk)
+            if chunks:
+                response = chunks[0]
+                for chunk in chunks[1:]:
+                    try:
+                        response = response + chunk
+                    except Exception:
+                        pass
+                # 严防普通 Message 相加被 LangChain 重载退化为 ChatPromptTemplate
+                if not isinstance(response, BaseMessage):
+                    combined_content = "".join(str(getattr(c, "content", "") or "") for c in chunks)
+                    response = AIMessage(content=combined_content)
+            else:
+                response = AIMessage(content="")
+        else:
+            response = await llm.ainvoke(messages, config=obs_config)
+
+
+        response.content = unpack_response_content(
+            response.content,
+            has_tool_calls=bool(getattr(response, "tool_calls", None))
+        )
+        return response
+
 
     def _resolve_tier_id(self, tier: str) -> str:
         """将逻辑层级映射为物理模型 ID (从配置中心/环境变量读取)"""

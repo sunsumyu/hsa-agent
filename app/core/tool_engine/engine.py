@@ -208,100 +208,19 @@ class ToolEngine:
                 structured_hints=["请检查 SQL 的语法闭合与括号配对。"]
             )
 
-        # 步骤 C: 物理适配器执行
+        # 步骤 C: 物理适配器执行 (集成 clickhouse_error_healer 自动自愈闭环)
+        from app.core.protocol.clickhouse_error_healer import execute_with_auto_heal
         try:
-            records = await self.db_adapter.query(safe_sql)
+            records, safe_sql = await execute_with_auto_heal(self.db_adapter.query, safe_sql)
         except Exception as exec_err:
-            err_str = str(exec_err)
-            logger.warning(f"⚠️ [ToolEngine] 数据库执行报错，尝试自动自愈: {err_str[:120]}")
-            
-            # 自愈分支 1: Code 6 包含制表符的日期转换
-            if "Code: 6" in err_str and "CANNOT_PARSE_TEXT" in err_str:
-                from app.skills.sql_tools import _heal_timestamp_tab
-                healed_sql = _heal_timestamp_tab(safe_sql)
-                if healed_sql != safe_sql:
-                    try:
-                        records = await self.db_adapter.query(healed_sql)
-                        safe_sql = healed_sql
-                    except Exception as retry_e:
-                        return ToolResult(
-                            call_id=call_id,
-                            tool_name="execute_audit_sql",
-                            is_success=False,
-                            error_type="EXECUTION_ERROR",
-                            error_message=str(retry_e),
-                            sql_executed=healed_sql
-                        )
-                else:
-                    return ToolResult(
-                        call_id=call_id,
-                        tool_name="execute_audit_sql",
-                        is_success=False,
-                        error_type="EXECUTION_ERROR",
-                        error_message=err_str,
-                        sql_executed=safe_sql
-                    )
-            # 自愈分支 2: Code 215 GROUP BY 漏字段
-            elif "Code: 215" in err_str:
-                from app.skills.sql_tools import _heal_group_by_215
-                healed_sql = _heal_group_by_215(safe_sql, err_str)
-                if healed_sql != safe_sql:
-                    try:
-                        records = await self.db_adapter.query(healed_sql)
-                        safe_sql = healed_sql
-                    except Exception as retry_e:
-                        return ToolResult(
-                            call_id=call_id,
-                            tool_name="execute_audit_sql",
-                            is_success=False,
-                            error_type="EXECUTION_ERROR",
-                            error_message=str(retry_e),
-                            sql_executed=healed_sql
-                        )
-                else:
-                    return ToolResult(
-                        call_id=call_id,
-                        tool_name="execute_audit_sql",
-                        is_success=False,
-                        error_type="EXECUTION_ERROR",
-                        error_message=err_str,
-                        sql_executed=safe_sql
-                    )
-            # 自愈分支 3: Code 184 别名遮蔽导致 ILLEGAL_AGGREGATION
-            elif "Code: 184" in err_str or "ILLEGAL_AGGREGATION" in err_str or "is found in WHERE in query" in err_str:
-                from app.core.protocol.tool_normalizer import ToolResponseNormalizer
-                healed_sql = ToolResponseNormalizer.fix_shadowing_aliases(safe_sql)
-                if healed_sql != safe_sql:
-                    try:
-                        records = await self.db_adapter.query(healed_sql)
-                        safe_sql = healed_sql
-                    except Exception as retry_e:
-                        return ToolResult(
-                            call_id=call_id,
-                            tool_name="execute_audit_sql",
-                            is_success=False,
-                            error_type="EXECUTION_ERROR",
-                            error_message=str(retry_e),
-                            sql_executed=healed_sql
-                        )
-                else:
-                    return ToolResult(
-                        call_id=call_id,
-                        tool_name="execute_audit_sql",
-                        is_success=False,
-                        error_type="EXECUTION_ERROR",
-                        error_message=err_str,
-                        sql_executed=safe_sql
-                    )
-            else:
-                return ToolResult(
-                    call_id=call_id,
-                    tool_name="execute_audit_sql",
-                    is_success=False,
-                    error_type="EXECUTION_ERROR",
-                    error_message=err_str,
-                    sql_executed=safe_sql
-                )
+            return ToolResult(
+                call_id=call_id,
+                tool_name="execute_audit_sql",
+                is_success=False,
+                error_type="EXECUTION_ERROR",
+                error_message=str(exec_err),
+                sql_executed=safe_sql
+            )
 
         # 步骤 D: 结构化采样与指纹生成 (集成 ToolEvidenceExtractor)
         total_count = len(records)

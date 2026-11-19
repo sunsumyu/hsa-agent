@@ -70,9 +70,11 @@ class HistoryManager:
         try:
             # 确保目录存在
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            tmp_path = f"{path}.tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 # 转换回字典列表进行存储
                 json.dump(messages_to_dict(history), f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
             logger.info(f"已更新会话历史 [Session: {session_id}]")
         except Exception as e:
             logger.error(f"保存历史记录失败 [Session: {session_id}]: {e}")

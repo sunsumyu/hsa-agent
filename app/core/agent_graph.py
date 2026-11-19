@@ -1,4 +1,5 @@
 import operator
+import os
 import re
 from typing import Annotated, Dict, List, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
@@ -28,7 +29,8 @@ from app.core.task_pool import task_pool
 from langgraph.graph import StateGraph, END
 
 # --- 常量配置 ---
-MAX_RETRIES = settings.max_agent_retries
+# [Matt Pocock 刚性熔断接缝] 生产交互单轮微调最多 1 次，严禁多轮乒乓死循环
+MAX_RETRIES = min(settings.max_agent_retries, 1)
 
 def _record_usage_with_budget(role: str, response: Any, model_id: str, prompt: Any = ""):
     """[兼容性接口] 供外部脚本(如 Benchmark) 拦截或手动记录用量。内部节点已切换至 LLMProvider。"""
@@ -56,6 +58,17 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     # 1. 获取基础信息
     metadata = state.get("metadata") or {}
     user_question = metadata.get("user_question")
+
+    # [SPEC-227 直通分流] 底稿汇编与便签回溯无需规划 SQL，直接放行
+    if metadata.get("synthesis_done"):
+        result = {
+            "tasks": ["直通汇编阶段性审计成果"],
+            "methodology": "多轮核查事实汇总与客观度量归集",
+            "error_log": None
+        }
+        pipeline_tracker.on_node_end("PLANNER", state, result)
+        return result
+
     # 检查是否已存在手动指定的 model_id
     manual_model = config.get("configurable", {}).get("model_id")
 
@@ -89,68 +102,27 @@ async def planner_node(state: AuditState, config: RunnableConfig):
     return result
 
 async def aligner_node(state: AuditState, config: RunnableConfig):
-    """[V210.0] 前置白盒语义对齐节点 AlignerNode"""
-    from app.core.context.funnel import semantic_funnel
-    from langchain_core.messages import HumanMessage
+    """[V227.0 SPEC-227 / Matt Pocock Deep Module] 前置白盒语义对齐与长链多轮状态机治理节点"""
+    from app.core.context.aligner_node_orchestrator import orchestrate_aligner_node
 
     pipeline_tracker.on_node_start("ALIGNER", state)  # [V178.10]
-
-    # 1. 提取用户审计提问
-    user_input = ""
-    for msg in state.get("messages", []):
-        if isinstance(msg, (HumanMessage, tuple)) or (hasattr(msg, "type") and msg.type in ("human", "user")):
-            user_input = msg[1] if isinstance(msg, tuple) else str(msg.content)
-            break
-
-    if not user_input:
-        logger.warning("[AlignerNode] 未能从状态中提取到有效的用户提问，跳过对齐流")
-        result = {}
-        pipeline_tracker.on_node_end("ALIGNER", state, result)
-        return result
-
-    # 2. 执行穿透四层语义漏斗流程
-    try:
-        metadata = state.get("metadata") or {}
-        fast_route_id = metadata.get("fast_route_id")
-
-        if fast_route_id:
-            logger.success(f"⚡ [Aligner Bypass] 智能体命中直通分支，跳过语义对齐漏斗")
-            result = {
-                "metadata": {
-                    "user_question": user_input
-                }
-            }
-            pipeline_tracker.on_node_end("ALIGNER", state, result)
-            return result
-
-        alignment_report = await semantic_funnel.execute_alignment_flow(user_input, config)
-
-        # 3. 构造状态更新
-        metadata_update = {
-            "semantic_alignment": alignment_report,
-            "user_question": user_input
-        }
-
-        # 提取临时表，写入 state
-        temp_table = alignment_report.get("temp_table")
-
-        logger.success(f"🎯 [AlignerNode] 语义白盒漏斗对齐成功，临时表: {temp_table}")
-        result = {
-            "metadata": metadata_update,
-            "temp_table": temp_table,
-            "schema_hint": alignment_report.get("explanation")
-        }
-        pipeline_tracker.on_node_end("ALIGNER", state, result)
-        return result
-    except Exception as e:
-        logger.error(f"❌ [AlignerNode] 对齐流执行异常: {e}")
-        pipeline_tracker.on_node_end("ALIGNER", state, {"error_log": str(e)})
-        return {}
+    result = await orchestrate_aligner_node(state, config)
+    pipeline_tracker.on_node_end("ALIGNER", state, result)
+    return result
 
 async def sqlexec_node(state: AuditState, config: RunnableConfig):
-    """[V150.0] 委托至 CoderAgent 执行工具调用与验证"""
-    from app.agents.coder_agent import coder_agent
+    """[V150.0] 委托至 CoderAgent 或 Execution Subgraph 执行工具调用与自愈验证"""
     pipeline_tracker.on_node_start("SQLEXEC", state)  # [V178.10]
+
+    # [Matt Pocock Deep Module] 当开启子图架构时，直接委托给 Execution Subgraph
+    if getattr(settings, "use_execution_subgraph", False):
+        from app.core.subgraphs.execution_subgraph import execution_engine_node
+        res = await execution_engine_node(state, config)
+        logger.info(f"🔍 [DEBUG Graph Subgraph] sqlexec_node returned: sql_query = {repr(res.get('sql_query'))}")
+        pipeline_tracker.on_node_end("SQLEXEC", state, res)
+        return res
+
+    from app.agents.coder_agent import coder_agent
     res = await coder_agent.execute(state, config)
     
     # [V2.0 NEW] Gate 3: 执行结果与原始意图的一致性校验
@@ -178,105 +150,26 @@ async def critic_node(state: AuditState, config: RunnableConfig):
     return result
 
 async def reporter_node(state: AuditState, config: RunnableConfig):
-    """[V150.0] 委托至 ReportRenderer 执行报告渲染与事实对齐"""
+    """[V150.0] 委托至 ReporterNodeOrchestrator 执行报告渲染与事实对齐 [Matt Pocock Deep Module]"""
     logger.info(f"🔍 [DEBUG Graph] reporter_node received: sql_query = {repr(state.get('sql_query'))}")
-    from app.reporting.report_renderer import report_renderer
-    from app.core.booster import booster
-    from app.core.registry.schema_registry import schema_registry
-    from app.core.llm_provider import llm_provider
-    from langchain_core.messages import HumanMessage, AIMessage
+    pipeline_tracker.on_node_start("REPORTER", state)
 
-    logger.info(">>> [REPORTER] 正在执行渲染任务...")
-    raw_data_list = report_renderer.clean_and_parse_raw_data(state.get("raw_data"))
-    from app.reporting.audit_metric_evaluator import AuditMetricEvaluator
-    hard_count, hard_sum = AuditMetricEvaluator.extract_totals(raw_data_list)
-    
-    # [V2.1] 识别执行是否受限/逃生舱激活
-    error_log = state.get("error_log") or ""
-    is_restricted = False
-    # [V180.0 Pocock 证据优先接缝] 若已获取真实物理证据且存在对应 SQL，物理取证已成功，绝不开启受限核查
-    has_valid_evidence = bool(raw_data_list) and bool(state.get("sql_query"))
-    if not has_valid_evidence:
-        if (
-            state.get("retry_count", 0) >= MAX_RETRIES 
-            or "降级报告模式" in error_log 
-            or "REACHED_MAX_RETRIES" in error_log
-            or not state.get("sql_validated")
-        ):
-            is_restricted = True
-            logger.warning("🚨 [REPORTER] 检测到执行受限/逃生舱触发，开启受限核查渲染模式。")
+    from app.reporting.reporter_node_orchestrator import orchestrate_reporter_node
+    result = await orchestrate_reporter_node(state, config, max_retries=MAX_RETRIES)
 
-    user_question = (state.get("metadata") or {}).get("user_question") or "医保专项审计"
-    
-    # [V156.0] 提取最后一条 AI 消息 of 元数据作为溯源证据
-    messages = state.get("messages", [])
-    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-    audit_meta = getattr(last_ai, "additional_kwargs", {}) if last_ai else {}
-    
-    methodology = state.get("methodology", "基础核查逻辑")
-    execution_trace = state.get("execution_trace") or []
+    pipeline_tracker.on_node_end("REPORTER", state, result)
+    return result
 
-    # 1.5 快速路由物理直通分流 (Bypass Reporter LLM)
-    metadata = state.get("metadata") or {}
-    fast_route_id = metadata.get("fast_route_id")
-    
-    if fast_route_id:
-        from app.reporting.fast_route_conclusion import generate_fast_route_conclusion
-        llm_conclusion = generate_fast_route_conclusion(
-            raw_data_list, hard_sum, hard_count, user_question
-        )
-    else:
-        semantic_align = (state.get("metadata") or {}).get("semantic_alignment") or {}
-        rewritten_q = semantic_align.get("rewritten_question")
-        prompt_text = report_renderer.prepare_conclusion_prompt(
-            user_question, 
-            methodology, 
-            execution_trace, 
-            hard_count, 
-            hard_sum, 
-            rewritten_question=rewritten_q,
-            is_restricted=is_restricted
-        )
-        try:
-            response = await llm_provider.chat(
-                role="reporter", 
-                messages=[HumanMessage(content=prompt_text)], 
-                config=config, 
-                state=state,
-                max_tokens=1000 # [V178.9] 防止长篇专业结论被物理截断
-            )
-            llm_conclusion = str(response.content).strip()
-        except Exception as e:
-            logger.error(f"结论生成失败: {e}")
-            llm_conclusion = f"本次核查由于逻辑受限未产出确切违规结论。" if is_restricted else f"本次核查扫描 {hard_count} 条记录，涉及金额 ¥{hard_sum:,.2f}。"
-
-    rendered = report_renderer.render(
-        user_question=user_question,
-        llm_conclusion=llm_conclusion,
-        raw_data=raw_data_list,
-        sql_query=state.get("sql_query"),
-        sql_history=state.get("sql_history", []), # [V178.9] 传入全量 SQL 历史
-        methodology=methodology,
-        table_info=f"{schema_registry.get_main_table()}",
-        total_amount=hard_sum,
-        finding_count=hard_count,
-        execution_trace=execution_trace,
-        audit_metadata=audit_meta, # [V156.0]
-        semantic_alignment=(state.get("metadata") or {}).get("semantic_alignment"), # [NEW]
-        raw_data_str=state.get("raw_data"), # [NEW]
-        is_restricted=is_restricted # [NEW V2.1]
-    )
-
-    if not is_restricted:
-        is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), llm_conclusion)
-        if not is_aligned: logger.warning("🚨 [SEMANTIC_MISMATCH] 报告语义偏离")
-
-    return {"structured_report": rendered, "messages": [AIMessage(content=rendered.markdown)]}
 
 async def consolidator_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ConsolidatorAgent 执行经验固化"""
     from app.agents.consolidator_agent import consolidator_agent
     pipeline_tracker.on_node_start("CONSOLIDATOR", state)  # [V178.10]
+    metadata = state.get("metadata") or {}
+    if metadata.get("synthesis_done"):
+        result = {"error_log": None}
+        pipeline_tracker.on_node_end("CONSOLIDATOR", state, result)
+        return result
     result = await consolidator_agent.consolidate(state)
     pipeline_tracker.on_node_end("CONSOLIDATOR", state, result)  # [V178.10]
     return result
@@ -296,52 +189,13 @@ async def human_approval_node(state: AuditState, config: RunnableConfig):
     }
 
 # ============================================================
-# 路由逻辑与工作流构建
+# 路由逻辑与工作流构建 (委托至 graph_route_coordinator 深模块)
 # ============================================================
-
-def _route_planner_post(state: AuditState) -> str:
-    """[V2.0 NEW] Planner 后的条件路由：若 Gate 1 校验失败则自愈，否则走向执行"""
-    if state.get("error_log"):
-        logger.info("🔄 [Graph Route] Gate 1 意图校验失败，走向 CRITIC 自愈。")
-        return "CRITIC"
-    return "SQLEXEC"
-
-def _route_critic_post(state: AuditState) -> str:
-    """[V2.0 NEW] CRITIC 后的条件路由：区分意图错误与执行错误"""
-    err = state.get("error_log", "")
-    if err and ("方法论" in err or "意图" in err or "Gate 1" in err or "RANKING" in err or "SQL 语义错误" in err and "RANKING" in state.get("metadata", {}).get("semantic_alignment", {}).get("query_type", "")):
-        logger.info("🔄 [Graph Route] CRITIC 诊断为意图方法论错误，重新进入 PLANNER。")
-        return "PLANNER"
-    logger.info("🔄 [Graph Route] CRITIC 诊断为执行错误，重新进入 SQLEXEC。")
-    return "SQLEXEC"
-
-def _route_sqlexec_post(state: AuditState) -> str:
-    # 0. 快速路由物理直通分流：直接走向 Consolidator，避免二次 LLM 工具综合与循环
-    metadata = state.get("metadata") or {}
-    if metadata.get("fast_route_id"):
-        return "CONSOLIDATOR"
-
-    # [FIX] 如果执行阶段发生错误（包括 Gate 2 拦截或执行报错），且未超限，优先走向 CRITIC 纠偏
-    if (state.get("error_log") or state.get("has_error")) and state.get("retry_count", 0) < MAX_RETRIES:
-        logger.info("🔄 [Graph Route] SQLEXEC 校验/执行失败，走向 CRITIC 纠偏。")
-        return "CRITIC"
-
-    messages = state.get("messages", [])
-    last_msg = messages[-1] if messages else None
-
-    # 1. 如果还在调工具，继续在 SQLEXEC 思考
-    if isinstance(last_msg, ToolMessage) or (not isinstance(last_msg, tuple) and getattr(last_msg, "tool_calls", None)):
-        if state.get("retry_count", 0) < MAX_RETRIES: return "SQLEXEC"
-
-    # 1.5 风险截断：如果风险过高，强制进入待审批状态
-    if QualityGate.should_trigger_human_approval(state):
-        return "HUMAN_APPROVAL"
-
-    # 2. 增强门控：检查错误日志或元数据信心值
-    if QualityGate.should_trigger_critic(state) and state.get("retry_count", 0) < MAX_RETRIES:
-        return "CRITIC"
-        
-    return "CONSOLIDATOR"
+from app.core.graph_route_coordinator import (
+    route_planner_post as _route_planner_post,
+    route_critic_post as _route_critic_post,
+    route_sqlexec_post as _route_sqlexec_post,
+)
 
 def _build_workflow_skeleton() -> StateGraph:
     wf = StateGraph(AuditState)
@@ -361,7 +215,8 @@ def _build_workflow_skeleton() -> StateGraph:
         _route_planner_post,
         {
             "CRITIC": "CRITIC",
-            "SQLEXEC": "SQLEXEC"
+            "SQLEXEC": "SQLEXEC",
+            "CONSOLIDATOR": "CONSOLIDATOR"
         }
     )
     wf.add_conditional_edges(

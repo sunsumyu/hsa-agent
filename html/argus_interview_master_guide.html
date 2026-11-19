@@ -1,0 +1,3304 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Argus-Agent 面试终极通关宝典 · 分类学习交互版</title>
+  <style>
+    :root, [data-theme="dark"] {
+      --bg-app: #0b0f19;
+      --bg-sidebar: #0f1524;
+      --bg-surface: #131b2e;
+      --bg-surface-hover: #18223a;
+      --bg-elevated: #1b2640;
+      --bg-code: #090d16;
+      --border: #23304d;
+      --border-strong: #33466e;
+      --text-primary: #e8eefc;
+      --text-secondary: #a4b3d1;
+      --text-muted: #7082a6;
+      --accent: #6366f1;
+      --accent-soft: rgba(99, 102, 241, 0.14);
+      --accent-hover: #818cf8;
+      --emerald: #10b981;
+      --emerald-bg: rgba(16, 185, 129, 0.08);
+      --emerald-border: rgba(16, 185, 129, 0.35);
+      --blue: #3b82f6;
+      --blue-bg: rgba(59, 130, 246, 0.08);
+      --blue-border: rgba(59, 130, 246, 0.32);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.1);
+      --amber-border: rgba(245, 158, 11, 0.35);
+      --rose: #f43f5e;
+      --rose-bg: rgba(244, 63, 94, 0.1);
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    [data-theme="light"] {
+      --bg-app: #f4f6fb;
+      --bg-sidebar: #ffffff;
+      --bg-surface: #ffffff;
+      --bg-surface-hover: #f8faff;
+      --bg-elevated: #eef2fa;
+      --bg-code: #1e2433;
+      --border: #dce3f0;
+      --border-strong: #bcc8de;
+      --text-primary: #172033;
+      --text-secondary: #475569;
+      --text-muted: #64748b;
+      --accent: #4f46e5;
+      --accent-soft: rgba(79, 70, 229, 0.1);
+      --accent-hover: #4338ca;
+      --emerald: #059669;
+      --emerald-bg: rgba(16, 185, 129, 0.07);
+      --emerald-border: rgba(5, 150, 105, 0.35);
+      --blue: #2563eb;
+      --blue-bg: rgba(37, 99, 235, 0.06);
+      --blue-border: rgba(37, 99, 235, 0.28);
+      --amber: #d97706;
+      --amber-bg: rgba(245, 158, 11, 0.08);
+      --amber-border: rgba(217, 119, 6, 0.3);
+      --rose: #e11d48;
+      --rose-bg: rgba(225, 29, 72, 0.07);
+      --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg-app);
+      color: var(--text-primary);
+      line-height: 1.7;
+      font-size: 15px;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── 左侧固定导航栏 ── */
+    .sidebar {
+      width: 290px;
+      flex-shrink: 0;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      z-index: 40;
+      transition: transform 0.25s ease;
+    }
+
+    .sidebar-brand {
+      padding: 20px 18px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--accent-hover);
+      background: var(--accent-soft);
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-bottom: 8px;
+    }
+
+    .sidebar-brand h1 {
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.35;
+      color: var(--text-primary);
+    }
+
+    .sidebar-brand p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* 掌握进度面板 */
+    .mastery-panel {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface-hover);
+    }
+
+    .mastery-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12.5px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .mastery-count {
+      color: var(--emerald);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: var(--bg-elevated);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--emerald));
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    .mastery-filter-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .mini-btn {
+      flex: 1;
+      padding: 4px 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mini-btn:hover {
+      border-color: var(--accent);
+      color: var(--text-primary);
+    }
+
+    .mini-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+
+    /* 侧边栏分类列表 */
+    .sidebar-nav {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 10px;
+    }
+
+    .nav-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      padding: 4px 10px 8px;
+    }
+
+    .nav-item {
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 9px 11px;
+      margin-bottom: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+
+    .nav-item:hover {
+      background: var(--bg-surface-hover);
+      color: var(--text-primary);
+    }
+
+    .nav-item.active {
+      background: var(--accent-soft);
+      border-color: rgba(99, 102, 241, 0.35);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .nav-item-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .nav-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .nav-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .nav-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .nav-item.active .nav-badge {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .reset-progress-btn {
+      background: transparent;
+      border: none;
+      color: var(--rose);
+      font-size: 11.5px;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    /* ── 主体区域 ── */
+    .main-wrapper {
+      margin-left: 290px;
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 顶部吸顶工具栏 */
+    .top-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: var(--bg-sidebar);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 28px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .mobile-menu-btn {
+      display: none;
+      padding: 7px 11px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .search-box {
+      flex: 1;
+      min-width: 220px;
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 8px 90px 8px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--bg-app);
+      color: var(--text-primary);
+      font-size: 13.5px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+    }
+
+    .search-meta {
+      position: absolute;
+      right: 10px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tool-btn {
+      padding: 7px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .tool-btn:hover {
+      border-color: var(--accent);
+      background: var(--bg-surface-hover);
+    }
+
+    .tool-btn.active-mode {
+      background: var(--amber-bg);
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+
+    /* 主内容流 */
+    .content-container {
+      max-width: 1020px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 26px 28px 80px;
+    }
+
+    .hero-banner {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(16, 185, 129, 0.1));
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      padding: 22px 24px;
+      margin-bottom: 24px;
+    }
+
+    .hero-banner h2 {
+      font-size: 21px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .hero-banner p {
+      font-size: 13.5px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .hero-tips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .hero-pill {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    /* 分类区块标题 */
+    .category-section {
+      margin-bottom: 34px;
+    }
+
+    .category-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-bottom: 10px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid var(--border);
+    }
+
+    .category-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .cat-tag {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent-hover);
+    }
+
+    .category-header h2 {
+      font-size: 18.5px;
+      font-weight: 700;
+    }
+
+    .category-desc {
+      font-size: 12.5px;
+      color: var(--text-muted);
+    }
+
+    /* 问答卡片 */
+    .qa-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .qa-card:hover {
+      border-color: var(--border-strong);
+      box-shadow: var(--shadow-md);
+    }
+
+    .qa-card.is-mastered {
+      border-left: 4px solid var(--emerald);
+    }
+
+    .qa-card.hidden-card {
+      display: none !important;
+    }
+
+    .qa-header {
+      padding: 15px 18px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      cursor: pointer;
+      user-select: none;
+      background: var(--bg-surface);
+      transition: background 0.15s;
+    }
+
+    .qa-header:hover {
+      background: var(--bg-surface-hover);
+    }
+
+    .qa-title-area {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .qa-meta-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .q-num {
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .q-num.followup { background: #8b5cf6; }
+    .q-num.codecase { background: #0ea5e9; }
+    .q-num.jdcase   { background: #f59e0b; color: #111827; }
+
+    .topic-pill {
+      font-size: 11.5px;
+      padding: 1px 8px;
+      border-radius: 999px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+    }
+
+    .qa-question {
+      font-size: 15.5px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.45;
+    }
+
+    .qa-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .mastery-btn {
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border-strong);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mastery-btn:hover {
+      border-color: var(--emerald);
+      color: var(--emerald);
+    }
+
+    .qa-card.is-mastered .mastery-btn {
+      background: var(--emerald-bg);
+      border-color: var(--emerald);
+      color: var(--emerald);
+    }
+
+    .chevron {
+      width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 12px;
+      transition: transform 0.2s;
+    }
+
+    .qa-card.collapsed .chevron {
+      transform: rotate(-90deg);
+    }
+
+    .qa-body {
+      padding: 4px 18px 18px;
+      border-top: 1px solid var(--border);
+    }
+
+    .qa-card.collapsed .qa-body {
+      display: none;
+    }
+
+    /* 面试标准回答块 */
+    .answer-box {
+      margin-top: 14px;
+      background: var(--emerald-bg);
+      border: 1px solid var(--emerald-border);
+      border-left: 4px solid var(--emerald);
+      border-radius: 8px;
+      padding: 14px 16px;
+      position: relative;
+    }
+
+    .box-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: 0.3px;
+    }
+
+    .answer-box .box-label {
+      color: var(--emerald);
+    }
+
+    .explain-box {
+      margin-top: 12px;
+      background: var(--blue-bg);
+      border: 1px solid var(--blue-border);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .explain-box .box-label {
+      color: var(--blue);
+    }
+
+    .warn-box {
+      margin-top: 12px;
+      background: var(--amber-bg);
+      border: 1px solid var(--amber-border);
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      padding: 13px 16px;
+    }
+
+    .warn-box .box-label {
+      color: var(--amber);
+    }
+
+    .box-body p {
+      margin-bottom: 8px;
+    }
+
+    .box-body p:last-child {
+      margin-bottom: 0;
+    }
+
+    .box-body ul, .box-body ol {
+      margin: 6px 0 8px 20px;
+    }
+
+    .box-body li {
+      margin-bottom: 5px;
+    }
+
+    .box-body h4 {
+      font-size: 14px;
+      font-weight: 700;
+      margin: 12px 0 6px;
+      color: var(--text-primary);
+    }
+
+    .box-body h4:first-child {
+      margin-top: 2px;
+    }
+
+    blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 6px 12px;
+      margin: 8px 0;
+      background: var(--accent-soft);
+      border-radius: 0 6px 6px 0;
+      color: var(--text-primary);
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.88em;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      padding: 1px 5px;
+      border-radius: 4px;
+      color: var(--accent-hover);
+    }
+
+    pre {
+      position: relative;
+      background: var(--bg-code);
+      color: #e2e8f0;
+      border: 1px solid #28354f;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 10px 0;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12.8px;
+      line-height: 1.55;
+    }
+
+    pre code {
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .copy-code-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      border: 1px solid #3c4f75;
+      background: #1b2640;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+
+    .copy-code-btn:hover {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+      font-size: 13px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    th, td {
+      padding: 9px 11px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    th:last-child, td:last-child {
+      border-right: none;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    th {
+      background: var(--bg-elevated);
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    td {
+      background: var(--bg-surface);
+      color: var(--text-secondary);
+    }
+
+    .hl-bad {
+      color: var(--rose);
+      font-weight: 600;
+    }
+
+    .hl-good {
+      color: var(--emerald);
+      font-weight: 600;
+    }
+
+    /* 自测背诵模糊模式 */
+    body.recite-mode .recite-target {
+      filter: blur(6px);
+      user-select: none;
+      cursor: pointer;
+      transition: filter 0.2s ease;
+    }
+
+    body.recite-mode .recite-target.revealed {
+      filter: none;
+      user-select: text;
+    }
+
+    .recite-hint {
+      display: none;
+      font-size: 11px;
+      color: var(--amber);
+      font-weight: 600;
+    }
+
+    body.recite-mode .recite-hint {
+      display: inline;
+    }
+
+    /* 空状态提示 */
+    .empty-state {
+      display: none;
+      text-align: center;
+      padding: 50px 20px;
+      background: var(--bg-surface);
+      border: 1px dashed var(--border-strong);
+      border-radius: 12px;
+      color: var(--text-muted);
+    }
+
+    .empty-state.visible {
+      display: block;
+    }
+
+    /* 回到顶部按钮 */
+    .back-to-top {
+      position: fixed;
+      right: 26px;
+      bottom: 26px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border-strong);
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: var(--shadow-md);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 50;
+    }
+
+    .back-to-top.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .back-to-top:hover {
+      transform: translateY(-2px);
+      background: var(--accent-hover);
+    }
+
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 35;
+    }
+
+    @media (max-width: 960px) {
+      .sidebar {
+        transform: translateX(-100%);
+      }
+      .sidebar.open {
+        transform: translateX(0);
+      }
+      .sidebar-backdrop.open {
+        display: block;
+      }
+      .main-wrapper {
+        margin-left: 0;
+      }
+      .mobile-menu-btn {
+        display: inline-flex;
+      }
+      .top-toolbar {
+        padding: 10px 14px;
+      }
+      .content-container {
+        padding: 18px 14px 70px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
+  <!-- 左侧导航边栏 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-badge">Argus-Agent · 面试宝典</span>
+      <h1>AI Agent 架构与医保审计全攻略</h1>
+      <p>30 道核心追问 · 实战话术 · 源码案例 · JD 对齐</p>
+    </div>
+
+    <div class="mastery-panel">
+      <div class="mastery-header">
+        <span>学习掌握进度</span>
+        <span class="mastery-count" id="masteryCountText">已掌握 0 / 44 项</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="mastery-filter-row">
+        <button class="mini-btn active" data-mastery-filter="all" type="button">全部</button>
+        <button class="mini-btn" data-mastery-filter="unmastered" type="button">未掌握</button>
+        <button class="mini-btn" data-mastery-filter="mastered" type="button">已掌握</button>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav" aria-label="分类导航">
+      <div class="nav-label">专题分类目录</div>
+      <button class="nav-item active" data-cat-filter="all" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#6366f1;"></span>
+          <span class="nav-text">全部专题总览</span>
+        </span>
+        <span class="nav-badge">44</span>
+      </button>
+      <button class="nav-item" data-cat-filter="cat-1" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#10b981;"></span>
+          <span class="nav-text">一、大脑与路由编排 (Q1-Q10)</span>
+        </span>
+        <span class="nav-badge">10</span>
+      </button>
+      <button class="nav-item" data-cat-filter="cat-2" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#3b82f6;"></span>
+          <span class="nav-text">二、混合检索与工具链路 (Q11-Q20)</span>
+        </span>
+        <span class="nav-badge">10</span>
+      </button>
+      <button class="nav-item" data-cat-filter="cat-3" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#a855f7;"></span>
+          <span class="nav-text">三、结构化输出与容错 (Q21-Q30)</span>
+        </span>
+        <span class="nav-badge">10</span>
+      </button>
+      <button class="nav-item" data-cat-filter="cat-4" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#8b5cf6;"></span>
+          <span class="nav-text">四、高频实战追问与架构拷打</span>
+        </span>
+        <span class="nav-badge">6</span>
+      </button>
+      <button class="nav-item" data-cat-filter="cat-5" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#0ea5e9;"></span>
+          <span class="nav-text">五、真实源码案例与底层原理</span>
+        </span>
+        <span class="nav-badge">5</span>
+      </button>
+      <button class="nav-item" data-cat-filter="cat-6" type="button">
+        <span class="nav-item-title">
+          <span class="nav-dot" style="background:#f59e0b;"></span>
+          <span class="nav-text">六、Skill/MCP 岗位 JD 拆解</span>
+        </span>
+        <span class="nav-badge">3</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <span>本地自动保存进度</span>
+      <button class="reset-progress-btn" id="resetMasteryBtn" type="button">重置进度</button>
+    </div>
+  </aside>
+
+  <!-- 右侧主内容区 -->
+  <div class="main-wrapper">
+    <header class="top-toolbar">
+      <button class="mobile-menu-btn" id="mobileMenuBtn" type="button">☰ 目录</button>
+      <div class="search-box">
+        <input
+          type="search"
+          id="searchInput"
+          class="search-input"
+          placeholder="搜索关键词：例如 LangGraph、RRF、sqlglot、MCP、小顶堆、分位数..."
+        />
+        <span class="search-meta" id="matchCount">显示 44 项</span>
+      </div>
+      <div class="toolbar-actions">
+        <button class="tool-btn" id="reciteToggleBtn" type="button" title="隐藏标准回答，点击回答区可单独揭晓">👁 自测背诵模式</button>
+        <button class="tool-btn" id="expandAllBtn" type="button">全部展开</button>
+        <button class="tool-btn" id="collapseAllBtn" type="button">全部折叠</button>
+        <button class="tool-btn" id="themeToggleBtn" type="button">☀ 浅色模式</button>
+      </div>
+    </header>
+
+    <main class="content-container">
+      <section class="hero-banner">
+        <h2>Argus-Agent 医保智能审计项目 · 面试全景复习工作台</h2>
+        <p>
+          本页面将全部 <strong>30 道三模块深度面试追问</strong>、<strong>6 大高频实战拷打专题</strong>、<strong>5 个项目真实源码/数据库底层图解</strong> 与 <strong>Skill + MCP 目标岗位 JD 拆解</strong> 完整归类整合，支持离线搜索、自测背诵盲测与本地进度追踪。
+        </p>
+        <div class="hero-tips">
+          <span class="hero-pill">🟢 绿色框 = 面试现场直接口述的标准高分话术</span>
+          <span class="hero-pill">🔵 蓝色框 = 底层工程原理、踩坑细节与追问拆招</span>
+          <span class="hero-pill">👁 开启「自测背诵模式」可遮盖答案进行模拟口述</span>
+        </div>
+      </section>
+
+      <div class="empty-state" id="emptyState">
+        <h3>未找到匹配的知识点</h3>
+        <p style="margin-top:6px;">请尝试更换搜索关键词，或切换回「全部」分类与进度筛选。</p>
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- 分类一：模块一（Q1 - Q10） -->
+      <!-- ============================================================ -->
+      <section class="category-section" data-section-cat="cat-1">
+        <div class="category-header">
+          <div class="category-title-wrap">
+            <span class="cat-tag">模块一 · 10 题</span>
+            <h2>意图识别与多 Agent 协同编排（大脑与路由层）</h2>
+          </div>
+          <span class="category-desc">架构选型依据 · 状态管理 · 死锁熔断 · 人机协同</span>
+        </div>
+
+        <!-- Q1 -->
+        <article class="qa-card" data-card-id="q1" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q1</span>
+                <span class="topic-pill">架构权衡</span>
+                <span class="topic-pill">SOP vs ReAct</span>
+              </div>
+              <div class="qa-question">架构权衡：你提到弃用了纯自主循环（如 ReAct），改用“SOP 确定性工作流 + 局部动态路由”，能结合具体业务场景说说，哪些环节是严格写死 SOP 的？哪些环节允许大模型做局部动态路由？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在医保基金审计这种高合规、高确定性的场景下，纯 ReAct 循环是绝对不可控的，模型容易在多轮工具调用中迷失方向或产生死循环。因此我们系统将骨干链路设计为<strong>严格确定性的状态机 SOP</strong>：</p>
+                <p>从用户问题输入，必须严格依次经过 <code>Aligner（白盒意图对齐） -&gt; Planner（意图与逻辑规划） -&gt; SQLEXEC（代码/SQL执行） -&gt; Critic（反思核验） -&gt; Consolidator（经验沉淀） -&gt; Reporter（客观报告合成）</code>。</p>
+                <p>而<strong>局部动态路由</strong>仅开放给受控的两个决策节点：</p>
+                <ol>
+                  <li><code>FastRouter</code> 前置分流：如果命中已知规则或算法模板，直接短路（Short-circuit）跳过 LLM 规划与生成，直达执行层；</li>
+                  <li><code>Critic（反思节点）</code> 条件边：当执行报错或触发门控拦截时，由 Critic 依据错误类型动态决定是打回给 <code>Planner</code>（意图理解偏差，重做业务解耦）还是打回给 <code>SQLEXEC</code>（语法或字段错误，仅做 SQL 微调），或者升级到 <code>Human-Approval</code>（挂起人工审批）。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p><strong>为什么不能用纯 ReAct？</strong> ReAct 把“规划-行动-观察”交给 LLM 自由循环，在复杂任务中（比如查询跨省异地就医多表关联），LLM 经常在调用了 2 次工具后产生幻觉，以为自己拿到了完整数据就开始胡编；或者由于返回数据过长直接上下文爆炸。</p>
+                <p><strong>为什么写死 SOP？</strong> 审计业务讲究“留痕”与“证据链闭环”，每一个案件必须有清晰的意图记录、执行 SQL 记录、客观行数统计、反思校验记录，必须依赖确定性的状态转移保障工程下限。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q2 -->
+        <article class="qa-card" data-card-id="q2" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q2</span>
+                <span class="topic-pill">意图识别</span>
+                <span class="topic-pill">FastAuditRouter</span>
+                <span class="topic-pill">ArchetypeRegistry</span>
+              </div>
+              <div class="qa-question">意图识别设计：前置意图识别具体是怎么实现的？是用小模型分类、向量相似度匹配，还是直接用大模型做 Function Calling？如果用户输入非常模糊或包含多个复合意图，路由层怎么处理？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们的意图路由采用的是<strong>分层漏斗架构（Tiered Router）</strong>：</p>
+                <ol>
+                  <li><strong>第一层（规则与轻量过滤）</strong>：通过 <code>FastAuditRouter</code> 执行关键词与正则匹配，毫秒级短路高频已知审计场景（如‘男性做妇科手术’直接命中 <code>GENDER_CONFLICT</code> 算子）；</li>
+                  <li><strong>第二层（语义与分类）</strong>：对于开放式自然语言，由高性价比小模型（如 8B / Flash）结合我们在 <code>ArchetypeRegistry</code> 中沉淀的 7 大审计原型（互斥排他型、伴随依赖缺失型、时序重叠型、药贩子跨机构聚合型等）进行结构化意图抽取与分类；</li>
+                  <li><strong>复合意图与模糊意图处理</strong>：若用户提问模糊或包含复合诉求（如‘查一下去年张三的报销有没有违规，顺便分析全院高频异常药品’），Aligner 会将其判定为复合任务，由 Planner 拆解为多个并行独立的子任务（Sub-tasks），每个子任务打上独立的 Task ID；若模糊到缺失关键主体，系统直接返回澄清提问（Clarification Prompts），拒绝强行猜意图进入执行。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>千万不要一上来就无脑调大模型的 Function Calling，不仅耗时（通常 1~2s），而且当工具多达几十个时，模型的调用准确率会急剧下降。分层漏斗将 80% 的高频确定性问题截流在正则/字典层，只有 20% 的长尾复杂意图交给小模型提取，既节省了 Token 成本，又压低了首字延迟。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q3 -->
+        <article class="qa-card" data-card-id="q3" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q3</span>
+                <span class="topic-pill">上下文协议</span>
+                <span class="topic-pill">AuditState</span>
+              </div>
+              <div class="qa-question">上下文通信协议（Context Schema）：你提到的 Context Schema 具体包含哪些字段？在多 Agent 流转时，你是把全量历史对话传给下一个 Agent，还是只传提取后的结构化状态？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们绝对不会在节点间传递全量历史对话，而是基于 LangGraph 定义了严格分层的 <code>AuditState</code> 契约，分三层：</p>
+                <ol>
+                  <li><strong>Layer 1（框架通用状态 WorkflowState）</strong>：包括 <code>session_id</code>, <code>retry_count</code>, <code>error_log</code>, <code>is_awaiting_human</code>，以及带有滑动窗口消息压缩机制的 <code>messages</code>；</li>
+                  <li><strong>Layer 2（任务中间态 TaskArtifacts）</strong>：包括解耦后的结构化意图 <code>tasks</code>、待执行与已执行的 <code>sql_query</code>, <code>sql_history</code>、数据库返回的 <code>raw_data</code>、<code>execution_trace</code>；</li>
+                  <li><strong>Layer 3（领域专属上下文 AuditDomainContext）</strong>：包括锁定的审计主体与违规客体 <code>audit_findings</code>、结构化报告 <code>structured_report</code>、反思评价 <code>audit_feedback</code>。</li>
+                </ol>
+                <p>下游 Agent 只订阅它所需的切片字段（State Projection），例如 CoderAgent 只看 <code>tasks</code>、<code>schema_hint</code> 和上一轮报错 <code>error_log</code>，彻底阻断历史废话干扰。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>如果直接把全量 Chat Messages 传给后续 Agent，会产生严重的信息污染（比如上一个 Agent 调用的废弃中间结果、冗余思考过程）。按需结构化抽取不仅将 Token 消耗降低了 60% 以上，更使得每个 Agent 的输入输出具备确定性契约，便于单元测试与重放调试。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q4 -->
+        <article class="qa-card" data-card-id="q4" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q4</span>
+                <span class="topic-pill">信息衰减</span>
+                <span class="topic-pill">Anchor Pinning</span>
+              </div>
+              <div class="qa-question">信息衰减问题：当任务链路很长（比如经过“规划 -&gt; 检索 -&gt; 审核 -&gt; 核验”四个节点）时，后面的 Agent 很容易遗忘最初的业务约束或用户核心诉求，你在工程上是怎么解决这种信息衰减的？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们在工程上主要通过两套机制防止信息衰减：</p>
+                <ol>
+                  <li><strong>状态快照只读锚定（Anchor Pinning）</strong>：在 Aligner/Planner 节点解析完成后，系统将初始锁定的核心约束（如用户的原始问题 <code>user_question</code>、审计主体 <code>AuditSubject</code>、原型约束 <code>AuditArchetype</code>）持久化写入 <code>AuditDomainContext</code> 的顶层不可变字段，禁止后续节点修改；</li>
+                  <li><strong>Prompt 动态组装前置注入（Prompt Context Assembly）</strong>：后续每一个 Agent（无论是 Coder、Critic 还是 Reporter）在组装 Prompt 时，其底层组装器（如 <code>CoderPromptAssembler</code>）强制把不可变的‘审计目标锚点’作为顶级 System 约束拼在最前，与易变上下文（如当前的 SQL、Traceback）做物理区隔，确保任何后续推理都以初始目标为首要参照系。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>大模型存在“迷失在中间（Lost in the Middle）”的注意力缺陷。长链路流转中，多轮工具执行结果和报错堆栈会迅速稀释模型的上下文注意力。把核心业务目标提取为固定的“全局常量”，每次在 Prompt 的最前端和最末端进行强制强化（Recency Bias 利用），能从根本上保证模型在第 4 个节点依然清楚最初的目标。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q5 -->
+        <article class="qa-card" data-card-id="q5" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q5</span>
+                <span class="topic-pill">防死锁</span>
+                <span class="topic-pill">MAX_RETRIES=1</span>
+              </div>
+              <div class="qa-question">防死锁与循环控制：在允许局部动态路由或打回重做的节点（比如“核验不通过打回给检索”），如何防止两个 Agent 之间陷入无限互相甩锅的死循环？除了硬编码最大重试次数（Max Iterations），还有什么优雅的降级策略？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们在死循环治理上采取了<strong>‘刚性熔断 + 差异化步进反馈 + 状态退避降级’</strong>三层机制：</p>
+                <ol>
+                  <li><strong>刚性熔断</strong>：在生产环境中设定 <code>MAX_RETRIES = 1</code>（最多允许 1 次定向纠错），坚决杜绝多轮乒乓推诿；</li>
+                  <li><strong>带差异化诊断记忆的重试（Diagnostic Feedback）</strong>：Critic 节点打回时，绝不仅仅返回‘失败’，而是必须通过 <code>ReflectionDiagnosticPolicy</code> 给出具体的归因（例如区分是‘主客体颠倒’还是‘伴随字段单行伪排除’），Coder 在重试时只针对该诊断点调整，若第二次依然失败直接判定此路不通；</li>
+                  <li><strong>优雅降级（Graceful Degradation）</strong>：触发熔断后，系统不直接抛出 500 异常，而是触发降级：通过底层纯代码度量工具（<code>AuditMetricEvaluator</code>）直接根据已有的物理执行数据输出保底底稿，并将报告的风险等级标定为 <code>PENDING_MANUAL_REVIEW</code>，流转至人工待办池。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>多 Agent 交互最忌讳“盲目重试”。如果第一次 SQL 查不出数据是因为数据库根本没有这种违规，LLM 可能会猜想是不是条件太严了，于是胡乱删条件导致全表查出来；或者两个 Agent 一个说 SQL 错了一个说意图错了，无限打架。因此，重试必须带明确诊断指令，且次数必须极其克制（通常 1 次即可判断是偶发格式错误还是根本性逻辑缺陷）。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q6 -->
+        <article class="qa-card" data-card-id="q6" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q6</span>
+                <span class="topic-pill">并发与隔离</span>
+                <span class="topic-pill">State Reducer</span>
+              </div>
+              <div class="qa-question">状态机并发与隔离：如果一个复杂任务被拆解为多个子任务并行执行（比如同时查多个政策和明细数据），你的 State Graph 是如何处理并发状态的合并（State Reducer）以及读写冲突的？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在 LangGraph 的状态管理中，我们针对不同字段定义了专门的 <strong>State Reducer（状态合并器）</strong>：</p>
+                <ol>
+                  <li><strong>通用消息合并</strong>：对于 <code>messages</code> 字段，挂载自定义的 <code>_default_message_reducer</code>，底层通过 <code>trim_and_sanitize</code> 执行去重、清洗与滑动窗口截断；</li>
+                  <li><strong>子任务产出隔离与追加</strong>：对于多子任务并发产出的发现项（<code>audit_findings</code>）或字典，定义为可追加的 Reducer（如 <code>_merge_list</code>），各个并行分支只写入自己局部的 <code>Finding</code>，在 Join 汇聚节点按照 <code>task_id</code> 自动归并；</li>
+                  <li><strong>覆盖式写入</strong>：对于最终的决定性状态（如 <code>sql_query</code>、<code>structured_report</code>），采用自定义的 <code>_overwrite_list</code> 或覆盖逻辑，优先保留最新非空分支的结果；</li>
+                  <li><strong>并发读写安全</strong>：在分布式或多工作线程场景下，利用 Redis 租户级分布式安全锁（<code>RedisSafeLock</code>）对同一 <code>session_id</code> 的状态写入进行原子性保护，防止脏写覆盖。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>原生 Python 字典在多协程并发写入同一状态时极易发生 Key 覆盖或竞态。LangGraph 的核心优势之一就是允许为 State 的每个属性定义 <code>Annotated[Type, reducer_function]</code>。通过严格区分“需追加归并的字段”（列表类成果）和“原子更新的字段”（状态标记），能优雅解决分支并行汇聚冲突。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q7 -->
+        <article class="qa-card" data-card-id="q7" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q7</span>
+                <span class="topic-pill">粒度拆分</span>
+                <span class="topic-pill">认知解耦</span>
+              </div>
+              <div class="qa-question">粒度拆分原则：你是依据什么标准把系统拆分成“规划、检索、审核、核验”这几个独立子 Agent 的？如果把“审核”和“核验”合并成一个 Agent 会有什么问题？拆得太细又会带来什么副作用？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们的拆分遵循软件工程的<strong>单一职责原则（SRP）与认知解耦（Cognitive Decoupling）</strong>：</p>
+                <ul>
+                  <li><strong>拆分标准</strong>：主要看各环节所需要的‘上下文依赖’与‘系统侧重’。<code>Planner</code> 负责纯业务逻辑推导（System 2 思考），不污染具体的 SQL 语法细节；<code>SQLEXEC</code> 纯粹负责结合物理 Schema 做代码生成与工具调用（System 1 行动）；<code>Critic</code> 拥有独立的审判视角，充当 Evaluator。</li>
+                  <li><strong>合并的危害</strong>：如果把‘生成/审核’与‘核验（Critic）’合并，模型会陷入<strong>同频幻觉（Self-affirmation Bias）</strong>。自己写的 SQL 自己去核查，模型极易产生‘我觉得自己写得完全没问题’的主观固执，必须通过切换独立 System Prompt 与角色的 Critic 节点实现神经符号交叉校验。</li>
+                  <li><strong>过细拆分的副作用</strong>：Agent 拆分过细会导致序列化传输开销暴增、端到端延迟翻倍、状态机复杂度陡增，以及长链路传导中的‘信息稀释与失真’。因此我们只保留核心的认知阶段，不在微小步骤上拆 Agent。”</li>
+                </ul>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>这在业界被称为“生成器-判别器（Actor-Critic）”或“Evaluator-Optimizer”架构。实践证明，用同一个 Prompt 让模型“生成并自我检查”，检出率极低；而让另一个带“挑刺专家”角色的 Critic Agent 来审视结果，拦截主客体颠倒和语法陷阱的成功率能提升 40% 以上。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q8 -->
+        <article class="qa-card" data-card-id="q8" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q8</span>
+                <span class="topic-pill">框架选型</span>
+                <span class="topic-pill">LangGraph vs AutoGen</span>
+              </div>
+              <div class="qa-question">框架选型与自研：底层编排你是用了 LangGraph、AutoGen 等开源框架，还是自己基于代码手写的状态机？如果用开源框架，遇到了哪些坑？如果自研，核心调度器是怎么设计的？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们底层选用了 <strong>LangGraph</strong> 作为有向无环图（DAG）及带环状态图的基础框架，但在其之上针对医保审计业务做了深度的<strong>自主封装与中间件拦截</strong>：</p>
+                <p><strong>为什么选 LangGraph 而不是 AutoGen？</strong> AutoGen 偏向拟人化对话，在需要确定性流程控制的严肃业务中极难收敛；LangGraph 原生基于图状态机，支持显式条件路由与持久化，工程契约更清晰。</p>
+                <p><strong>踩过的主要坑与应对：</strong></p>
+                <ol>
+                  <li><em>状态臃肿与序列化瓶颈</em>：LangGraph 默认的 State 容易在多轮迭代中无限累加导致序列化性能暴跌，我们通过自研的 <code>state_governance</code> 实现了严格的分层状态管理和消息清洗截断；</li>
+                  <li><em>异常处理机制不透明</em>：原生图执行报错时往往全局崩溃，我们在节点外层封装了 <code>pipeline_tracker</code> 与独立深模块，实现了节点级沙箱捕获与白盒追踪。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>很多团队盲目从零手写状态机，最后发现重做了线程池调度、异步协程管理、条件分支判定、状态快照回退等基础轮子，维护成本极高。借助 LangGraph 提供的图骨架，将业务重心放在自定义 Gate 拦截器、SQL 安全沙箱与上下文组装等高价值模块，是企业级落地性价比最高的做法。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q9 -->
+        <article class="qa-card" data-card-id="q9" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q9</span>
+                <span class="topic-pill">持久化</span>
+                <span class="topic-pill">Checkpointer</span>
+              </div>
+              <div class="qa-question">长周期任务与断点续传：如果工作流执行到第 3 个 Agent 时因为网络波动或服务重启中断了，你的状态机支持状态持久化（Checkpointer）和从断点恢复执行吗？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“是的，系统原生支持断点续传。我们通过为 LangGraph 挂载外部持久化 Checkpointer（开发测试环境为 SQLite，生产环境为 PostgreSQL/Redis）：</p>
+                <ol>
+                  <li><strong>状态自动快照</strong>：每个节点执行完毕并通过 Gate 校验后，调度器会自动将当前 <code>AuditState</code> 的增量 Diff 结合 <code>thread_id</code> 和 <code>checkpoint_id</code> 持久化到存储介质；</li>
+                  <li><strong>故障拉起与幂等恢复</strong>：当节点因网络中断或进程崩溃重启后，系统根据会话 <code>thread_id</code> 从数据库检索最新的合法 Checkpoint，重建内存图状态，直接从中断的下游节点继续向下流转，而无需从头重新调用前置的 Planner 或大模型，既保障了长任务可靠性，又避免了重复消耗 Token。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>在大数据量审计或多表复杂查询中，一个审计任务可能耗时十几秒到数分钟。没有 Checkpoint 机制意味着任何网络抖动都会让昂贵的 LLM 推理与数据库查询前功尽弃。通过快照持久化，配合幂等性设计（执行过的 SQL 记录在 <code>sql_history</code> 中），可以做到“无感断点恢复”。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q10 -->
+        <article class="qa-card" data-card-id="q10" data-category="cat-1">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q10</span>
+                <span class="topic-pill">Human-in-the-loop</span>
+                <span class="topic-pill">TaskPool</span>
+              </div>
+              <div class="qa-question">人工介入（Human-in-the-loop）：在审核或核验这类高风险节点，如果 Agent 置信度不足需要人工确认，你的状态机如何实现挂起（Suspend）、等待外部信号回调后再继续流转？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们在状态机中设计了专门的 <strong><code>HUMAN_APPROVAL</code> 挂起节点与动态任务池（Task Pool）机制</strong>：</p>
+                <ol>
+                  <li><strong>挂起判定</strong>：当 Critic 或安全哨兵检测到高风险异常（例如涉案金额巨大但置信度低于阈值、或触发了高危规则变更时），SQLEXEC 后的条件边会直接路由至 <code>HUMAN_APPROVAL</code> 节点；</li>
+                  <li><strong>任务提报与中断</strong>：该节点将当前完整快照注册至分布式 <code>task_pool.submit_task(thread_id, state, reason)</code>，将状态标记为 <code>is_awaiting_human=True</code>，随后工作流直接流转至 <code>END</code> 释放工作线程；</li>
+                  <li><strong>异步回调恢复</strong>：当医保专家在后台界面完成核验并提交修正意见后，API 服务接收到 Webhook 回调，携带专家的批注输入通过图执行器的 <code>resume</code> 接口唤醒原会话，直接跳转至下一步（如 Reporter 渲染）继续流转。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>千万不要在进程内 <code>time.sleep()</code> 阻塞等待人工！在分布式生产架构中，人工可能几个小时甚至几天后才审批。必须将状态机持久化入库，进程优雅退出；待审批通过后，通过 API 唤醒携带人工修正参数从当前检查点继续走，这才是真正的工业级 Human-in-the-loop。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- 分类二：模块二（Q11 - Q20） -->
+      <!-- ============================================================ -->
+      <section class="category-section" data-section-cat="cat-2">
+        <div class="category-header">
+          <div class="category-title-wrap">
+            <span class="cat-tag">模块二 · 10 题</span>
+            <h2>混合检索与工具执行链路（感知与行动层）</h2>
+          </div>
+          <span class="category-desc">RAG 切片与 RRF · Rerank 漏斗 · Schema 裁剪 · SQL AST 门禁</span>
+        </div>
+
+        <!-- Q11 -->
+        <article class="qa-card" data-card-id="q11" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q11</span>
+                <span class="topic-pill">Chunking</span>
+                <span class="topic-pill">文档切片</span>
+              </div>
+              <div class="qa-question">切片策略（Chunking）：在处理复杂的业务规则或政策文档时，你是怎么切分文档的？如果遇到跨段落的条款、带有多层标题的文档或者文档内嵌表格，普通按字符长度切分导致语义截断怎么解决？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们彻底摒弃了朴素的‘固定字符长度切分（Fixed-size Chunking）’，采用了<strong>层次化结构感知切片（Hierarchical &amp; Markdown-Aware Chunking）</strong>：</p>
+                <ol>
+                  <li><strong>层级标题感知</strong>：基于 AST 解析医保政策的树状目录结构（章、节、条、款），将上级各级标题作为元数据与‘面包屑上下文（Breadcrumbs Context）’，强制前置拼接到该条款的具体正文切片中，避免孤立条款丢失适用范围；</li>
+                  <li><strong>内嵌表格原子化</strong>：对于诊疗项目收费标准、医保报销比例等内嵌表格，将其整体序列化为标准 Markdown 表格或结构化 Key-Value，视为不可分割的‘原子 Chunk’，严禁从表格中间按字符斩断；</li>
+                  <li><strong>滑动重叠与语义边界对齐</strong>：对于超长条款，优先在句号、分号处截断，并保留 15%~20% 的语义滑动窗口（Overlap），从根本上消除跨段落条件与前提约束被截断的假阳性问题。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>例如某政策规定：“第一章 住院医疗费用管理... 第三条 下列情况不予报销：(1) 美容整形；(2) 减肥项目”。如果单纯按长度切分，切出来的片段只有“(1) 美容整形；(2) 减肥项目”，检索出来后模型根本不知道这是“属于住院还是门诊”、是“报销”还是“不予报销”。把父级路径作为元数据注入切片，是专业领域 RAG 的核心基本功。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q12 -->
+        <article class="qa-card" data-card-id="q12" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q12</span>
+                <span class="topic-pill">混合检索</span>
+                <span class="topic-pill">RRF 融合</span>
+              </div>
+              <div class="qa-question">混合检索权重融合：向量检索（Dense）和 BM25（Sparse）各自的优劣势是什么？在你的系统里，两路召回的结果是如何进行分数归一化或融合的（比如 RRF 倒数秩融合算法，还是加权打分）？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在医保场景下，两者的互补性极强：</p>
+                <ul>
+                  <li><strong>Dense（向量检索）</strong>：优势在于语义泛化与意图模糊匹配（比如用户输入‘超标买补药’能召回‘滋补中药超限使用’），但劣势是对生僻专有名词、药品代码、耗材编码（如 <code>YB0102001</code>）极度不敏感，易产生虚假相似度；</li>
+                  <li><strong>Sparse（BM25 稀疏检索）</strong>：优势是对精准专有名词、医保编码、特定条款序号拥有 100% 命中能力，但无法处理同义词替换。</li>
+                </ul>
+                <p><strong>融合方案</strong>：我们采用 <strong>RRF（Reciprocal Rank Fusion，倒数秩融合）</strong> 而非线性加权打分。因为 Dense 的余弦相似度与 BM25 的 TF-IDF 得分处于完全不同的尺度空间，Min-Max 归一化极易受到极值干扰；而 RRF 只看两路召回的绝对排名（公式：<code>RRF_Score = Σ 1 / (k + rank_i)</code>，常数 <code>k=60</code>），无论底层分值怎么波动，排名越靠前的交集文档最终得分越高，工程稳定性极佳。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>线性打分（如 <code>0.7 * Dense + 0.3 * BM25</code>）在实际调参时非常痛苦，因为换一个 Embedding 模型或者换一批长短不同的文档，Dense 和 BM25 的分值分布就会剧烈漂移，每次都要重新校准超参数。RRF 完全摆脱了分值维度的束缚，只依赖相对排序，是目前工业级混合检索公认鲁棒性最高的方法。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q13 -->
+        <article class="qa-card" data-card-id="q13" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q13</span>
+                <span class="topic-pill">Rerank</span>
+                <span class="topic-pill">BGE-Reranker-large</span>
+              </div>
+              <div class="qa-question">Rerank 的收益与代价：引入 Rerank 模型后，召回准确率提升了多少？Rerank 会增加明显的推理延迟，你的 Top-K 漏斗是怎么设置的（比如粗排召回多少条，精排保留多少条喂给 LLM）？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在引入 Cross-Encoder 架构的 <strong>BGE-Reranker-large</strong> 模型后，我们业务场景下的 Top-3 召回准确率（Hit@3）从原本混合检索的 <strong>78.5% 跃升到了 92.3%</strong>，彻底解决了 Bi-Encoder 向量空间无法捕捉深层交叉语义的问题。</p>
+                <p>针对 Rerank 带来的计算延迟，我们构建了<strong>两阶段漏斗（Two-stage Funnel）</strong>：</p>
+                <ol>
+                  <li><strong>粗排阶段（召回）</strong>：Qdrant 向量检索召回 Top-30，BM25 召回 Top-30，经 RRF 融合去重后截取 <strong>Top-20</strong>；</li>
+                  <li><strong>精排阶段（Rerank）</strong>：仅将这 Top-20 条候选送入本地部署并经过 TensorRT 优化的 BGE-Reranker，将端到端延迟严格压制在 <strong>35ms 以内</strong>；</li>
+                  <li><strong>上下文注入</strong>：最终仅筛选前 <strong>Top-3 ~ Top-5</strong> 条核心政策依据注入 LLM 上下文，既保证了关键证据无遗漏，又防止长 Prompt 增加 LLM 生成延迟。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>为什么 Bi-Encoder（向量检索）不够？因为向量检索是把 Query 和 Document 分别独立编码成向量再求内积，两个文本之间没有任何 Token 级别的交叉注意力（Cross-attention）。而 Reranker 把 Query 和 Document 拼在一起送入 Transformer，每个字互相做 Attention，虽然慢，但判断相关性极其精准。用 Top-20 漏斗控制 Rerank 计算量，是兼顾准确率与性能的工业级标准姿态。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q14 -->
+        <article class="qa-card" data-card-id="q14" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q14</span>
+                <span class="topic-pill">Few-shot</span>
+                <span class="topic-pill">防投毒门禁</span>
+              </div>
+              <div class="qa-question">动态 Few-shot 注入：在 Text-to-SQL 中，动态 Few-shot 是怎么检索的？是匹配用户问题的字面相似度，还是匹配问题背后的 SQL 语法结构相似度？样本库是怎么构建和维护的？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“如果仅靠字面相似度检索 Few-shot，经常会召回‘业务看起来像、但 SQL 语法结构风马牛不相及’的错误样本。我们的解决方案是<strong>‘意图原型驱动的混合语义检索 + 防投毒门禁’</strong>：</p>
+                <ol>
+                  <li><strong>样本向量化特征</strong>：在向量库（Qdrant）构建 Golden Examples 时，索引的内容不仅是问题文本，更是通过‘自然语言问题 + 审计原型标签（如伴随依赖、时序重叠、自连接套收）+ 目标表名’拼接后的结构化特征；</li>
+                  <li><strong>检索对齐</strong>：检索时优先按照 Aligner 判定的 <code>AuditArchetype</code> 进行软过滤，确保召回的示范样本在 SQL 拓扑结构上（比如都是跨行子查询对撞）高度一致；</li>
+                  <li><strong>防投毒门禁（Anti-Poisoning Gate）</strong>：只有人工复核过、或者在生产环境中经过 <code>SQLGuardian</code> 严格 AST 语法审计无恒假矛盾、且执行结果验证通过的优质 SQL 才能通过 <code>Consolidator</code> 入库，杜绝脏数据污染检索库。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>例如用户问：“查张三有没有同时在两家医院住院”，如果按字面查，可能召回“查张三的住院总费用”；但按“时序重叠型（Temporal Overlap）”原型检索，召回的样本就会教模型如何写 <code>A.in_time &lt; B.out_time AND A.out_time &gt; B.in_time</code> 的区间重叠 SQL。教模型“语法结构与逻辑拓扑”远比教它“匹配关键词”更重要。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q15 -->
+        <article class="qa-card" data-card-id="q15" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q15</span>
+                <span class="topic-pill">Schema Linking</span>
+                <span class="topic-pill">SceneTableSelector</span>
+              </div>
+              <div class="qa-question">数据库 Schema 裁剪：如果生产环境有几百张表、上千个字段，不可能全部塞进 Prompt。你的 Schema 裁剪（Schema Linking）具体是怎么做的？如果裁剪阶段漏掉了关键关联表，后续怎么补救？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们设计了 <strong><code>SceneTableSelector</code> + <code>TableRelationLinker</code> + <code>AdaptiveSelector</code></strong> 的多级裁剪体系：</p>
+                <ol>
+                  <li><strong>表级裁剪（Table Linking）</strong>：建立领域映射注册表 <code>configs/schema_registry.yaml</code>。当问题分类器识别出场景（如‘结算明细违规’），直接命中核心大宽表 <code>fqz_fymx_test</code>；若涉及字典或目录核查，自动关联 <code>fqz_fyml_test</code>，从数百张表中锁定 1~3 张核心表；</li>
+                  <li><strong>列级裁剪（Column Pruning）</strong>：通过词表匹配与字段图谱（<code>FieldKnowledgeGraph</code>），只提取与问题相关的列及其注释，将上百个冗余字段剔除；</li>
+                  <li><strong>漏表动态补救机制</strong>：如果在 SQLEXEC 阶段出现 <code>Unknown identifier</code> 或在 AST 静态预检中发现缺少 JOIN 必要外键，Coder 捕获该异常并向 <code>TableRelationLinker</code> 抛出拓扑补齐请求，根据元数据图谱动态将缺失的关联表补入下一次重试的上下文。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>塞全量 Schema 是很多初级 RAG/Text-to-SQL 系统崩溃的元凶：不仅会导致 Prompt 长度瞬间超出 10K 甚至 30K Tokens，更容易让模型在几十个同名字段（如各表的 <code>create_time</code>, <code>id</code>, <code>org_code</code>）中挑错列。基于领域元数据进行自适应收敛，既保证了准确率，又大幅压低了推理成本。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q16 -->
+        <article class="qa-card" data-card-id="q16" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q16</span>
+                <span class="topic-pill">语义对齐</span>
+                <span class="topic-pill">SSOT 枚举契约</span>
+              </div>
+              <div class="qa-question">隐式业务逻辑与黑话对齐：用户提问往往用业务黑话（比如“违规套现”、“超标刷卡”），而数据库字段是枯燥的英文缩写或状态码（如 status = 3），你如何解决非结构化问题与结构化枚举值之间的语义鸿沟？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在医保行业中，黑话和字段之间存在巨大的鸿沟。我们通过<strong>‘单一事实源枚举契约（Single Source of Truth Enum Contract）+ 字段知识图谱（FieldKnowledgeGraph）’</strong>来拉齐：</p>
+                <ol>
+                  <li><strong>物理注册与正向对齐</strong>：所有物理字段的取值规范唯一注册在 <code>schema_registry.yaml</code> 中。例如，业务上‘男性使用妇科栓剂’，在知识库中明确注册：<code>gend</code> 字段中 <code>'1'</code> 代表男性（且物理库可能带尾部制表符，统一对齐为 <code>gend LIKE '1%'</code>），<code>'2'</code> 代表女性；</li>
+                  <li><strong>黑话概念映射</strong>：在 Prompt 注入前，通过 <code>FieldKnowledgeGraph</code> 执行预处理，将用户提问中的业务概念（如‘退费冲正’）直接翻译为底层语义约束（<code>det_item_fee_sumamt &lt; 0</code>，且数量 <code>cnt</code> 为负数，不是聚合计数）；</li>
+                  <li><strong>严禁模型自由臆测</strong>：提示词中明确禁止模型脑补状态码，所有枚举值全部通过 <code>AdaptiveSelector</code> 由注册表动态注入到 System Context 中作为强行约束。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>很多大模型直接写出来的 SQL 会想当然地写出 <code>WHERE status = '违规'</code> 或者 <code>WHERE gender = '男'</code>，而在实际医保物理表中存储的往往是国标码或特定历史系统的数值（如 <code>1</code>、<code>2</code>、<code>01</code>）。靠 Prompt 叮嘱模型“不要猜”是防不住的，必须在工程层维护权威的术语词典，并在 Prompt 中以“物理定义与示范”的形式喂给模型。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q17 -->
+        <article class="qa-card" data-card-id="q17" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q17</span>
+                <span class="topic-pill">SQLGuardian</span>
+                <span class="topic-pill">sqlglot AST</span>
+              </div>
+              <div class="qa-question">SQL 语法预检与安全拦截：你提到的“SQL 语法预检机制”具体检查什么？是用 AST（抽象语法树，如 sqlglot）做静态解析，还是用数据库的 EXPLAIN？如何从根源上防止大模型生成 DROP、DELETE 或导致全表扫描的慢查询（Slow Query）？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们的 <strong><code>SQLGuardian</code> 采用的是双重防护：前置 AST 静态安全与逻辑审计（sqlglot）+ 底层只读物理限制</strong>：</p>
+                <ol>
+                  <li><strong>AST 静态安全拦截</strong>：使用 <code>sqlglot</code> 将模型生成的 SQL 解析为抽象语法树，遍历所有 AST 节点，严禁出现 <code>DROP</code>, <code>DELETE</code>, <code>UPDATE</code>, <code>ALTER</code>, <code>TRUNCATE</code> 等任何非只读节点，违者直接阻断并报错；</li>
+                  <li><strong>恒假互斥与逻辑陷阱防御（Contradiction Predicate）</strong>：通过静态 AST 检查是否存在布尔矛盾，如二元枚举全排除（<code>gend NOT LIKE '1%' AND gend NOT LIKE '2%'</code>）、上下界区间倒置（<code>amt &gt; 1000 AND amt &lt; 100</code>）、伴随缺失单行伪排除等，在物理执行前 100% 静态拦截；</li>
+                  <li><strong>慢查询与全表扫描防御</strong>：在 AST 层强制检查是否命中分区字段（如医保结算日期 <code>setl_time</code>）；如未声明分区，AST 重写器会自动注入默认时间窗口与强制 <code>LIMIT 1000</code> 采样；同时在 ClickHouse 数据库账号权限上严格配置为 <code>readonly=1</code>，并在引擎层设置 <code>max_execution_time=10</code> 秒与 <code>max_rows_to_read</code> 硬件级熔断。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>绝对不能依赖数据库驱动的简单字符串判断，因为模型可能会用注释绕过（如 <code>SELECT ...; -- DROP TABLE</code>）。基于 AST 的解析能穿透一切文本变形，精准识别真正的语法操作类型。同时，医保流水表通常有数十亿行，如果不强制在 AST 检查分区和 LIMIT，一条全表聚合 SQL 就能直接打崩生产分析引擎。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q18 -->
+        <article class="qa-card" data-card-id="q18" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q18</span>
+                <span class="topic-pill">空集诊断</span>
+                <span class="topic-pill">Zero-Findings Baseline</span>
+              </div>
+              <div class="qa-question">Text-to-SQL 自适应修正边界：当把数据库 Traceback 回传给大模型修正时，最常见的是哪类错误（如列名幻觉、GROUP BY 语法错误、JOIN 条件缺失）？如果生成的 SQL 语法完全正确、执行不报错，但查出来的业务逻辑是错的（或返回空集），你的系统怎么发现并拦截？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在实际生产中，最隐蔽、杀伤力最大的不是语法报错，而是<strong>‘语法完全合法，但因逻辑颠倒暗中返回 0 行’</strong>。</p>
+                <p>针对空集问题，我们设计了<strong>‘零发现基线判定与主客体一致性核验’（QualityGate 规则集）</strong>：</p>
+                <ol>
+                  <li><strong>真合规 vs 伪合规甄别</strong>：当 ClickHouse 返回 0 行时，系统绝不直接采信。此时 Critic 节点会介入，对比 <code>tasks</code> 中的主体定义与 SQL WHERE 子句：检查是否发生了‘将客体特征当成主体过滤’（例如‘查男性使用节育器’，错误写成了 <code>WHERE gend = '2'</code> 导致 0 结果）；</li>
+                  <li><strong>恒假逻辑检测</strong>：通过 <code>ContradictionDetector</code> 回溯 SQL 是否存在恒假逻辑（如互斥条件并列）；</li>
+                  <li><strong>自愈反思触发</strong>：如果判定为伪合规，Critic 会生成明确的诊断记忆（‘检测到主体条件颠倒，应使用 gend=1’），回传给 Coder 执行仅限 1 次的定向纠错；只有当逻辑核查完全无误且确认全库确实无此违规时，才作为‘零发现基线合规（Zero-Findings Baseline）’正常放行。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>在传统 Text-to-SQL 中，查出 0 条数据，开发者很容易误以为“系统很健康、没有违规数据”。但在医保审计中，90% 的 0 数据都是因为大模型把主体条件写反了，或者在单条明细记录上写了互斥条件。如果不设立针对“0 命中”的逻辑审计门控，系统就会漏掉几乎所有的真实违规案件。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q19 -->
+        <article class="qa-card" data-card-id="q19" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q19</span>
+                <span class="topic-pill">跨源联动</span>
+                <span class="topic-pill">串行解耦拓扑</span>
+              </div>
+              <div class="qa-question">跨源数据联动：当一个审核任务既需要去向量库查非结构化政策（RAG），又需要去关系型数据库查结构化流水（Text-to-SQL）时，这两步是串行还是并行？如何用查出来的政策阈值去动态指导 SQL 的生成？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们在架构上严格采用<strong>‘串行解耦拓扑（Serial Decoupled Pipeline）’</strong>：</p>
+                <ol>
+                  <li><strong>前置 RAG 政策提取</strong>：在进入 SQL 编写之前，Planner 必须先调用向量检索与 Rerank 查出相关政策文档（例如《某市门诊慢特病结算规定》）；</li>
+                  <li><strong>结构化参数提炼（Parameter Grounding）</strong>：由 Planner 从非结构化文本中抽取出明确的定性与定量门槛（如：高血压开药量不超过 30 天，单笔报销上限 500 元），转化为强类型的结构化参数注入 <code>methodology</code> 字段；</li>
+                  <li><strong>参数作为常量传递给 Coder</strong>：CoderAgent 在组装 SQL 时，直接引用 Planner 提炼出的硬指标作为 SQL <code>WHERE</code> 或 <code>HAVING</code> 的数值阈值（例如 <code>HAVING sum(cnt) &gt; 30</code>），坚决杜绝让 Coder 边看原始政策长篇大论、边猜着写 SQL。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>如果并行执行，不仅逻辑上说不通（SQL 根本不知道过滤阈值是多少），而且会导致两个子任务争抢上下文注意力。让专业的人做专业的事：检索负责拿政策，Planner 负责把自然语言政策定型为“数值与规则算子”，Coder 负责拿确定的数值翻译为 ClickHouse 语法，责任边界极其清晰。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q20 -->
+        <article class="qa-card" data-card-id="q20" data-category="cat-2">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q20</span>
+                <span class="topic-pill">工具幻觉</span>
+                <span class="topic-pill">Tool Scoping</span>
+              </div>
+              <div class="qa-question">工具调用幻觉：当挂载的工具较多时，模型可能会选错工具，或者编造工具所需的必填参数。你在 Tool Description 和参数约束上做了哪些工程优化？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们主要通过三层工程手段遏制工具调用幻觉：</p>
+                <ol>
+                  <li><strong>工具集上下文隔离与动态挂载（Tool Scoping）</strong>：不在一个全局会话中挂载所有工具。在 Planner 节点，只暴露只读检索与元数据工具；在 SQLEXEC 节点，只暴露只读数据库执行与校验工具，物理消除‘跨阶段选错工具’的可能；</li>
+                  <li><strong>契约化 Description 设计</strong>：在 Tool Description 中明确编写<strong>‘Negative Constraints（反向禁令）’和‘适用场景正向用例’</strong>，明确指出‘当需要查某明细时严禁调用本工具，应调用 XXX’；</li>
+                  <li><strong>Pydantic 严格模式绑定（Strict Schema Binding）</strong>：每个工具的入参均采用 Pydantic v2 定义，所有字段明确标明类型、正则校验器与默认值，并开启模型的 <code>strict=True</code> 结构化参数输出模式，让底层直接通过受限解码 FSM 拦截参数格式幻觉。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>很多 Agent 系统把十几二十个工具平铺给 LLM，这在模型看来就像面对一个巨大的迷宫。根据状态机的当前节点动态裁剪暴露的工具列表，能直接把工具选择的复杂度从 <code>O(N)</code> 降到 <code>O(1)</code>，从根源上消除了工具调用的混乱。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- 分类三：模块三（Q21 - Q30） -->
+      <!-- ============================================================ -->
+      <section class="category-section" data-section-cat="cat-3">
+        <div class="category-header">
+          <div class="category-title-wrap">
+            <span class="cat-tag">模块三 · 10 题</span>
+            <h2>结构化输出与自愈容错机制（稳定性与工程兜底）</h2>
+          </div>
+          <span class="category-desc">Pydantic 门禁 · json_repair · 增量重试 · 多模型路由 · 成功率口径</span>
+        </div>
+
+        <!-- Q21 -->
+        <article class="qa-card" data-card-id="q21" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q21</span>
+                <span class="topic-pill">Pydantic 校验</span>
+                <span class="topic-pill">@model_validator</span>
+              </div>
+              <div class="qa-question">Pydantic 校验设计：除了基础的字段类型检查（如 str, int），你在 Pydantic 中是否使用了自定义校验器（如 @field_validator 或 @model_validator）来校验业务逻辑（例如：校验生成的金额必须大于 0，或者引用的政策编号必须在召回列表中）？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“是的，我们在 <code>AuditReport</code> 与 <code>AuditFinding</code> 等核心 Schema 中大量使用了 <code>@field_validator</code> 与 <code>@model_validator(mode='after')</code> 进行跨字段深层业务校验：</p>
+                <ol>
+                  <li><strong>金额与数值合理性校验</strong>：通过 <code>@field_validator('amount', 'count')</code> 强制校验涉案金额必须 <code>&ge; 0</code>、违规记录数必须为正整数；</li>
+                  <li><strong>客观事实交叉核对（Cross-Field Truth Alignment）</strong>：在 <code>AuditReport</code> 的 <code>@model_validator</code> 中，校验模型填写的 <code>total_amount</code> 是否等于其 <code>findings</code> 列表中所有项的 <code>amount</code> 累加和，若误差绝对值超过 <code>0.01</code> 则触发校验失败，防止模型内部自相矛盾；</li>
+                  <li><strong>政策引用与实体白名单核验</strong>：校验 <code>policy_basis</code> 是否确实引用了本次上下文通过 RAG 召回的真实文件名或规范编号，严禁模型在结论中虚构未提及的法律法规。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>普通的类型校验（int、str）只能保证“程序不报 TypeError”，根本管不了“业务胡说八道”。例如模型在列表里写了三笔违规，分别是 100、200、300 元，但在总计金额里随手写了个 1000 元，如果没有 Model Validator 拦截，这份报告一打印出来就会被审计局客户立刻识破为 AI 幻觉。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q22 -->
+        <article class="qa-card" data-card-id="q22" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q22</span>
+                <span class="topic-pill">结构化对比</span>
+                <span class="topic-pill">FSM vs 业务门禁</span>
+              </div>
+              <div class="qa-question">结构化输出方式对比：现在很多大模型原生支持 response_format={"type": "json_object"} 或 Structured Outputs（基于受限解码 FSM），为什么还需要自己写 Pydantic 拦截器与自愈重试管道？这两者有什么本质区别？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“<strong>原生的 Structured Outputs 解决的是‘语法合规（Syntax Compliance）’，而我们的 Pydantic 拦截器与自愈管道解决的是‘语义真理与业务合规（Semantic Truth &amp; Business Compliance）’</strong>：</p>
+                <ol>
+                  <li><strong>局限性</strong>：厂商原生的受限解码（FSM）只能保证输出的 JSON 严格符合 Schema 定义的字段类型（例如 <code>amount</code> 确实是个 float），但它完全无法保证这个 <code>amount</code> 是否符合业务逻辑（比如模型完全可以合规地输出一个 <code>amount: -99999</code>，或者伪造一条合规数据）；</li>
+                  <li><strong>多模型生态兼容</strong>：很多优秀的开源模型或轻量推理引擎对原生 JSON Schema 支持并不完善，强依赖厂商特有 API 会丧失底层模型切换的自由度；</li>
+                  <li><strong>自愈管道的价值</strong>：当深层业务校验未通过时，原生的 API 是无法感知的；必须靠我们的外层拦截器捕获 <code>ValidationError</code>，并携带具体的业务诊断信息驱动模型执行精准自愈。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>把“格式正确”等同于“结果正确”是做 Agent 最常见的误区。FSM 能保证括号闭合、字段齐全，但决定数据能不能用于实际审计执法的，是后面的客观业务逻辑。因此，Pydantic 业务门禁不仅不能砍，反而是保证系统严肃可信的核心生命线。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q23 -->
+        <article class="qa-card" data-card-id="q23" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q23</span>
+                <span class="topic-pill">自愈重试</span>
+                <span class="topic-pill">Delta Context Repair</span>
+              </div>
+              <div class="qa-question">自愈重试 Prompt 组装：当捕获到 ValidationError 时，你是如何构造修正 Prompt 的？是把原始长 Prompt、错误输出和报错信息全部拼在一起重发，还是只截取局部上下文？如何避免重试导致 Token 消耗翻倍？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们绝对不会把全量长 Prompt 和历史重新打包发送，而是采用<strong>‘局部增量诊断重试（Delta Context Repair）’</strong>：</p>
+                <ol>
+                  <li><strong>报错精准裁剪</strong>：捕获 Pydantic 的 <code>ValidationError.errors()</code>，只提取具体的错误定位路径（<code>loc</code>）和错误原因（<code>msg</code>），例如只提取 <code>findings[0].amount: 金额不能为负数</code>；</li>
+                  <li><strong>局部上下文切片</strong>：仅携带：① 核心指令摘要；② 模型上一轮输出的有缺陷的 JSON 片段；③ 裁剪后的报错诊断明细；④ 一句强制修复约束（‘请仅针对上述指出的字段错误进行修正，直接输出修复后的完整 JSON’）；</li>
+                  <li><strong>收益</strong>：这种组装方式将原本可能需要消耗 8K~15K Tokens 的长上下文直接压缩至 <strong>800 Tokens 以内</strong>，Token 开销削减了 80% 以上，同时因没有长距离噪音干扰，模型的单次修复成功率高达 95% 以上。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>把原 Prompt + 错误堆栈全部原样发回去，模型往往会“不知道自己到底错在哪里”，反而因为上下文太长注意力涣散，在修改 A 错误的同时又把原来正确的 B 字段给改错了。给出像编译器一样的精准局部定位（类似“第几行第几个字段是什么错误”），模型能以最小的算力消耗快速精准改正。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q24 -->
+        <article class="qa-card" data-card-id="q24" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q24</span>
+                <span class="topic-pill">格式预清洗</span>
+                <span class="topic-pill">json_repair</span>
+              </div>
+              <div class="qa-question">格式预清洗（Pre-parsing）：大模型输出 JSON 时，经常喜欢在前后加上 ```json 的 Markdown 标记、夹带解释性文字、或者出现未转义的双引号和尾部多余逗号。在送入 Pydantic 校验前，你有做正则提取或 AST 容错修复（如使用 json_repair）吗？如果能直接代码修复，还会触发大模型重试吗？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在我们的管道中，<strong>‘代码能修的，绝不劳烦大模型’</strong>是核心成本铁律。在进入 Pydantic 校验前，必须经过两级纯代码预清洗：</p>
+                <ol>
+                  <li><strong>格式剥离与正则提取</strong>：通过正则快速识别并剔除前后的 Markdown 代码块标记（如 <code>```json ... ```</code>）以及模型在开头和结尾礼貌附带的寒暄文字，精准提取最外层 <code>{...}</code> 或 <code>[...]</code> 内的纯文本；</li>
+                  <li><strong>AST 容错修复（json_repair）</strong>：利用 <code>json_repair</code> 库自动修复高频小毛病，如 JSON 尾部多余的逗号（Trailing Comma）、缺失的闭合大括号、字符串内部未转义的双引号等；</li>
+                  <li><strong>直接放行</strong>：只要预清洗代码成功将其转换为合规 dict 并通过 Pydantic 校验，流程直接放行，<strong>完全不触发大模型重试</strong>。只有在清洗依然发生语法或致命字段缺失时，才会调用大模型介入。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>大模型调用一次不仅要花钱，而且有 1~3 秒的网络与推理开销。如果仅仅因为模型多输出了一个逗号或加了个代码块，就重新调用一次 LLM，是极度不合格的工程实现。通过几十行 Python 正则和轻量工具在 1 毫秒内完成修复，可以大幅提升系统的整体响应速度并节省可观的 API 账单。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q25 -->
+        <article class="qa-card" data-card-id="q25" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q25</span>
+                <span class="topic-pill">优雅降级</span>
+                <span class="topic-pill">AuditMetricEvaluator</span>
+              </div>
+              <div class="qa-question">重试退避与彻底失败兜底：自愈重试的上限是多少次？如果连续重试 3 次依然解析失败（比如遇到了模型死活绕不过去的逻辑死角），系统如何做优雅降级（Fallback），以保证整个业务流水线不崩溃？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在我们的生产策略中，<strong>自愈重试上限严格限制为 1 次（<code>MAX_RETRIES = 1</code>）</strong>。连续失败后绝不无脑重试，而是触发<strong>三级降级兜底网（Fallback Mesh）</strong>：</p>
+                <ol>
+                  <li><strong>确定性代码兜底（Deterministic Code Synthesizer）</strong>：在 Reporter 阶段，如果大模型始终无法生成合规的结构化报告，系统直接启动底层纯 Python 开发的 <code>AuditMetricEvaluator</code> 与 <code>RowTotalsExtractor</code>；</li>
+                  <li><strong>物理数据直出报告</strong>：直接读取底层 ClickHouse 执行返回的原始明细，用纯代码计算总金额、总条数、涉及机构数，填充入保底的基础 <code>AuditReport</code> 模板中；</li>
+                  <li><strong>标定待复核状态</strong>：在生成的兜底报告中将风险等级显式打上 <code>PENDING_MANUAL_REVIEW</code>，并附带错误轨迹，将工单推送至人工待办，确保整个 HTTP API 永远返回符合契约的结构化数据，保障上游微服务流水线 100% 不发生 500 崩溃。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>企业级系统与 Demo 系统的最大区别就在于“异常兜底能力”。一个面向客户的系统，绝对不能因为 LLM 输出格式坏了就直接抛出未捕获异常导致前端白屏。即使 AI 彻底瘫痪，通过备选的代码模板把真实的数据库统计结果展现出来，系统依然具备可用的基础业务价值。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q26 -->
+        <article class="qa-card" data-card-id="q26" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q26</span>
+                <span class="topic-pill">模型路由</span>
+                <span class="topic-pill">ModelTier</span>
+              </div>
+              <div class="qa-question">多模型动态路由策略：你提到结合主力大模型和高性价比 Flash 模型，具体的路由规则是怎么写的？是通过前置分类器动态分发，还是按固定节点绑定不同模型？如果小模型在格式清洗或简单分类时翻车了，会自动升级（Fallback）到主力大模型吗？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们采取的是<strong>‘节点能力基线绑定 + 运行时故障无缝升配（Escalation Fallback）’</strong>的双轨制：</p>
+                <ol>
+                  <li><strong>静态分级绑定</strong>：在 <code>ModelTier</code> 机制下，轻量高频节点（如 Aligner 意图分类、格式预清洗、简单字段抽取）默认绑定 <strong>LIGHT 模型（如 Gemini Flash / 8B 模型）</strong>，兼顾毫秒级低延迟与低成本；而核心思考节点（如复杂的 Planner 逻辑解耦、跨表 Coder SQL 合成、全案总结归因）默认绑定 <strong>HEAVY 旗舰模型（如 DeepSeek-V3 / GPT-4o 等）</strong>；</li>
+                  <li><strong>动态自愈升级（Escalation）</strong>：在统一底层 <code>LLMProvider</code> 中封装了熔断与升配逻辑。当 LIGHT 模型在执行分类或解析时，若首次调用报错或触发 JSON 解析失败，重试逻辑会自动切换配置，将任务升配（Escalate）至 HEAVY 主力大模型进行二次兜底，既享受了小模型的性价比，又保障了系统执行的高可靠性。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>很多系统所有节点都用 GPT-4，导致跑一次完整审计成本高达几毛钱甚至几块钱，延迟长达十几秒；有些系统全用小模型，导致逻辑经常写错。按节点的智商需求精准下发模型，小模型不行时再无感切到大模型，是目前大模型工程化降本增效的核心打法。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q27 -->
+        <article class="qa-card" data-card-id="q27" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q27</span>
+                <span class="topic-pill">异构适配</span>
+                <span class="topic-pill">Adapter Pattern</span>
+              </div>
+              <div class="qa-question">异构模型切换的 Prompt 兼容性：在混用不同厂商或不同量级的模型（如 DeepSeek、GLM 等）时，不同模型对 System Prompt、JSON 格式约束的遵循能力差异很大，你在代码层是如何做统一抽象和 Prompt 适配的？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“为了实现异构模型解耦，我们在工程上构建了<strong>统一适配层（Provider &amp; Adapter Pattern）</strong>：</p>
+                <ol>
+                  <li><strong>Prompt 模板解耦</strong>：所有 Prompt 均拆分为两部分：‘与模型无关的纯领域核心指令（Core Domain Rules）’和‘针对特定模型族群的方言修饰器（Dialect Decorators）’；</li>
+                  <li><strong>方言自动适配</strong>：对于指令遵循能力极强的大模型，直接使用标准 Markdown 结构和简要 Schema 描述；而对于开源轻量模型（如 7B/8B），适配器会自动在末尾追加硬性的 Few-Shot 示例，并注入强制语法标记（如必须使用闭合的 JSON 块）；</li>
+                  <li><strong>统一标准化输出抽象</strong>：无论底层模型是使用原生工具调用、还是输出 Markdown 纯文本，外部一律由统一的 Response Sanitizer 进行归一化清洗与拦截，调用方业务代码对具体模型类型完全无感。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>不能在业务代码里充斥着 <code>if model == 'deepseek': ... elif model == 'qwen': ...</code>。通过深模块设计，把不同模型对格式要求、System 角色支持与 Token 截断的怪癖收敛在底层的 Adapter 中，上层 Agent 只需要面向标准的业务 Prompt，后续替换模型或接入新模型时只需新增一个适配器即可。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q28 -->
+        <article class="qa-card" data-card-id="q28" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q28</span>
+                <span class="topic-pill">延迟优化</span>
+                <span class="topic-pill">SSE 双轨流式</span>
+              </div>
+              <div class="qa-question">延迟与吞吐量优化：结构化输出往往需要等完整 JSON 生成完毕才能通过 Pydantic 解析，这会导致首字延迟（TTFT）感知不明显、端到端耗时变长。你在生产环境中有做异步并发、流式 JSON 解析（Streaming JSON Parser）或者缓存机制吗？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在处理长耗时审计报告时，我们通过三项优化大幅降低了用户端感知延迟：</p>
+                <ol>
+                  <li><strong>SSE 双轨流式渲染（Dual-track Streaming）</strong>：系统在流式输出时，将推理内容与结构化事件分轨；通过前端专用的流式协议（<code>StreamProtocolRenderer</code>），模型的思考过程（Thinking Process）和阶段性状态切换（如‘正在生成查询 SQL’、‘正在执行 ClickHouse 检索’）立即通过 SSE 推送到前端，<strong>首字感知延迟（TTFT）降至 300ms 以内</strong>；</li>
+                  <li><strong>基于 Redis 的语义与动作缓存（Action Cache）</strong>：对于常见的相同或相似查询，在 SQLEXEC 层基于意图与 SQL 签名建立多级缓存，命中缓存时直接在 <strong>20ms 内</strong>返回执行结果；</li>
+                  <li><strong>流式增量解析预检</strong>：在最终的大报告生成阶段，通过局部流式解析器动态捕获已经生成的块（Chunk），提前进行字段级校验，无须等到几千字全部生成完才开始排查基本错误。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>如果用户在界面上点击了“开始审计”，后端一直在转圈等 20 秒直到完整 JSON 出来才一次性返回，用户体验会极差甚至误以为系统卡死。通过 SSE 实时向前端通知 Agent 当前正在走的图节点和思考过程，哪怕总时间依然是 10 秒，用户的等待焦虑感也会大幅降低。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q29 -->
+        <article class="qa-card" data-card-id="q29" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q29</span>
+                <span class="topic-pill">统计口径</span>
+                <span class="topic-pill">99.5% 拆解</span>
+              </div>
+              <div class="qa-question">解析成功率的统计口径：你提到的“99.5% 的解析成功率”，请问“一次解析成功率（First-pass）”是多少？经过自愈重试才救回来的占比大约是多少？那剩下的 0.5% 失败案例通常长什么样？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们在自动化测试集和生产日志监控（基于 LangSmith / 自研埋点）中的真实统计口径如下：</p>
+                <ol>
+                  <li><strong>一次解析成功率（First-pass）</strong>：基线表现大约在 <strong>92% ~ 94%</strong> 之间（主要失分点在于轻量模型偶发带多余注释、多余逗号或在复杂场景下误判二元枚举）；</li>
+                  <li><strong>代码预清洗（Pre-parsing）挽回率</strong>：通过 <code>json_repair</code> 与正则剥离，直接将成功率在不消耗 Token 的情况下提升到了 <strong>97.8%</strong>；</li>
+                  <li><strong>自愈重试（Reflection Retry）救回率</strong>：剩下的 2.2% 触发了携带差异化诊断的单次重试，其中约 <strong>1.7%</strong> 被成功救回，最终综合有效解析率达到了 <strong>99.5%</strong>；</li>
+                  <li><strong>剩余 0.5% 失败长相</strong>：主要是遇到了极端的边界情况：例如因超长数据流水导致模型输出触发了物理 Token 上限截断（JSON 直接腰斩）、或者用户输入了极其矛盾的业务逻辑让大模型产生了严重的逻辑幻觉死锁，此类案例直接走我们上面提到的降级兜底网。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>这是面试官专门用来“测真假”的陷阱题！如果你张嘴就说“我的大模型一次性成功率就是 99.5%”，面试官立刻知道你在吹牛或没有做过实际生产监控。把“一次成功率”、“代码修复拯救率”、“LLM 重试拯救率”和“极端坏用例长相”分层讲得清清楚楚，是具备深厚实战经验最有力的证明。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q30 -->
+        <article class="qa-card" data-card-id="q30" data-category="cat-3">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num">Q30</span>
+                <span class="topic-pill">防合规幻觉</span>
+                <span class="topic-pill">Explicit Nullability</span>
+              </div>
+              <div class="qa-question">防止纠偏引发新幻觉：在触发自愈重试时，有时候模型为了强行迎合 Pydantic 的字段类型要求（比如某个必填字段找不到对应信息），会选择“胡编乱造”一个合法的值来通过校验。你如何在 Schema 设计上防止这种“为了合规而产生幻觉”的现象？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“在工业界，这种现象叫<strong>‘合规逼迫型幻觉（Compliance-driven Hallucination）’</strong>。我们在 Schema 设计和提示词工程中采用了三项防腐设计：</p>
+                <ol>
+                  <li><strong>允许可空与未知类型（Explicit Nullability）</strong>：在 Schema 定义上，杜绝盲目设置必填；对于非关键或从上下文中可能无法推断的字段，严格声明为 <code>Optional[T] = None</code>；</li>
+                  <li><strong>设计‘无法判定’的合法枚举（Explicit Unknown Enum）</strong>：例如在违规原因或依据字段中，显式提供 <code>'UNCONFIRMED'</code>、<code>'NOT_SPECIFIED'</code> 或 <code>'DATA_ABSENT'</code> 枚举选项，并在 System Prompt 中反复强调：<em>‘若证据不足以支撑结论，必须明确填入 UNCONFIRMED，严禁自行揣测’</em>；</li>
+                  <li><strong>置信度门禁（Confidence Score Gate）</strong>：在 Finding 模型中增加 <code>confidence_score: float</code> 字段。如果模型必须填写某字段，要求其同步输出置信度；后置拦截器若发现其给出的字段虽然格式合法，但置信度得分过低，自动剥离该字段并将其转入人工待办复核，杜绝以假乱真。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <p>如果你的 Pydantic 模型里每个字段都是必填（比如必须填写违规政策编号、必须填写责任医生工号），而这篇就诊明细里根本就没提供医生工号，大模型在被报错打回后，为了通过程序校验，唯一的选择就是硬编一个“DOC9999”。给大模型留出合法的“我不知道”的退路，配合置信度后验，是解决高风险场景下模型胡编乱造的关键解法。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- 分类四：高频实战追问与架构拷打 -->
+      <!-- ============================================================ -->
+      <section class="category-section" data-section-cat="cat-4">
+        <div class="category-header">
+          <div class="category-title-wrap">
+            <span class="cat-tag">实战拷打 · 6 专题</span>
+            <h2>高频实战追问与架构拷打</h2>
+          </div>
+          <span class="category-desc">负责模块话术 · 多轮对话 · 多 Agent 协作 · 为何 LangGraph · Skill 防膨胀</span>
+        </div>
+
+        <!-- F1 -->
+        <article class="qa-card" data-card-id="f1" data-category="cat-4">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num followup">追问 1</span>
+                <span class="topic-pill">自我介绍</span>
+                <span class="topic-pill">项目分工</span>
+              </div>
+              <div class="qa-question">面试官问：“你在项目中负责哪些部分？”该怎么回答？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】（总—分—总，约 2~3 分钟）</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我在这个项目中担任<strong>核心 Agent 架构与安全引擎的研发负责人</strong>。项目目标是用 AI 替代传统人工审计，对数亿级医保结算流水做自动化违规排查。我端到端主导了四大模块：</p>
+                <ol>
+                  <li><strong>状态机协同与编排（大脑层）</strong>：基于 LangGraph 把扁平图解耦为带闭环的局部执行自愈子图（Execution Subgraph），推行分层状态契约 <code>AuditState</code>，实现私有状态隔离与消息滑窗清洗，<strong>Checkpoint 序列化 I/O 降低 60%</strong>。</li>
+                  <li><strong>工具执行与物理安全（行动层）</strong>：设计落地<strong>神经符号门禁（Neuro-Symbolic Gate）</strong>，基于 <code>sqlglot</code> AST 静态审计，形式化拦截 <strong>9 类恒假矛盾与逻辑陷阱</strong>，解决“查出 0 行就误判合规”的致命假阴性。</li>
+                  <li><strong>检索增强与 Token 成本治理</strong>：落地 Qdrant + BM25 + BGE-Reranker 混合检索，经验库带防投毒门禁；落地 Fast/Heavy-Path 双轨自适应路由，<strong>单 Case Token 消耗降低 88%+</strong>。</li>
+                  <li><strong>稳定性容错与可观测</strong>：Pydantic v2 业务门禁 + <code>json_repair</code> 预清洗，结构化报告解析成功率 99.5%；基于 LangSmith 搭建可观测飞轮，自研 PII 脱敏与智能尾部采样，<strong>存储成本降低 80%</strong>。</li>
+                </ol>
+                <p>以上四块是我投入最深的部分，您可以挑感兴趣的方向，我来展开代码实现与踩坑细节。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释 / 备用弹药库】</span></div>
+              <div class="box-body">
+                <h4>被深挖时的展开要点</h4>
+                <ul>
+                  <li><strong>编排与状态图</strong>：关键词 LangGraph、认知解耦（Planner 只定主体/客体，Coder 只写 SQL）、自定义 Reducer（<code>_overwrite_list</code>、<code>trim_and_sanitize</code>）、<code>MAX_RETRIES</code> 刚性熔断、<code>HUMAN_APPROVAL</code> 异步挂起。</li>
+                  <li><strong>神经符号门禁</strong>：讲“无手术收麻醉费”的单行伪排除坑；强调 Prompt 是概率性的，AST 是数学确定性的。</li>
+                  <li><strong>混合检索与路由</strong>：为什么 RRF 而不是加权（分数域不统一）；Few-shot 库为什么要防投毒。</li>
+                  <li><strong>稳定性与可观测</strong>：正则剥离 → <code>json_repair</code> → Pydantic，能用代码修的绝不调 LLM；患者身份证/姓名先脱敏再入 LangSmith。</li>
+                </ul>
+                <h4>加分技巧</h4>
+                <ul>
+                  <li><strong>主导感</strong>：多说“我主导设计…”“我权衡后选择…”，少说“我写了其中一段代码”。</li>
+                  <li><strong>讲“为什么不用通用做法”</strong>：为什么弃用纯 ReAct、为什么要独立 Critic + AST 而不是让模型自查。</li>
+                  <li><strong>留 Hook</strong>：结尾把话语权交还面试官，引导他问你最熟的模块。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- F2 -->
+        <article class="qa-card" data-card-id="f2" data-category="cat-4">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num followup">追问 2</span>
+                <span class="topic-pill">多轮对话</span>
+                <span class="topic-pill">状态治理</span>
+              </div>
+              <div class="qa-question">面试官问：“多轮对话后会返回错误的内容吗？怎么处理的？”</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“<strong>会。</strong>如果仅靠把历史消息无脑追加（<code>messages.append</code>），多轮后会出现 4 类致命错误：</p>
+                <ol>
+                  <li><strong>上下文漂移与约束遗忘</strong>：第 1 轮锁定的“仅限男性”“仅查某医院”被中间对话稀释；</li>
+                  <li><strong>试错脏数据污染（State Bleeding）</strong>：上一轮的报错堆栈、废弃 SQL、空结果残留在 State，被下一轮当成事实；</li>
+                  <li><strong>工具调用协议断头</strong>：按条数暴力截断历史会留下孤立的 <code>AIMessage(tool_calls)</code> 缺 <code>ToolMessage</code>，API 直接 400；</li>
+                  <li><strong>思考模型回放陷阱</strong>：Doubao/DeepSeek-R1 等对历史 assistant 消息的 <code>reasoning_content</code> 有严格校验。</li>
+                </ol>
+                <p>对应我们做了 4 个工程抓手：</p>
+                <ol>
+                  <li><strong>长短期解耦 + 轮次重置补丁</strong>：<code>create_turn_reset_patch</code> 每轮开始清空 <code>sql_query / raw_data / error_log / retry_count / execution_trace</code> 与 metadata 里的单轮标记，只保留 <code>accumulated_findings</code> 等长期事实；</li>
+                  <li><strong>工具协议守护</strong>：<code>tool_protocol_guard</code> 保证 tool_calls 与 ToolMessage 成对；上轮的大结果压缩成“[工具执行摘要]”，原文存 <code>additional_kwargs['_raw_content']</code>；</li>
+                  <li><strong>前置 Aligner 重对齐</strong>：做指代消解（“这家医院呢？”还原成完整命题），判断本轮是追问下钻、修正重查还是全新任务；</li>
+                  <li><strong>消息净化</strong>：<code>sanitize_for_thinking_mode</code> 把不含 tool_calls 的历史 AIMessage 降级为带 <code>[Agent历史分析结果]</code> 标签的 HumanMessage。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释 · 对应真实代码】</span></div>
+              <div class="box-body">
+                <ul>
+                  <li><code>app/core/state_governance.py</code> 的 <code>create_turn_reset_patch</code> 确实把 <code>current_turn_query, turn_type, retry_count, raw_data, sql_query, error_log, execution_trace, sql_validated</code> 清零，并重置 metadata 中 <code>synthesis_done / fast_route_id / direct_response / semantic_alignment</code>。</li>
+                  <li><code>app/memory/message_sanitizer.py</code> 与 <code>tool_protocol_guard.py</code> 负责消息净化、压缩和配对。</li>
+                  <li><code>coder_prompt_assembler.compact_coder_messages</code>：保留 human 提问与带 tool_calls 的 AI 消息，超 300 字的 AI 历史公文压缩为前 150 字 + “[前序审计结论已归档]”。</li>
+                </ul>
+                <blockquote>真实性提醒：其中“意图对齐率 98.6%”等具体数字是示例话术，面试时请替换成你自己评测过的真实数据。</blockquote>
+                <h4>追问 A：下一轮用户问“把里面金额最大的 3 笔挑出来”，数据被清洗了怎么答？</h4>
+                <p>清洗的是 Prompt 里的长文本，不是真实数据。上轮明细落在临时表（<code>temp_table</code> 字段）或缓存中，Coder 直接生成针对临时表的聚合 SQL（<code>ORDER BY amt DESC LIMIT 3</code>），用数据库算，不靠模型“肉眼翻数据”。</p>
+                <h4>追问 B：第 5 轮用户说“刚才不对，重新查第二家医院”，如何回退？</h4>
+                <p>Aligner 识别为“纠偏/回退”意图，从 Checkpointer 取第 2 轮的快照，丢弃第 3、4 轮分支，再结合新指令重新执行，避免废弃分支干扰。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- F3 -->
+        <article class="qa-card" data-card-id="f3" data-category="cat-4">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num followup">追问 3</span>
+                <span class="topic-pill">多 Agent 协作</span>
+                <span class="topic-pill">LLM 判断可靠性</span>
+              </div>
+              <div class="qa-question">面试官问：“多 Agent 是怎么协作的？让 LLM 做判断不会出错吗？”</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <h4>1. 怎么协作</h4>
+                <p>不用 AutoGen 式自由群聊，而是 <strong>LangGraph 强类型状态机 + 认知解耦</strong>：</p>
+                <ul>
+                  <li><strong>Planner</strong>：只做业务分析，锁定“谁是主体、什么是违规特征”，<strong>严禁写代码</strong>；</li>
+                  <li><strong>Coder / SQLEXEC</strong>：把意图结合物理 Schema 翻译成 ClickHouse SQL 并执行；</li>
+                  <li><strong>Critic</strong>：独立审判视角，对执行结果挑刺；</li>
+                  <li><strong>Reporter</strong>：把取证结果固化为标准报告。</li>
+                </ul>
+                <p>Agent 之间不传聊天记录，而是订阅强类型的 <code>AuditState</code>。</p>
+                <h4>2. LLM 判断会出错吗</h4>
+                <p><strong>一定会。</strong>所以核心哲学是：<strong>大模型负责概率生成（System 1），确定性代码负责 100% 硬拦截（System 2）</strong>。四道门禁：</p>
+                <ol>
+                  <li><strong>神经符号门禁</strong>：SQL 执行前用 sqlglot AST 做布尔推导，发现恒假矛盾直接阻断；</li>
+                  <li><strong>Actor-Critic 视角分离</strong>：写 SQL 的不自检；Gate 1（意图）/ Gate 2（语义）/ Gate 3（结果对齐）任一不过就带诊断打回；</li>
+                  <li><strong>客观度量对账</strong>：<code>AuditMetricEvaluator</code> 对数据库原始行做代码级求和去重，报告里的数字不让模型算；</li>
+                  <li><strong>刚性熔断 + 人工兜底</strong>：<code>MAX_RETRIES = 1</code>，仍冲突则进 <code>HUMAN_APPROVAL</code>。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释 / 追问拆招】</span></div>
+              <div class="box-body">
+                <h4>追问 A：为什么 Planner 和 Coder 要分开？合成一个不是更省 Token？</h4>
+                <p>合并会造成认知过载：既要理解政策逻辑，又要关注几十个字段拼写和 ClickHouse 方言。拆开后每步职责单一，错误可定位。（面试时可说“我们做过对比”，但具体错误率 31%→9% 请换成你真实测过的数据，否则被追问会露馅。）</p>
+                <h4>追问 B：Critic 也是 LLM，它误判怎么办？</h4>
+                <p>Critic 的 REJECT 必须给结构化证据（违反哪条规则、哪个字段不存在）；并且单轮只重试 1 次，不会被 Critic 无限卡死；最终有 Gate 与人工审批兜底。</p>
+                <h4>对应真实代码</h4>
+                <p><code>app/core/agent_graph.py</code> 中：<code>planner_node</code> 末尾调用 <code>QualityGate.validate_intent</code>（Gate 1），<code>sqlexec_node</code> 之后调用 <code>QualityGate.validate_result_matching</code>（Gate 3），失败则写入 <code>error_log</code> 并 <code>retry_count + 1</code>，由条件边路由回 Planner/SQLEXEC。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- F4 -->
+        <article class="qa-card" data-card-id="f4" data-category="cat-4">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num followup">追问 4</span>
+                <span class="topic-pill">LangGraph 选型</span>
+                <span class="topic-pill">对比传统工作流</span>
+              </div>
+              <div class="qa-question">面试官问：“既然流程是确定的，为什么要用 LangGraph 状态机？直接用传统工作流不就好了？”</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“主干虽然确定，但 Agent 场景有传统工作流/手写脚本难以优雅承载的 4 个特性：</p>
+                <ol>
+                  <li><strong>带环拓扑</strong>：Airflow、Prefect 等本质是 DAG，禁止环路；而 Agent 必须有 <strong>Critic → Planner/Coder 的反思回环</strong>，LangGraph 用条件边原生支持细粒度的局部回流。</li>
+                  <li><strong>状态快照与时间旅行</strong>：Checkpointer 每个节点自动存快照，支持断点续跑（不重复调用昂贵 LLM）和回滚到某一轮重新分叉；手写要自己重造轮子。</li>
+                  <li><strong>非阻塞的 Human-in-the-loop</strong>：进入 <code>HUMAN_APPROVAL</code> 时持久化状态并释放线程，审批后用 API 唤醒继续，而不是 <code>sleep</code> 或轮询。</li>
+                  <li><strong>声明式 State Reducer</strong>：并行分支的状态合并通过 <code>Annotated[Type, reducer]</code> 声明，免去到处加锁和手写合并。</li>
+                </ol>
+                <p>结论：无环固定数据管道用 ETL 工作流；需要带环自愈、人工挂起、状态回溯的 LLM 业务，LangGraph 更合适。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释 / 追问拆招】</span></div>
+              <div class="box-body">
+                <h4>追问 A：Temporal / Camunda 也支持长等待和断点恢复，为什么不用？</h4>
+                <ul>
+                  <li><strong>运维重</strong>：它们需要独立集群与 Worker 守护；LangGraph 是内嵌在 FastAPI 进程里的轻量库。</li>
+                  <li><strong>缺少 LLM 语义</strong>：LangGraph 与 LangChain/LangSmith 同生态，对流式输出、BaseMessage、工具协议、Prompt 追踪原生契合；Temporal 里要自己写序列化胶水。</li>
+                  <li>承认：做大型跨服务分布式事务编排时，Temporal 仍是更好的选择。</li>
+                </ul>
+                <h4>追问 B：手写 Python 脚本会遇到什么坑？</h4>
+                <ul>
+                  <li>标志位膨胀（<code>is_retry / need_critic / turn_count</code>），分支逻辑成面条代码；</li>
+                  <li>异常处理分散，每个函数外套 try-except；</li>
+                  <li>缺少可视化与节点级可观测，执行路径只是一串文本日志。</li>
+                </ul>
+                <p><strong>真实代码佐证</strong>：<code>_build_workflow_skeleton()</code> 里 <code>wf.add_conditional_edges("CRITIC", _route_critic_post, {"PLANNER": ..., "SQLEXEC": ...})</code> 就是带环回流，<code>HUMAN_APPROVAL → END</code> 是挂起终点。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- F5 -->
+        <article class="qa-card" data-card-id="f5" data-category="cat-4">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num followup">追问 5A</span>
+                <span class="topic-pill">本项目 Skill</span>
+                <span class="topic-pill">Token 剪枝</span>
+              </div>
+              <div class="qa-question">面试官问：“编码 LLM 每次会把所有 skill 内容都调进去吗？你是怎么处理的？”（本项目 Coder 视角）</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“不会。全量注入会 Token 膨胀、延迟变长，还会让模型选错工具。我们做了<strong>四层动态剪枝</strong>：</p>
+                <ol>
+                  <li><strong>角色级工具白名单</strong>：<code>skill_registry</code> 里有很多技能，但 CoderAgent 只暴露 <code>CORE_CODER_TOOLS</code> 6 个（<code>execute_audit_sql / calculator / get_table_schema / audit_medical_rule / query_law_database / query_knowledge_base</code>），其余在运行时剔除；</li>
+                  <li><strong>场景驱动 Schema 裁剪</strong>：<code>SceneTableSelector</code> 只给 1 张主表 + 最多 2 张候选关联表；</li>
+                  <li><strong>重型本体按需加载</strong>：<code>resolve_ontology_context</code> 仅在出现“团伙、共用、手机号、图谱”等关键词时才注入 Neo4j 本体；普通查询返回一句“无需加载”；</li>
+                  <li><strong>Fast-Route 直通</strong>：命中已知规则时 <code>execute_fast_route_bypass</code> 直接走预置算子，完全跳过 Coder LLM。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释 / 追问拆招】</span></div>
+              <div class="box-body">
+                <p>以上四点都可在代码中对应：<code>coder_agent.py</code> 的 <code>CORE_CODER_TOOLS</code> 过滤，<code>coder_prompt_assembler.py</code> 的 <code>build_schema_hint</code> 与 <code>resolve_ontology_context</code>。</p>
+                <blockquote>真实性提醒：“18K → 2K Tokens、工具准确率 99.2%”是示例数字，请用你自己测得的数据。</blockquote>
+                <h4>追问 A：裁剪太狠，漏掉了需要的表怎么办？</h4>
+                <p>默认最小化、按需扩容：执行报错或 AST 发现缺外键时，Coder 可调用 <code>get_table_schema</code> 拉取缺失表，或在重试时由 <code>TableRelationLinker</code> 补入关联表。</p>
+                <h4>追问 B：工具过滤是代码做的还是模型选的？</h4>
+                <p>纯代码、确定性集合过滤（<code>permission_manager.filter_skills</code> 再与白名单求交），再 <code>bind_tools</code>。让模型自己选等于它得先看完所有工具，起不到剪枝作用。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- F6 -->
+        <article class="qa-card" data-card-id="f6" data-category="cat-4">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num followup">追问 5B</span>
+                <span class="topic-pill">Codex / Claude Code / Antigravity</span>
+                <span class="topic-pill">渐进式披露</span>
+              </div>
+              <div class="qa-question">面试官的真实意图：像 Codex、Antigravity、Claude Code 这样的编码 AI，是怎么避免每次把所有 Skill 内容都塞进上下文的？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“核心是<strong>渐进式披露（Progressive Disclosure）</strong>：</p>
+                <ol>
+                  <li><strong>目录常驻、正文延迟加载</strong>：初始上下文里只放每个 Skill 的 <code>name + description</code>（触发场景），几十个也就几百 Token；模型判断命中后，用 <code>read_file</code> 去读对应的 <code>SKILL.md</code> 正文，用完即走；</li>
+                  <li><strong>资源树状懒加载</strong>：Skill 目录里的 <code>references/</code>、<code>examples/</code>、<code>scripts/</code> 只有在 <code>SKILL.md</code> 指引下需要时才读；</li>
+                  <li><strong>语义路由</strong>：Skill 上百个时，先用 embedding 在 Query 与 description 间做相似度，只把 Top-3~5 个候选暴露给模型；</li>
+                  <li><strong>子代理隔离</strong>：重型 Skill（全工程审查、大型重构）交给 subagent 在独立上下文里执行，主会话只收结果。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释 / 追问拆招】</span></div>
+              <div class="box-body">
+                <h4>追问 A：模型忘了去读 SKILL.md 怎么办？</h4>
+                <ul>
+                  <li><strong>强触发描述</strong>：description 里用 “You MUST read … before …” 一类刚性措辞；</li>
+                  <li><strong>确定性 Hook</strong>：用户输入 slash command（如 <code>/review</code>）时，由代码直接把对应 Skill 内容注入，剥夺模型“不读”的选择权。</li>
+                </ul>
+                <h4>追问 B：全局 Skill 与项目 Skill 怎么区分？</h4>
+                <p>分层覆盖：内置/全局目录（如 <code>~/.gemini/…/skills</code>）→ 工作区私有目录，同名时<strong>项目级覆盖全局</strong>（Shadowing），保证不同技术栈互不串味。</p>
+                <blockquote>注意：这部分是通用行业做法的描述，不是 Argus-Agent 项目本身的实现，面试时不要说成是你项目里做的。</blockquote>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- 分类五：真实源码案例与底层原理 -->
+      <!-- ============================================================ -->
+      <section class="category-section" data-section-cat="cat-5">
+        <div class="category-header">
+          <div class="category-title-wrap">
+            <span class="cat-tag">源码 · 5 专题</span>
+            <h2>真实源码案例与底层原理图解</h2>
+          </div>
+          <span class="category-desc">Gate 1 意图门控 · 4 个真实意图错误 · 伴随缺失 · 分位数 · MySQL 堆排序</span>
+        </div>
+
+        <!-- C1 -->
+        <article class="qa-card" data-card-id="c1" data-category="cat-5">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num codecase">源码 1</span>
+                <span class="topic-pill">Gate 1</span>
+                <span class="topic-pill">意图门控</span>
+              </div>
+              <div class="qa-question">意图门控（Gate 1）是怎么做的？调用链是什么？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“Gate 1 位于 <strong>Planner 产出规划之后、Coder 写 SQL 之前</strong>。它用纯代码静态检验 Planner 的方法论（<code>methodology</code>）是否违背用户原始问题（<code>original_question</code>）与业务常识。简单说就是一道<strong>‘前置编译器’</strong>：在花 Token 写 SQL、查数据库之前，先给解题思路挑刺。”</p>
+                <p>未通过时：错误写入 <code>error_log</code>、<code>retry_count + 1</code>，条件边把它带着诊断信息打回 Planner；通过则清空 <code>error_log</code> 放行。校验器自身异常时<strong>默认放行（fail-open）</strong>，避免阻塞流水线。</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【真实调用链】</span></div>
+              <div class="box-body">
+<pre><code>planner_node (app/core/agent_graph.py)
+   └─ QualityGate.validate_intent(state)        # app/core/context/gates.py
+        └─ guard_intent_alignment(state)         # app/core/guardrails/intent_alignment_guard.py
+             ├─ query_classifier.classify(original_question)   # 判定 RANKING / TOP_N / THRESHOLD_FILTER ...
+             └─ intent_validator.validate_alignment(...)       # app/core/intent_validator.py
+                  └─ DiagnosticInterpreter.interpret_gate1_intent(...)  # 生成诊断建议
+</code></pre>
+                <p>补充：<code>guard_intent_alignment</code> 在缺少 <code>original_question</code> 或 <code>methodology</code> 时直接放行；整个函数包在 try/except 里，异常默认 <code>passed=True</code>。</p>
+                <blockquote>真实性提醒：当前 <code>intent_validator.py</code> 的硬规则主要覆盖三类——排名类滥用基线/分位数、排名类被强加 GROUP BY 聚合、药店场景硬编码 ≥2000 元阈值。不要夸大成“覆盖所有意图错误”。</blockquote>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- C2 -->
+        <article class="qa-card" data-card-id="c2" data-category="cat-5">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num codecase">源码 2</span>
+                <span class="topic-pill">真实案例</span>
+                <span class="topic-pill">audit_intent_planner.py</span>
+                <span class="topic-pill">intent_validator.py</span>
+              </div>
+              <div class="qa-question">能举几个项目里真实的“前置意图错误”例子吗？（主客体颠倒 / Top-N 乱算基线 / 药店高阈值 / 伴随缺失）</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“我们专门有红队单测（<code>tests/unit/security/test_intent_alignment_guard_red.py</code>、<code>tests/unit/test_audit_intent_planner.py</code>）固化这些坑，最典型的四个：”</p>
+                <ol>
+                  <li><strong>主客体颠倒</strong>：“男性开具益母草、地屈孕酮”，模型被妇科药吸引，把主体写成女性或 <code>gend NOT LIKE '1%'</code>，结果查出全是正常女性、真正违规的男性被漏掉。→ <code>AuditIntentPlanner</code> 用关键词表识别“男性主体 + 女性专属项目”，锁定 <code>target_gender="1"</code> 与 <code>EXCLUSION_MUTEX</code> 原型，强约束“严禁在 WHERE 中排除男性”。</li>
+                  <li><strong>Top-N 乱算基线</strong>：“住院总费用最高的前 10 名”，Planner 写“先计算分位数基线阈值，再筛选大于阈值的记录”。→ <code>IntentValidator</code> 对 RANKING/TOP_N 禁止“基线、分位数、quantile、先计算、计算阈值”，要求直接 <code>ORDER BY … DESC LIMIT N</code>。</li>
+                  <li><strong>药店硬编码大额阈值</strong>：“药店异常大额购药”，模型套住院经验写“大于 5000 元”，导致 0 行漏判。→ 正则提取方法论里的数字，药店/购药场景下 ≥2000 直接拦截，建议改用动态分位数基线。</li>
+                  <li><strong>伴随缺失单行伪排除</strong>：“无手术却收麻醉费”写成单行 <code>LIKE '%麻醉%' AND NOT LIKE '%手术%'</code>。→ 归类 <code>MISSING_COMPANION</code>，强制按就诊/结算粒度 <code>setl_id</code> 做 <code>NOT IN</code> 子查询（详见下一卡片）。”</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【对应真实代码片段】</span></div>
+              <div class="box-body">
+                <h4>① 主客体锁定（audit_intent_planner.py）</h4>
+<pre><code>is_male_subject = any(kw in q for kw in ["男性", "男患者", "男参保", "男", "male"])
+has_female_item = any(kw in q for kw in cls.FEMALE_ONLY_KEYWORDS)  # 宫内节育/益母草/地屈孕酮...
+
+if is_male_subject and has_female_item:
+    return AuditIntent(
+        audit_subject="男性参保人",
+        violation_feature=matched_feature,
+        archetype=AuditArchetype.EXCLUSION_MUTEX,
+        target_gender="1",
+        enforcement_guidance="【强约束】... 必须正向筛选 gend LIKE '1%' ... 严禁在 WHERE 子句中排除男性！"
+    )</code></pre>
+                <h4>② Top-N 基线拦截（intent_validator.py）</h4>
+<pre><code>if query_type in (QueryType.RANKING, QueryType.TOP_N):
+    forbidden_words = ["基线", "分位数", "quantile", "先计算", "计算阈值", "计算基线"]
+    for word in forbidden_words:
+        if word in methodology_lower:
+            passed = False
+            errors.append("排名类/Top-N查询方法论中包含了不必要的前置基线计算特征 ... 应直接 ORDER BY ... DESC LIMIT N")</code></pre>
+                <h4>③ 药店阈值拦截（intent_validator.py）</h4>
+<pre><code>elif query_type == QueryType.THRESHOLD_FILTER:
+    is_pharmacy = "药店" in original_query or "购药" in original_query
+    if is_pharmacy:
+        hard_limits = re.findall(r'(?:大于|超过|固定阈值|阈值设置为)\s*(\d+)\s*(?:元)?', methodology_lower)
+        for limit in hard_limits:
+            if int(limit) >= 2000:
+                passed = False  # 提示：改用动态分位数基线</code></pre>
+                <h4>④ 单测中的真实用例</h4>
+<pre><code>def test_guard_intent_ranking_mismatch():
+    state = {
+        "original_question": "查询住院总费用最高的前10名患者",
+        "methodology": "先计算分位数基线阈值，然后筛选大于阈值的记录",
+    }
+    res = guard_intent_alignment(state)
+    assert res["passed"] is False</code></pre>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- C3 -->
+        <article class="qa-card" data-card-id="c3" data-category="cat-5">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num codecase">源码 3</span>
+                <span class="topic-pill">MISSING_COMPANION</span>
+                <span class="topic-pill">单行伪排除</span>
+              </div>
+              <div class="qa-question">“伴随缺失”与“单行伪排除反模式”到底是什么？举个例子看懂。</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“费用明细表<strong>每行只代表一个收费项目</strong>。‘无手术收麻醉费’不能在单行里写 <code>LIKE '%麻醉%' AND NOT LIKE '%手术%'</code>——因为任何麻醉行本身的名称都不含‘手术’，会让<strong>所有正常的麻醉费 100% 被判违规</strong>。正确做法是在<strong>就诊/结算粒度（<code>setl_id</code>）跨行核对</strong>：麻醉行所在的结算单里，是否存在手术行。我们把它归为 <code>MISSING_COMPANION</code> 原型，由 <code>QualityGate</code> 规则强制要求子查询 <code>NOT IN</code> 或 <code>LEFT JOIN … IS NULL</code>。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【直观例子：张三 vs 李四】</span></div>
+              <div class="box-body">
+                <table>
+                  <thead><tr><th>行</th><th>结算单号 setl_id</th><th>患者</th><th>收费项目 hilist_name</th><th>金额</th><th>说明</th></tr></thead>
+                  <tbody>
+                    <tr><td>1</td><td>1001</td><td>张三</td><td>挂号费</td><td>10</td><td></td></tr>
+                    <tr><td>2</td><td>1001</td><td>张三</td><td>阑尾切除手术</td><td>3000</td><td>做了手术</td></tr>
+                    <tr><td>3</td><td>1001</td><td>张三</td><td>全身麻醉费</td><td>800</td><td class="hl-good">合法：有手术</td></tr>
+                    <tr><td>4</td><td>1002</td><td>李四</td><td>门诊诊察费</td><td>20</td><td></td></tr>
+                    <tr><td>5</td><td>1002</td><td>李四</td><td>局部麻醉费</td><td>200</td><td class="hl-bad">违规：无手术收麻醉</td></tr>
+                  </tbody>
+                </table>
+                <h4>❌ 错误 SQL（单行伪排除）</h4>
+<pre><code>SELECT * FROM 费用明细表
+WHERE 收费项目 LIKE '%麻醉%'
+  AND 收费项目 NOT LIKE '%手术%';
+-- 第 3 行“全身麻醉费”本身不含“手术”二字 → 张三也被抓 → 全省合法麻醉全部误报</code></pre>
+                <h4>✅ 正确 SQL（跨行子查询）</h4>
+<pre><code>SELECT * FROM 费用明细表
+WHERE 收费项目 LIKE '%麻醉%'
+  AND 结算单号 NOT IN (
+      SELECT 结算单号 FROM 费用明细表 WHERE 收费项目 LIKE '%手术%'
+  );
+-- 子查询返回 [1001] → 排除张三；1002 不在其中 → 只抓出李四</code></pre>
+                <blockquote>项目对应：<code>CONTEXT.md</code> 的 2.8 节“单行伪排除反模式”，规则由 <code>QualityGate</code> 规则 4 拦截；意图层由 <code>AuditArchetype.MISSING_COMPANION</code> 提前下发强约束。</blockquote>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- C4 -->
+        <article class="qa-card" data-card-id="c4" data-category="cat-5">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num codecase">源码 4</span>
+                <span class="topic-pill">分位数</span>
+                <span class="topic-pill">Quantile / P95</span>
+              </div>
+              <div class="qa-question">什么是分位数计算？为什么在 Top-10 任务里先算分位数是灾难？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“分位数是<strong>‘排位门槛线’</strong>：P95 = 5000 元表示 95% 的数据都在 5000 元以下，只有前 5% 超过。审计里常用 P95/P99 当异常基线，因为平均数会被极端值拉偏。但对于‘取最高的前 10 名’，先算全表 P95 再过滤再排序是多此一举：<strong>前 10 名一定远高于 P95</strong>，而精确分位数要把数亿行载入内存做排序/聚合，耗时长、内存大；直接 <code>ORDER BY … DESC LIMIT 10</code> 只需维护一个大小为 10 的堆。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <h4>通俗类比</h4>
+                <ul>
+                  <li><strong>P50（中位数）</strong>：1000 万考生排队，站在正中间的成绩；</li>
+                  <li><strong>P90</strong>：前 10% 的门槛；<strong>P95</strong>：前 5% 的门槛；<strong>P99</strong>：前 1% 的门槛。</li>
+                </ul>
+                <h4>ClickHouse 写法</h4>
+<pre><code>SELECT quantile(0.95)(det_item_fee_sumamt) AS p95_fee FROM fqz_fymx_test;</code></pre>
+                <table>
+                  <thead><tr><th>做法</th><th>底层执行</th><th>代价</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="hl-good">直接取前 10</span><br><code>ORDER BY fee DESC LIMIT 10</code></td><td>只需维护大小为 10 的小顶堆，流式扫描一遍</td><td>内存极小，速度快</td></tr>
+                    <tr><td><span class="hl-bad">先算分位数再过滤</span><br><code>quantile(0.95)(fee)</code></td><td>需对全量数据做分位聚合（精确版本要保留大量数据）</td><td>耗时更长、内存占用更高，数据量大时可能超时/OOM</td></tr>
+                  </tbody>
+                </table>
+                <blockquote>表述提醒：ClickHouse 默认的 <code>quantile</code> 是近似算法（采样），<code>quantileExact</code> 才是精确算法且最耗内存。面试时可说“精确分位数”开销大；别笼统说“一定会 OOM”，说“可能超时或内存压力大”更严谨。</blockquote>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- C5 -->
+        <article class="qa-card" data-card-id="c5" data-category="cat-5">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num codecase">源码 5</span>
+                <span class="topic-pill">MySQL</span>
+                <span class="topic-pill">优先队列 / 堆</span>
+              </div>
+              <div class="qa-question">MySQL 的 <code>ORDER BY … LIMIT N</code> 是用小顶堆实现的吗？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【面试标准回答】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>“是的。排序列<strong>没有可用索引</strong>时，MySQL 的 filesort 在 <code>LIMIT</code> 较小、堆能放进 <code>sort_buffer</code> 的情况下，会使用<strong>优先队列（堆）优化</strong>：只维护容量为 N 的堆，流式扫描全表，新记录只和堆顶比较，更优则替换堆顶；扫完后堆里就是 Top-N。时间复杂度约 <code>O(M log N)</code>，内存只需 N 条记录。而如果排序列有索引，直接沿 B+ 树有序叶子取前 N 条即可，连堆都不需要。”</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【深度原理解释】</span></div>
+              <div class="box-body">
+                <table>
+                  <thead><tr><th>档位</th><th>条件</th><th>做法</th></tr></thead>
+                  <tbody>
+                    <tr><td>第一档（最快）</td><td>排序列有索引且可用</td><td>顺着 B+ 树有序叶子直接取前 N 条，无需排序</td></tr>
+                    <tr><td>第二档</td><td>无索引，LIMIT 小，堆能放进 sort_buffer</td><td>filesort + 优先队列（堆）优化</td></tr>
+                    <tr><td>第三档</td><td>无索引，LIMIT/OFFSET 很大（如深度分页）</td><td>堆放不下，退化为全量排序，必要时落临时文件做多路归并</td></tr>
+                  </tbody>
+                </table>
+                <h4>如何自己验证</h4>
+<pre><code>SET optimizer_trace="enabled=on";
+SELECT * FROM orders ORDER BY amount DESC LIMIT 10;
+SELECT * FROM information_schema.optimizer_trace\G
+-- 在 filesort_summary / filesort_priority_queue_optimization 相关字段里
+-- 查看是否 chosen: true</code></pre>
+                <blockquote>严谨提示：不同 MySQL 版本的 trace 字段位置略有差异，且是否启用优先队列还取决于 <code>sort_buffer_size</code>、行大小和 LIMIT。上面的 JSON 结构以你实际版本输出为准，面试时讲原理即可，别背具体字段值。</blockquote>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============================================================ -->
+      <!-- 分类六：岗位 JD 拆解 -->
+      <!-- ============================================================ -->
+      <section class="category-section" data-section-cat="cat-6">
+        <div class="category-header">
+          <div class="category-title-wrap">
+            <span class="cat-tag">JD · 3 专题</span>
+            <h2>目标岗位 JD 拆解（AI 应用架构：RAG / Agent / Skill / MCP）</h2>
+          </div>
+          <span class="category-desc">岗位画像 · 四大考察维度 · 项目话术对齐</span>
+        </div>
+
+        <!-- J1 -->
+        <article class="qa-card" data-card-id="j1" data-category="cat-6">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num jdcase">JD 1</span>
+                <span class="topic-pill">岗位画像</span>
+              </div>
+              <div class="qa-question">这份 JD 招的到底是什么人？面试官主要关注什么？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【结论】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <p>招的不是单纯调 Prompt 的工程师，而是 <strong>“AI 中台 / Agent 基础设施架构师”</strong>：把公司散乱的 API、数据库、RAG 库，通过 <strong>Skill（标准技能抽象）+ MCP（标准接入协议）</strong> 资产化，让上层 Agent 能安全、即插即用地调用。</p>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【4 大考察维度（权重为经验性估计）】</span></div>
+              <div class="box-body">
+                <h4>① Skill 体系建模与工程化（约 40%）</h4>
+                <ul>
+                  <li>元数据 Schema：name、description、版本（SemVer）、依赖、权限作用域、入参出参 Schema、超时/重试/熔断策略；</li>
+                  <li>注册中心与热插拔：不重启服务动态注册/发现 Skill；</li>
+                  <li>复合编排：Skill A 输出作 Skill B 输入、并行、条件分支；失败回滚（补偿）与幂等。</li>
+                </ul>
+                <h4>② MCP 协议与网关（约 25%）</h4>
+                <ul>
+                  <li>MCP 基于 JSON-RPC 2.0，三大原语：<strong>Resources</strong>（只读数据）、<strong>Prompts</strong>（提示模板）、<strong>Tools</strong>（可执行动作）；传输层有 stdio（本地）与 HTTP/SSE 等（远程）；</li>
+                  <li>网关层：身份认证与 RBAC、限流、审计日志、PII 脱敏、租户隔离。</li>
+                </ul>
+                <h4>③ RAG 与工具调用治理（约 20%）</h4>
+                <ul>
+                  <li>RAG 封装成窄接口 Skill（入参 query/filters，返回证据与引用）；</li>
+                  <li>防上下文膨胀（目录常驻 + 按需激活）；</li>
+                  <li>执行沙箱（容器隔离 + AST 静态审计）。</li>
+                </ul>
+                <h4>④ 技能级可观测与评估（约 15%）</h4>
+                <ul>
+                  <li>指标：调用量、一次成功率、P99 延迟、Token 效率、任务完成率；</li>
+                  <li>Trace：Node → Subgraph → Skill Call → LLM Retry 的全链路追踪，Bad Case 回流为离线回归用例。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- J2 -->
+        <article class="qa-card" data-card-id="j2" data-category="cat-6">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num jdcase">JD 2</span>
+                <span class="topic-pill">话术换算</span>
+                <span class="topic-pill">项目对齐</span>
+              </div>
+              <div class="qa-question">我的 Argus-Agent 项目经验，怎么换算成 JD 里的高频词？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【对照表】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <table>
+                  <thead><tr><th>项目里的实际模块</th><th>对应 JD 的说法</th></tr></thead>
+                  <tbody>
+                    <tr><td><code>skill_registry</code> + <code>permission_manager</code></td><td>企业级技能注册中心 + RBAC 权限管控</td></tr>
+                    <tr><td><code>CORE_CODER_TOOLS</code> + 场景动态剪枝</td><td>动态技能发现与上下文防膨胀治理</td></tr>
+                    <tr><td><code>sqlglot</code> AST + <code>SQLGuardian</code></td><td>具备确定性拦截能力的技能执行安全沙箱</td></tr>
+                    <tr><td>法规政策检索抽象为 Tool（<code>query_law_database</code> 等）</td><td>RAG 管道的标准化 Skill 接口封装</td></tr>
+                    <tr><td>LangSmith 埋点 + Token 追踪 + PII 脱敏</td><td>技能级全链路 Trace、Token 经济学与可观测体系</td></tr>
+                    <tr><td><code>FastRouter</code> + 预置参数化算子</td><td>高频固定技能的短路直通与编排调度</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【诚实边界：要提前准备的短板】</span></div>
+              <div class="box-body">
+                <p>JD 强调 <strong>MCP、技能版本管理/灰度/回滚、Skill Marketplace、Dify/LangServe、K8s 部署</strong>。就我读到的代码，项目里有 <code>skill_registry</code> 与权限过滤，但<strong>我没有看到 MCP Server/网关、技能 SemVer 版本与灰度发布的实现</strong>。面试时：</p>
+                <ul>
+                  <li>不要把没做过的说成做过；可以说“我们的 registry 是内部 Python 注册机制，设计上可平滑演进为 MCP 暴露”；</li>
+                  <li>提前读一遍 MCP 官方规范（Resources/Prompts/Tools、JSON-RPC、stdio vs HTTP），能说清概念与落地设想；</li>
+                  <li>准备一个“如果让我把现有 Skill 接入 MCP 网关，我会怎么设计”的口述方案。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- J3 -->
+        <article class="qa-card" data-card-id="j3" data-category="cat-6">
+          <div class="qa-header">
+            <div class="qa-title-area">
+              <div class="qa-meta-row">
+                <span class="q-num jdcase">JD 3</span>
+                <span class="topic-pill">高频考点自测</span>
+              </div>
+              <div class="qa-question">针对这份 JD，面试官最可能问的 6 个问题与回答要点是什么？</div>
+            </div>
+            <div class="qa-controls">
+              <button class="mastery-btn" type="button">○ 未掌握</button>
+              <span class="chevron">▼</span>
+            </div>
+          </div>
+          <div class="qa-body">
+            <div class="answer-box">
+              <div class="box-label">
+                <span>【回答要点】</span>
+                <span class="recite-hint">点击内容区显示/隐藏答案</span>
+              </div>
+              <div class="box-body recite-target">
+                <ol>
+                  <li><strong>如何定义一个标准 Skill 的元数据？</strong> name/description/version/依赖/权限 scope/入参出参 JSON Schema/timeout/retry/降级策略。</li>
+                  <li><strong>如何热加载新 Skill？</strong> 配置或事件驱动更新运行时 registry，沙箱隔离，注册前做 Schema 与权限校验。</li>
+                  <li><strong>MCP 三大原语是什么？</strong> Resources / Prompts / Tools，基于 JSON-RPC 2.0；stdio 适合本地进程，HTTP 流式适合远程服务。</li>
+                  <li><strong>MCP 网关做什么？</strong> 鉴权、RBAC 下发可见工具列表、限流、审计、脱敏。</li>
+                  <li><strong>50 个 Skill 如何防止 Token 爆炸？</strong> 目录常驻 + 按需读取正文 + 语义路由 Top-K + 角色白名单（可举 <code>CORE_CODER_TOOLS</code>）。</li>
+                  <li><strong>如何防止工具把宿主机搞挂？</strong> 容器沙箱 + AST 静态审计（可举 <code>SQLGuardian</code>）+ 只读账号 + 超时/资源限额。</li>
+                </ol>
+              </div>
+            </div>
+            <div class="explain-box">
+              <div class="box-label"><span>【使用建议】</span></div>
+              <div class="box-body">
+                <p>开启顶部“自测背诵模式”，遮住答案，对着问题自己口述 1 分钟，再点击揭晓对照；每个能流畅讲完的卡片点“已掌握”，侧栏进度会自动统计。</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <div class="empty-state" id="emptyStateBottom" style="display:none;"></div>
+    </main>
+  </div>
+
+  <button class="back-to-top" id="backToTop" type="button">↑ 顶部</button>
+
+  <script>
+    (function () {
+      var MASTERY_KEY = 'argus_interview_mastery_v1';
+      var THEME_KEY = 'argus_interview_theme_v1';
+
+      var cards = Array.prototype.slice.call(document.querySelectorAll('.qa-card'));
+      var sections = Array.prototype.slice.call(document.querySelectorAll('.category-section'));
+      var navItems = Array.prototype.slice.call(document.querySelectorAll('.nav-item'));
+      var masteryFilterBtns = Array.prototype.slice.call(document.querySelectorAll('[data-mastery-filter]'));
+      var searchInput = document.getElementById('searchInput');
+      var matchCount = document.getElementById('matchCount');
+      var emptyState = document.getElementById('emptyState');
+      var progressFill = document.getElementById('progressFill');
+      var masteryCountText = document.getElementById('masteryCountText');
+      var sidebar = document.getElementById('sidebar');
+      var backdrop = document.getElementById('sidebarBackdrop');
+      var backToTop = document.getElementById('backToTop');
+
+      var state = {
+        category: 'all',
+        masteryFilter: 'all',
+        keyword: ''
+      };
+
+      /* ---------- 掌握进度（localStorage） ---------- */
+      function loadMastery() {
+        try {
+          return JSON.parse(localStorage.getItem(MASTERY_KEY)) || {};
+        } catch (e) {
+          return {};
+        }
+      }
+      function saveMastery(obj) {
+        try { localStorage.setItem(MASTERY_KEY, JSON.stringify(obj)); } catch (e) {}
+      }
+      var mastery = loadMastery();
+
+      function paintMasteryButton(card) {
+        var id = card.getAttribute('data-card-id');
+        var btn = card.querySelector('.mastery-btn');
+        var done = !!mastery[id];
+        card.classList.toggle('is-mastered', done);
+        btn.textContent = done ? '✓ 已掌握' : '○ 未掌握';
+      }
+
+      function updateProgress() {
+        var total = cards.length;
+        var done = cards.filter(function (c) { return mastery[c.getAttribute('data-card-id')]; }).length;
+        masteryCountText.textContent = '已掌握 ' + done + ' / ' + total + ' 项';
+        progressFill.style.width = (total ? (done / total) * 100 : 0) + '%';
+      }
+
+      /* ---------- 过滤 ---------- */
+      function applyFilters() {
+        var kw = state.keyword.trim().toLowerCase();
+        var visible = 0;
+
+        cards.forEach(function (card) {
+          var id = card.getAttribute('data-card-id');
+          var cat = card.getAttribute('data-category');
+          var okCat = state.category === 'all' || state.category === cat;
+          var isDone = !!mastery[id];
+          var okMastery = state.masteryFilter === 'all' ||
+            (state.masteryFilter === 'mastered' && isDone) ||
+            (state.masteryFilter === 'unmastered' && !isDone);
+          var okKw = !kw || card.textContent.toLowerCase().indexOf(kw) !== -1;
+          var show = okCat && okMastery && okKw;
+          card.classList.toggle('hidden-card', !show);
+          if (show) {
+            visible++;
+            if (kw) { card.classList.remove('collapsed'); }
+          }
+        });
+
+        sections.forEach(function (sec) {
+          var hasVisible = sec.querySelector('.qa-card:not(.hidden-card)');
+          sec.style.display = hasVisible ? '' : 'none';
+        });
+
+        matchCount.textContent = '显示 ' + visible + ' 项';
+        emptyState.classList.toggle('visible', visible === 0);
+      }
+
+      /* ---------- 初始化卡片 ---------- */
+      cards.forEach(function (card) {
+        paintMasteryButton(card);
+
+        var header = card.querySelector('.qa-header');
+        header.addEventListener('click', function (e) {
+          if (e.target.closest('.mastery-btn')) { return; }
+          card.classList.toggle('collapsed');
+        });
+
+        card.querySelector('.mastery-btn').addEventListener('click', function (e) {
+          e.stopPropagation();
+          var id = card.getAttribute('data-card-id');
+          if (mastery[id]) { delete mastery[id]; } else { mastery[id] = true; }
+          saveMastery(mastery);
+          paintMasteryButton(card);
+          updateProgress();
+          applyFilters();
+        });
+      });
+
+      /* ---------- 背诵模式：点击答案区单独揭晓 ---------- */
+      Array.prototype.slice.call(document.querySelectorAll('.recite-target')).forEach(function (el) {
+        el.addEventListener('click', function () {
+          if (document.body.classList.contains('recite-mode')) {
+            el.classList.toggle('revealed');
+          }
+        });
+      });
+
+      var reciteBtn = document.getElementById('reciteToggleBtn');
+      reciteBtn.addEventListener('click', function () {
+        var on = document.body.classList.toggle('recite-mode');
+        reciteBtn.classList.toggle('active-mode', on);
+        reciteBtn.textContent = on ? '👁 退出自测模式' : '👁 自测背诵模式';
+        if (!on) {
+          Array.prototype.slice.call(document.querySelectorAll('.recite-target.revealed')).forEach(function (el) {
+            el.classList.remove('revealed');
+          });
+        }
+      });
+
+      /* ---------- 展开/折叠 ---------- */
+      document.getElementById('expandAllBtn').addEventListener('click', function () {
+        cards.forEach(function (c) { c.classList.remove('collapsed'); });
+      });
+      document.getElementById('collapseAllBtn').addEventListener('click', function () {
+        cards.forEach(function (c) { c.classList.add('collapsed'); });
+      });
+
+      /* ---------- 分类导航 ---------- */
+      navItems.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          navItems.forEach(function (n) { n.classList.remove('active'); });
+          btn.classList.add('active');
+          state.category = btn.getAttribute('data-cat-filter');
+          applyFilters();
+          closeSidebar();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      });
+
+      masteryFilterBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          masteryFilterBtns.forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          state.masteryFilter = btn.getAttribute('data-mastery-filter');
+          applyFilters();
+        });
+      });
+
+      /* ---------- 搜索 ---------- */
+      searchInput.addEventListener('input', function () {
+        state.keyword = searchInput.value;
+        applyFilters();
+      });
+
+      /* ---------- 重置进度 ---------- */
+      document.getElementById('resetMasteryBtn').addEventListener('click', function () {
+        if (!window.confirm('确定要清空所有“已掌握”记录吗？')) { return; }
+        mastery = {};
+        saveMastery(mastery);
+        cards.forEach(paintMasteryButton);
+        updateProgress();
+        applyFilters();
+      });
+
+      /* ---------- 主题 ---------- */
+      var themeBtn = document.getElementById('themeToggleBtn');
+      function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        themeBtn.textContent = theme === 'dark' ? '☀ 浅色模式' : '🌙 深色模式';
+      }
+      var savedTheme = 'dark';
+      try { savedTheme = localStorage.getItem(THEME_KEY) || 'dark'; } catch (e) {}
+      applyTheme(savedTheme);
+      themeBtn.addEventListener('click', function () {
+        var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+      });
+
+      /* ---------- 代码块复制按钮 ---------- */
+      Array.prototype.slice.call(document.querySelectorAll('pre')).forEach(function (pre) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'copy-code-btn';
+        btn.textContent = '复制';
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var text = pre.querySelector('code') ? pre.querySelector('code').innerText : pre.innerText;
+          function done() {
+            btn.textContent = '已复制';
+            setTimeout(function () { btn.textContent = '复制'; }, 1200);
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, done);
+          } else {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch (err) {}
+            document.body.removeChild(ta);
+            done();
+          }
+        });
+        pre.appendChild(btn);
+      });
+
+      /* ---------- 移动端侧栏 ---------- */
+      function openSidebar() {
+        sidebar.classList.add('open');
+        backdrop.classList.add('open');
+      }
+      function closeSidebar() {
+        sidebar.classList.remove('open');
+        backdrop.classList.remove('open');
+      }
+      document.getElementById('mobileMenuBtn').addEventListener('click', openSidebar);
+      backdrop.addEventListener('click', closeSidebar);
+
+      /* ---------- 回到顶部 ---------- */
+      window.addEventListener('scroll', function () {
+        backToTop.classList.toggle('show', window.scrollY > 500);
+      });
+      backToTop.addEventListener('click', function () {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      /* ---------- 启动 ---------- */
+      updateProgress();
+      applyFilters();
+    })();
+  </script>
+</body>
+</html>

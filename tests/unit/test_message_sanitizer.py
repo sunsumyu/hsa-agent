@@ -171,3 +171,49 @@ class TestTrimAndSanitize:
     def test_tuple_inputs_converted(self):
         result = trim_and_sanitize([], [("human", "test msg")], max_total=10)
         assert len(result) == 1
+
+    def test_ai_message_preserved_in_reducer(self):
+        left = [HumanMessage(content="user query")]
+        right = [AIMessage(content="audit report conclusion")]
+        result = trim_and_sanitize(left, right, max_total=10)
+        assert len(result) == 2
+        assert result[1].__class__.__name__ == "AIMessage"
+        assert result[1].content == "audit report conclusion"
+
+
+class TestPrunePastTurnTools:
+    def test_prunes_past_tools_keeps_active_tools(self):
+        from app.memory.message_sanitizer import prune_past_turn_tools
+        # Turn 1: Completed turn
+        h1 = HumanMessage(content="Q1")
+        ai1_tc = AIMessage(content="Calling sql", tool_calls=[{"name": "sql", "args": {}, "id": "tc1"}])
+        t1 = ToolMessage(content="Result 1", tool_call_id="tc1")
+        ai1_final = AIMessage(content="Conclusion 1")
+        
+        # Turn 2: Active turn with executing tools
+        h2 = HumanMessage(content="Q2")
+        ai2_tc = AIMessage(content="Calling sql 2", tool_calls=[{"name": "sql", "args": {}, "id": "tc2"}])
+        t2 = ToolMessage(content="Result 2", tool_call_id="tc2")
+
+        msgs = [h1, ai1_tc, t1, ai1_final, h2, ai2_tc, t2]
+        pruned = prune_past_turn_tools(msgs)
+
+        # In past turn: ai1_tc and t1 should be pruned, h1 and ai1_final kept
+        # In active turn: h2, ai2_tc, t2 should be preserved
+        assert h1 in pruned
+        assert ai1_tc not in pruned
+        assert t1 not in pruned
+        assert ai1_final in pruned
+        assert h2 in pruned
+        assert ai2_tc in pruned
+        assert t2 in pruned
+        assert len(pruned) == 5
+
+    def test_single_turn_not_pruned(self):
+        from app.memory.message_sanitizer import prune_past_turn_tools
+        h1 = HumanMessage(content="Q1")
+        ai1_tc = AIMessage(content="Calling sql", tool_calls=[{"name": "sql", "args": {}, "id": "tc1"}])
+        t1 = ToolMessage(content="Result 1", tool_call_id="tc1")
+        msgs = [h1, ai1_tc, t1]
+        pruned = prune_past_turn_tools(msgs)
+        assert len(pruned) == 3

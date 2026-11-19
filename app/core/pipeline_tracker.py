@@ -88,8 +88,10 @@ class PipelineTracker:
         # 2. 写入 JSONL 日志文件
         try:
             log_path = self._get_log_file(event.session_id)
+            from app.core.observability_service import sanitize_pii_payload
+            safe_payload = sanitize_pii_payload(asdict(event))
             with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(asdict(event), ensure_ascii=False, default=str) + "\n")
+                f.write(json.dumps(safe_payload, ensure_ascii=False, default=str) + "\n")
         except Exception as e:
             logger.warning(f"[PipelineTracker] 日志写入失败: {e}")
 

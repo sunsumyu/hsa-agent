@@ -1,11 +1,13 @@
 """
 app/agents/tool_evidence_extractor.py
 =====================================
-[V230.0] 工具执行结果与审计证据提取器 (Tool Evidence Extractor)
+[V230.0 / Matt Pocock Deep Module] 工具执行结果与审计证据提取器 (Tool Evidence Extractor)
 
-重构自 AuditCoderAgent._process_tool_results：
-将 120+ 行充斥反序列化、探针过滤、数据截断、证据链拼装的私有逻辑
-提取为高内聚、易测试、强类型的深模块 (Deep Module)。
+核心职责：
+1. 工具执行响应反序列化与异常状态提取
+2. 委托 evidence_truncation_policy 实施结构化截断与宏观保全
+3. 委托 core_sql_resolver 仲裁主线核心审计 SQL
+4. 证据链多轮 Append-Only 累加保全
 """
 
 from __future__ import annotations
@@ -13,12 +15,14 @@ from __future__ import annotations
 import json
 import time
 import hashlib
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Tuple, Optional
+from dataclasses import dataclass
+from typing import List, Dict, Any, Tuple
 from loguru import logger
 from langchain_core.messages import ToolMessage
 
 from app.skills.probe_guard import is_probe_query
+from app.agents.evidence_truncation_policy import truncate_evidence_data
+from app.agents.core_sql_resolver import resolve_core_audit_sql
 
 
 @dataclass
@@ -61,33 +65,8 @@ class ToolEvidenceExtractor:
         self.max_chars = max_chars
 
     def truncate_data(self, data: Any) -> str:
-        """截断超长数据集防止上下文溢出，结构化数据保持 JSON 语法完整"""
-        if isinstance(data, list):
-            # 结构化保全截断：保留前 N 条完整记录，避免破坏 JSON 结构
-            total_items = len(data)
-            sampled = []
-            current_chars = 2  # '[' and ']'
-            for item in data:
-                item_str = json.dumps(item, ensure_ascii=False, default=str)
-                if current_chars + len(item_str) > self.max_chars and sampled:
-                    break
-                sampled.append(item)
-                current_chars += len(item_str) + 2
-            
-            if len(sampled) < total_items:
-                logger.warning(f"🚨 [State Safeguard] 结果集过大 ({total_items} 条)，结构化保留前 {len(sampled)} 条记录。")
-            return json.dumps(sampled, ensure_ascii=False, default=str)
-        elif isinstance(data, dict):
-            return json.dumps(data, ensure_ascii=False, default=str)
-
-        data_str = str(data)
-        if len(data_str) > self.max_chars:
-            logger.warning(f"🚨 [State Safeguard] 结果集过大 ({len(data_str)} chars)，自动截断至 {self.max_chars} chars。")
-            return (
-                data_str[:self.max_chars]
-                + f"... \n\n[WARNING: Data truncated due to excessive length. Original length: {len(data_str)} chars]"
-            )
-        return data_str
+        """委托至截断策略深模块"""
+        return truncate_evidence_data(data, max_chars=self.max_chars)
 
     def process(self, results: List[Tuple[Dict[str, Any], Any]], state: Dict[str, Any]) -> ProcessedToolResults:
         """执行工具响应解析与证据链归集"""
@@ -141,26 +120,11 @@ class ToolEvidenceExtractor:
                 else:
                     logger.info(f"🔮 [EVIDENCE] Skipped probe query data extraction: {sql_logic[:80]}...")
 
-        # 筛选核心审计 SQL
+        # 委托核心审计 SQL 仲裁解析器
         accumulated_sql_history = state.get("sql_history", []) + sql_logics
-        core_sql = ""
-        if accumulated_sql_history:
-            audit_queries = [sql for sql in accumulated_sql_history if not is_probe_query(sql)]
-            # 优先选择包含业务指标/金额计算的核心查询，而非纯辅助校验
-            metric_queries = [
-                s for s in audit_queries
-                if any(m in s.upper() for m in ["SUM(", "AVG(", "MEDFEE", "TOTAL", "AMT", "FEE", "ROUND(SUM"])
-            ]
-            if metric_queries:
-                core_sql = metric_queries[-1]
-            elif audit_queries:
-                core_sql = audit_queries[-1]
-            else:
-                core_sql = accumulated_sql_history[-1]
+        core_sql = resolve_core_audit_sql(accumulated_sql_history)
 
-        has_new_core_query = any(not is_probe_query(s) for s in sql_logics)
-
-        # 兜底保障：若所有结果被过滤导致 raw_data_list 为空，仅提取非探针结果
+        # 兜底保障：若所有结果被过滤导致 raw_data_list 为空，提取非探针结果
         if not raw_data_list:
             for t_call, res in results:
                 parsed_res = res

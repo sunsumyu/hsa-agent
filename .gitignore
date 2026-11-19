@@ -70,9 +70,35 @@ uuid
 *.pdf
 anthropic_agents_text.txt
 
+# ── ClickHouse 本地运行时存储 (严禁提交) ────────────────────
+store/
+metadata/
+metadata_dropped/
+preprocessed_configs/
+cores/preprocessed_configs/
+format_schemas/
+flags/
+user_files/
+tmp/
+
 # ── 大仓库内脏文件 ────────────────────────────────────────
 
 docs-log/
 docs/
 tools/_history_chunk.md
 data/
+
+# BFCL 隔离评估环境与产物
+.venv-bfcl/
+artifacts/bfcl_results/
+artifacts/bfcl_reports/
+artifacts/bfcl_score/
+
+# GAIA 评估产物
+artifacts/gaia_results/
+artifacts/gaia_reports/
+
+*.pdf--
+verify_p1.png
+
+logs/
