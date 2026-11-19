@@ -23,3 +23,16 @@ def test_match_precedents_construction():
     matched = precedent_registry.match_precedents("建设工程施工合同纠纷", "实际施工人挂靠总包承建工程，要求发包人还钱", top_k=2)
     assert len(matched) >= 1
     assert any("103号" in m.case_name or "施工" in m.case_name for m in matched)
+
+
+def test_match_precedents_traffic_accident():
+    matched = precedent_registry.match_precedents("机动车交通事故责任纠纷", "交警认定主次责任，交强险先行赔付限额与医疗费", top_k=2)
+    assert len(matched) >= 1
+    assert any("24号" in m.case_name for m in matched)
+
+
+def test_match_precedents_lease_contract():
+    matched = precedent_registry.match_precedents("房屋租赁合同纠纷", "租客提前退租，房东扣留全部押金并要求巨额违约金", top_k=2)
+    assert len(matched) >= 1
+    assert any("提前退租" in m.case_name or "空置期" in m.case_name for m in matched)
+
