@@ -15,12 +15,15 @@ import os
 from loguru import logger
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from app.infra.model_manager import model_manager
-from app.core.memory import memory_hub
-from app.infra.neo4j_manager import neo4j_manager
 from app.skills.fast_router import fast_router, RouteType
-from app.prompts import PLANNER_PROMPT
 from app.core.structured_tracer import StructuredTracer
+from app.agents.sql_evidence_resolver import resolve_user_query
+from app.agents.planner_evaluator import evaluate_action_cache, parse_planner_response
+from app.agents.planner_context_assembler import (
+    assemble_planner_context,
+    format_compact_plan_message,
+)
+from app.core.llm_provider import llm_provider
 
 class AuditPlannerAgent:
     def __init__(self):
@@ -34,51 +37,20 @@ class AuditPlannerAgent:
             on_event_cb=getattr(config, "on_trace_update", None)
         )
         
-        user_input = ""
-        # 提取用户输入
-        for msg in state.get("messages", []):
-            if isinstance(msg, (HumanMessage, tuple)) or (hasattr(msg, "type") and msg.type in ("human", "user")):
-                user_input = msg[1] if isinstance(msg, tuple) else str(msg.content)
-                break
-        
+        # [SPEC-227 SSOT] 优先读取当前轮次确定性命题，废除正向遍历首条提问的锁死缺陷
+        user_input = resolve_user_query(state)
+
         if not user_input:
             return {"error_log": "未获取到用户审计需求", "tasks": []}
 
         # 1. 语义缓存检查 (Action Compression - Matt Pocock 确定性接缝)
         with tracer.span("CACHE_CHECK", node="PLANNER") as span:
-            from app.memory.semantic_memory import action_cache_manager
-            disable_cache = os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true"
-            cached_plan = None
-            if not disable_cache:
-                candidate = action_cache_manager.search(user_input)
-                if candidate:
-                    # 1. 检查版本指纹
-                    target_prompt_ver = "2.0"
-                    cached_prompt_ver = candidate.get("prompt_version")
-                    if cached_prompt_ver != target_prompt_ver:
-                        logger.info(f"🔄 [Planner] 缓存版本陈旧 ({cached_prompt_ver} != {target_prompt_ver})，跳过缓存")
-                    else:
-                        # 2. 检查运行时业务契约
-                        cached_sql = candidate.get("sql", "")
-                        sql_upper = cached_sql.upper()
-                        census_keywords = ["排查", "全量", "全市", "字典", "名录", "普查", "层级", "全部"]
-                        if any(kw in user_input for kw in census_keywords) and "LIMIT" in sql_upper:
-                            logger.warning(f"⚠️ [Planner] 全量排查任务拒绝带 LIMIT 的脏缓存，执行物理淘汰: {cached_sql[:50]}")
-                            action_cache_manager.evict(candidate.get("question", user_input))
-                        else:
-                            cached_plan = candidate
-
+            cached_plan = evaluate_action_cache(user_input, target_prompt_ver="2.0")
             if cached_plan:
-                logger.success("⚡ [Planner] 契约与指纹校验通过，命中动作链缓存")
                 span.set_result("命中经验缓存")
                 return {
-                    "tasks": cached_plan.get("tasks", ["执行已验证的精准 SQL"]),
-                    "methodology": cached_plan.get("methodology", "基于历史成功经验的快速路径"),
-                    "sql_query": cached_plan.get("sql"),
-                    "sql_history": [cached_plan.get("sql")] if cached_plan.get("sql") else [], # [V178.9] 确保缓存路径也具备证据链
-                    "cache_hit": True,
+                    **cached_plan,
                     "execution_trace": tracer.to_legacy_list(),
-                    "messages": []
                 }
             span.set_result("未命中缓存")
 
@@ -100,77 +72,33 @@ class AuditPlannerAgent:
                 "messages": []
             }
 
-        # 3. LLM 动态规划路径
+        # 3. LLM 动态规划路径 [Matt Pocock Deep Module: planner_context_assembler]
         with tracer.span("LLM_PLANNING", node="PLANNER") as span:
-            from app.core.llm_provider import llm_provider
-            
-            # [V168.1] 使用 state 中已持久化的复杂度或重新计算
-            complexity = (state.get("metadata") or {}).get("model_id", "HEAVY")
-            role = "planner_heavy" if complexity == "HEAVY" else "planner_light"
+            ctx_payload = await assemble_planner_context(state, user_input=user_input)
 
-            # [V178.9] 准备上下文：混合检索 (Semantic + Episodic)
-            ontology = neo4j_manager.get_ontology()
-            
-            # [V180.0] 意图强化：扩展医学关键词，防止语义丢失
-            from app.infra.neo4j_manager import expand_medical_intent
-            expanded_terms = expand_medical_intent(user_input)
-            if expanded_terms:
-                logger.info(f"🧬 [IntentEnrich] 扩展医学意图: {expanded_terms}")
-                user_input_enriched = f"{user_input} (核查范围应包含但不限于: {', '.join(expanded_terms)})"
-            else:
-                user_input_enriched = user_input
-
-            # 1. 语义与情景召回 (重构：对于 planner_heavy，召回托管给统一 GSSC 上下文引擎；对于 planner_light，执行极简内存查询以防爆 Token)
-            if role == "planner_heavy":
-                schema_hint = "【已启用 GSSC 统一引擎：相关的 ClickHouse DDL 与物理主表元数据规范，已安全挂载于当前消息流最尾部。请滚动至尾部查阅 <database_schema_context> 标签获取真实物理 Schema 以确保规划的准确性】"
-                experience_hint = "【已启用 GSSC 统一引擎：相关的专家审计经验与已固化的外部便签证据线索，已安全挂载于当前消息流最尾部。请滚动至尾部查阅 <experiential_context> 与 <structured_audit_notes> 获取细节】"
-            else:
-                relevant_items = await memory_hub.query(user_input_enriched)
-                schema_hint = memory_hub.semantic.format_for_prompt(relevant_items)
-                avoidance_guide = memory_hub.semantic.get_avoidance_guides(user_input_enriched)
-                if avoidance_guide: schema_hint = f"{schema_hint}\n\n{avoidance_guide}"
-
-                episodes = await memory_hub.episodic.recall_experience(user_input_enriched, limit=2)
-                experience_hint = memory_hub.episodic.format_experience_for_prompt(episodes)
-
-            # 3. 构造 Messages
-            messages = PLANNER_PROMPT.format_messages(
-                original_question=user_input_enriched[:600],
-                messages=state["messages"], 
-                experiences=experience_hint, 
-                ontology=ontology,
-                schema_info=schema_hint
-            )
-            
-            # 调用统一 Provider
+            # 调用统一 Provider (严格施加预算限制，防止生成 4K 冗余长文)
             response = await llm_provider.chat(
-                role=role,
-                messages=messages,
+                role=ctx_payload.role,
+                messages=ctx_payload.prompt_messages,
                 config=config,
-                state=state
+                state=state,
+                max_tokens=600  # [V220.0 瘦身] 严格限制规划输出预算，阻断对后续 Coder 输入的 4K 污染
             )
-            
+
             content = str(response.content)
 
-            # 解析响应
-            methodology = ""
-            tasks = []
-            if "### METHODOLOGY" in content:
-                parts = content.split("### TASKS")
-                methodology = parts[0].replace("### METHODOLOGY", "").strip()
-                if len(parts) > 1:
-                    task_part = parts[1].strip()
-                    tasks = [re.sub(r'^[\-\*123\.]\s*', '', line).strip() for line in task_part.split("\n") if line.strip().startswith(("-", "*", "1.", "2.", "3."))]
-            else:
-                tasks = [re.sub(r'^[\-\*123\.]\s*', '', line).strip() for line in content.split("\n") if line.strip().startswith(("-", "*", "1.", "2.", "3."))]
-            
+            # 解析响应 [Matt Pocock Deep Module: planner_evaluator]
+            methodology, tasks = parse_planner_response(content)
             span.set_result(f"完成路径规划，生成任务 {len(tasks)} 条")
 
+        # [V220.0 Matt Pocock 局部性优化] 向后序 Coder 仅传递精简紧凑的规划决策，彻底阻断上下文滚雪球
+        compact_msg = format_compact_plan_message(methodology, tasks)
+
         return {
-            "tasks": tasks[:3], 
+            "tasks": tasks[:3],
             "methodology": methodology,
-            "messages": [response], 
-            "retry_count": 0, 
+            "messages": [compact_msg],
+            "retry_count": 0,
             "execution_trace": tracer.to_legacy_list()
         }
 

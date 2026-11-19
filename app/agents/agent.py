@@ -35,9 +35,6 @@ except ImportError:
     logger.warning("langchain_classic 未安装，agent.py 旧版 AgentExecutor 不可用。请迁移至 agent_graph.py。")
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage
-from langchain_community.vectorstores import FAISS
-from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 from app.infra.model_manager import model_manager
 

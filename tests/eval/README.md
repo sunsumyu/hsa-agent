@@ -8,6 +8,7 @@
 | `fuzzy` | 5 | 关键词 + SQL 模板命中 (不烧 LLM) | 低 | 模糊意图语义路由 |
 | `refusal` | 5 | 关键词正则匹配 (不烧 LLM) | 极低 | SQL 注入/越权/敏感字段拦截 |
 | `rules` | 5 | SQL 模板命中检查 (不烧 LLM) | 低 | 规则引擎直接激活 |
+| `user_perspective` | 12 | 多角色自然提问 + 原型路由/基线/安全 (全覆盖) | 低-中 | 真实一线用户视角端到端审计评估 |
 
 ## 运行
 
@@ -23,12 +24,13 @@ pytest tests/eval/test_agent.py
 pytest tests/eval/test_agent.py -m fuzzy
 pytest tests/eval/test_agent.py -m refusal
 pytest tests/eval/test_agent.py -m rules
+pytest tests/eval/test_agent.py -m user_perspective
 ```
 
 全跑（生产 CI 完整回归时使用）：
 
 ```bash
-pytest tests/eval/test_agent.py -m "basic or fuzzy or refusal or rules"
+pytest tests/eval/test_agent.py -m "basic or fuzzy or refusal or rules or user_perspective"
 ```
 
 ## 结果产物
@@ -48,6 +50,7 @@ pytest tests/eval/test_agent.py -m "basic or fuzzy or refusal or rules"
 | `golden_dataset_fuzzy.json` | 模糊意图路由 |
 | `golden_dataset_refusal.json` | 拒绝/脱敏 |
 | `golden_dataset_rules.json` | SQL 模板激活 |
+| `golden_dataset_user_perspective.json` | 真实用户视角全新 12 用例全集 |
 
 ## 扩充用例
 

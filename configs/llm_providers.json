@@ -1,15 +1,39 @@
 {
-  "claude-3-5-sonnet": {
+  "ppio-lightweight": {
     "provider": "anthropic",
-    "model_name": "claude-3-5-sonnet-20241022",
-    "priority": 0,
+    "model_name": "deepseek/deepseek-v4.1-flash",
+    "priority": 1,
     "tools_support": true,
     "temperature": 0.3,
-    "api_key_env": "ANTHROPIC_API_KEY",
-    "base_url_env": "ANTHROPIC_BASE_URL",
+    "api_key_env": "PPIO_LLM_API_KEY",
+    "base_url_env": "PPIO_LLM_API_URL",
     "daily_quota": 10000000,
-    "input_cost_1k": 0.003,
-    "output_cost_1k": 0.015
+    "input_cost_1k": 0.0001,
+    "output_cost_1k": 0.0002
+  },
+  "ppio-premium": {
+    "provider": "anthropic",
+    "model_name": "zai-org/glm-5.3-flash",
+    "priority": 1,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "PPIO_LLM_API_KEY",
+    "base_url_env": "PPIO_LLM_API_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.0001,
+    "output_cost_1k": 0.0002
+  },
+  "ppio-mimo": {
+    "provider": "anthropic",
+    "model_name": "xiaomimimo/mimo-v2.6-pro",
+    "priority": 1,
+    "tools_support": true,
+    "temperature": 0.3,
+    "api_key_env": "PPIO_LLM_API_KEY",
+    "base_url_env": "PPIO_LLM_API_URL",
+    "daily_quota": 10000000,
+    "input_cost_1k": 0.0002,
+    "output_cost_1k": 0.0004
   },
   "deepseek-v4-pro": {
     "provider": "openai",

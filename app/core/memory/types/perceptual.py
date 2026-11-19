@@ -44,7 +44,7 @@ class PerceptualMemory:
         将 PDF, Office, 图片等资产统一解析为 Markdown。
         """
         if not os.path.exists(path): return ""
-        ext = os.path.splitext(path).lower()
+        ext = os.path.splitext(path)[1].lower()
         
         # 针对图片返回占位符（后续由 CLIP 处理）
         if ext in ('.jpg', '.jpeg', '.png', '.bmp'): return ""
@@ -98,7 +98,8 @@ class PerceptualMemory:
                         self.model = model
                         self.image = image
                     def embed_documents(self, _):
-                        return self.model.encode([self.image]).tolist()
+                        encoded = self.model.encode([self.image])
+                        return encoded.tolist() if hasattr(encoded, "tolist") else list(encoded)
                 
                 await self.storage.add([item], embeddings_engine=ImageEmbeddingWrapper(self._clip_model, img))
                 logger.info(f"📸 [Perceptual] 已完成视觉资产物理固化: {os.path.basename(image_path)}")
@@ -119,7 +120,8 @@ class PerceptualMemory:
         # 路径 A: 视觉语义对齐 (文搜图)
         if isinstance(query, str) and self._clip_model:
             try:
-                query_vector = self._clip_model.encode(query).tolist()
+                encoded_q = self._clip_model.encode(query)
+                query_vector = encoded_q.tolist() if hasattr(encoded_q, "tolist") else list(encoded_q)
                 return await self.storage.search(limit=limit, tenant_id=tenant_id, query_vector=query_vector)
             except Exception as e:
                 logger.error(f"感知对齐搜索失败: {e}")

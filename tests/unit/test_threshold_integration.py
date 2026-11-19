@@ -190,7 +190,7 @@ class TestEndToEndIntegration:
         # 【核心验证】药店场景不应该使用固定阈值
         assert decision.hard_threshold is None
         assert decision.strategy.startswith("DYNAMIC_QUANTILE") or decision.strategy == "RANKING_NO_THRESHOLD"
-        print("✅ 药店场景不使用固定阈值，将使用动态分位数")
+        print("[OK] 药店场景不使用固定阈值，将使用动态分位数")
 
 
 if __name__ == "__main__":

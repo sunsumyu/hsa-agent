@@ -1,0 +1,243 @@
+"""
+app/api/legal_stream_coordinator.py
+====================================
+[Legal Agent Deep Module] 法律多轮辩法流式协调器
+将民商事法律辩法引擎（事实审查、焦点三段论、红蓝攻防、神经符号门禁、HITL 人工补证中断、法官心证）
+无缝转换为 argus-frontend (Rust/WASM) 协议流格式。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import sys
+from typing import Any, AsyncGenerator, Dict, Optional
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
+from loguru import logger
+
+from domains.legal.graph import build_legal_graph
+from domains.legal.state.case_state import LegalCaseState
+from app.memory.history import history_manager
+from app.infra.redis_client import redis_manager
+
+
+class LegalStreamCoordinator:
+    """民商事法律辩法核心流式编排器（支持 LangGraph HITL 中断与中继恢复）"""
+
+    def __init__(self):
+        self._checkpointer = MemorySaver()
+        self._graph = build_legal_graph(checkpointer=self._checkpointer, enable_hitl=True)
+
+    def _detect_cause(self, message: str) -> str:
+        sales_keywords = ["买卖", "货款", "交货", "收货", "产品", "货物", "采购", "标的物"]
+        if any(kw in message for kw in sales_keywords):
+            return "买卖合同纠纷"
+        return "民间借贷纠纷"
+
+    async def coordinate_legal_stream(
+        self,
+        *,
+        session_id: str,
+        message: str,
+    ) -> AsyncGenerator[str, None]:
+        session_lock_key = f"session:in_flight:{session_id}"
+        with redis_manager.dist_lock(session_lock_key, timeout=120) as acquired:
+            if acquired is False:
+                logger.warning(f"⚠️ [法律会话并发拦截] 会话 {session_id} 正在执行推演，拒绝并发请求。")
+                yield "[[[STATUS: 正在处理上一轮法律辩法推演，请勿重复提交...]]]\n\n"
+                yield "⚠️ 当前会话已有法律推演正在进行中，请等待上一轮完成后再发起新问题。"
+                return
+
+            config = {"configurable": {"thread_id": session_id}}
+            snapshot = await self._graph.aget_state(config)
+            is_resuming = bool(snapshot and snapshot.next)
+
+            cause = self._detect_cause(message)
+            if is_resuming and snapshot.values:
+                cause = (snapshot.values.get("metadata") or {}).get("cause", cause)
+
+            yield "[[[ENGINE:Argus-Legal-Agent]]]"
+            yield "[[[VERSION:Argus-Legal-v1.1]]]\n\n"
+            if is_resuming:
+                yield "[[[STATUS: 🔄 已接收补充材料，正在恢复辩法推演...]]]\n\n"
+                graph_input: Any = Command(resume=message)
+            else:
+                yield "[[[STATUS: ⚖️ 正在分析民商事案件事实与争议焦点...]]]\n\n"
+                graph_input = LegalCaseState(
+                    thread_id=session_id,
+                    messages=[],
+                    metadata={"cause": cause, "user_question": message},
+                    current_step="INIT",
+                    error_log=None,
+                    retry_count=0,
+                    is_awaiting_human=False,
+                    case_facts=[],
+                    evidence_items=[],
+                    dispute_foci=[],
+                    active_focus_id=None,
+                    dialectic_history=[],
+                    final_disposition=None,
+                    missing_evidence=[],
+                )
+
+            ai_response_content = ""
+            token_usage: Dict[str, Any] = {"prompt": 0, "completion": 0, "model_id": "Argus-Legal"}
+
+            try:
+                async for event in self._graph.astream(graph_input, config):
+                    for node_name, node_output in event.items():
+                        if not isinstance(node_output, dict):
+                            continue
+                        meta = node_output.get("metadata") or {}
+                        if isinstance(meta.get("token_usage"), dict):
+                            token_usage = meta["token_usage"]
+
+                        if node_name == "ALIGNER":
+                            yield "[[[STATUS: 📋 客观事实提取与证据核验完成...]]]\n\n"
+                            facts = node_output.get("case_facts", [])
+                            evidence = node_output.get("evidence_items", [])
+                            missing = node_output.get("missing_evidence", [])
+
+                            facts_lines = []
+                            for f in facts:
+                                text = f.narrative if hasattr(f, "narrative") else (f.get("narrative", "") if isinstance(f, dict) else str(f))
+                                facts_lines.append(f"- 📌 **要素认定**: {text}")
+                            facts_block = "\n".join(facts_lines) if facts_lines else "- 暂无明确客观事实提取"
+
+                            ev_lines = []
+                            for e in evidence:
+                                t = e.title if hasattr(e, "title") else (e.get("title", "") if isinstance(e, dict) else str(e))
+                                etype = e.evidence_type if hasattr(e, "evidence_type") else (e.get("evidence_type", "书证") if isinstance(e, dict) else "书证")
+                                auth = e.authenticity_level if hasattr(e, "authenticity_level") else (e.get("authenticity_level", "存疑") if isinstance(e, dict) else "存疑")
+                                sub = e.submission_status if hasattr(e, "submission_status") else (e.get("submission_status", "仅口头陈述提及（待提交）") if isinstance(e, dict) else "仅口头陈述提及（待提交）")
+                                ev_lines.append(f"- 📄 **凭证**: 《{t}》（类型: `{etype}` | 状态: `{sub}` | 效力: `{auth}`）")
+                            ev_block = "\n".join(ev_lines) if ev_lines else "- 尚无已提交的书面/电子证据"
+
+                            miss_block = ""
+                            if missing:
+                                miss_lines = "\n".join(f"- ❗ {m}" for m in missing)
+                                miss_block = f"\n\n**【缺失/待补充凭证】**:\n{miss_lines}"
+
+                            aligner_text = (
+                                f"### 📋 一、涉案案情事实认定与证据审查\n"
+                                f"> **审判案由**: `{cause}`\n\n"
+                                f"**【已查明事实要件】**:\n{facts_block}\n\n"
+                                f"**【证据凭证审查】**:\n{ev_block}{miss_block}\n\n---\n\n"
+                            )
+                            ai_response_content += aligner_text
+                            yield aligner_text
+                            await asyncio.sleep(0.02)
+
+                        elif node_name == "PLANNER":
+                            yield "[[[STATUS: 🎯 已锁定法定构成要件与争议焦点树...]]]\n\n"
+                            foci = node_output.get("dispute_foci", [])
+                            foci_lines = []
+                            for i, fc in enumerate(foci, 1):
+                                stmt = fc.issue_statement if hasattr(fc, "issue_statement") else (fc.get("issue_statement", "") if isinstance(fc, dict) else str(fc))
+                                statutes = fc.governing_statutes if hasattr(fc, "governing_statutes") else (fc.get("governing_statutes", []) if isinstance(fc, dict) else [])
+                                statute_str = ", ".join(statutes) if statutes else "《民法典》相关规定"
+                                foci_lines.append(f"{i}. 🎯 **争议焦点 {i}**: {stmt} *(适用法条: {statute_str})*")
+                            foci_block = "\n".join(foci_lines) if foci_lines else "- 核心要件基本无争议"
+
+                            planner_text = (
+                                f"### 🎯 二、法定构成要件与争议焦点\n"
+                                f"{foci_block}\n\n---\n\n"
+                            )
+                            ai_response_content += planner_text
+                            yield planner_text
+                            await asyncio.sleep(0.02)
+
+                        elif node_name == "DIALECTIC":
+                            yield "[[[STATUS: ⚔️ 红蓝攻防对抗完成，正在执行神经符号门禁...]]]\n\n"
+                            turns = node_output.get("dialectic_history", [])
+                            dialectic_text = "### ⚔️ 三、法庭红蓝攻防对抗推演\n"
+                            for t in turns[-1:]:
+                                p_arg = t.plaintiff_stance if hasattr(t, "plaintiff_stance") else (t.get("plaintiff_stance", "") if isinstance(t, dict) else "")
+                                d_arg = t.defendant_defense if hasattr(t, "defendant_defense") else (t.get("defendant_defense", "") if isinstance(t, dict) else "")
+                                c_strat = t.counter_strategy if hasattr(t, "counter_strategy") else (t.get("counter_strategy", "") if isinstance(t, dict) else "")
+                                dialectic_text += (
+                                    f"- 🔴 **原告攻击要件 (Plaintiff)**: {p_arg}\n"
+                                    f"- 🔵 **被告抗辩防御 (Defendant)**: {d_arg}\n"
+                                    f"- 🛡️ **诉讼突围策略 (Advise)**: {c_strat}\n\n"
+                                )
+                            dialectic_text += "---\n\n"
+                            ai_response_content += dialectic_text
+                            yield dialectic_text
+                            await asyncio.sleep(0.02)
+
+                        elif node_name == "GATE":
+                            yield "[[[STATUS: 🛡️ 神经符号门禁刚性审查完毕...]]]\n\n"
+                            passed = node_output.get("current_step") == "GATE_PASS"
+                            error_log = node_output.get("error_log")
+
+                            if not passed and error_log:
+                                gate_text = (
+                                    f"### 🛡️ 四、神经符号法理门禁审查\n"
+                                    f"> [!WARNING]\n"
+                                    f"> **法理门禁刚性拦截 / 实体法重大风险**:\n"
+                                    f"> {error_log}\n\n---\n\n"
+                                )
+                            else:
+                                gate_text = (
+                                    f"### 🛡️ 四、神经符号法理门禁审查\n"
+                                    f"> [!NOTE]\n"
+                                    f"> **神经符号法理门禁审查通过**: 诉讼时效、利息上限与禁止反言审查通过（具体证据原件效力见下述核验提示）。\n\n---\n\n"
+                                )
+                            ai_response_content += gate_text
+                            yield gate_text
+                            await asyncio.sleep(0.02)
+
+                        elif node_name == "REPORTER":
+                            yield "[[[STATUS: ⚖️ 法官终审心证评判与诉讼策略生成完毕]]]\n\n"
+                            disposition = node_output.get("final_disposition", "")
+                            reporter_text = f"{disposition}\n\n"
+                            ai_response_content += reporter_text
+                            yield reporter_text
+
+                # 检查是否触发了 HITL 人工介入中断
+                post_snapshot = await self._graph.aget_state(config)
+                if post_snapshot and post_snapshot.next:
+                    vals = post_snapshot.values or {}
+                    missing = list(vals.get("missing_evidence") or [])
+                    err = vals.get("error_log")
+                    items = []
+                    if err:
+                        items.append(f"- 🚨 **硬门禁阻塞项**: {err}")
+                    for m in missing:
+                        items.append(f"- 📎 **待补充/核验材料**: {m}")
+                    if not items:
+                        items.append("- 📎 **待核验材料**: 当前陈述提及的借条/合同/转账回单尚未提交原件核验")
+                    items_md = "\n".join(items)
+
+                    hitl_card = (
+                        f"### ⏸️ 人工介入核验：请补充缺失的证据材料\n"
+                        f"> [!IMPORTANT]\n"
+                        f"> 系统检测到关键证据缺口（或证据仅停留在口头陈述、尚未实际提交核验），已**主动中断终审心证**，请补充：\n\n"
+                        f"{items_md}\n\n"
+                        f"**请直接在下方输入框回复补充证据**（例如：`已补充提交招行银行转账电子回单及借条原件，金额20万元`）；\n"
+                        f"若暂无上述材料，请直接回复 **`跳过`**，系统将基于当前举证状态直接出具法官心证与风险提示。\n\n"
+                    )
+                    yield "[[[STATUS: ⏸️ 等待人工补充缺失证据（或回复“跳过”继续）...]]]\n\n"
+                    ai_response_content += hitl_card
+                    yield hitl_card
+
+                prompt_tok = int(token_usage.get("prompt", 0))
+                comp_tok = int(token_usage.get("completion", 0))
+                yield f"[[[RESOURCE: {{'role': 'JUDGE', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+
+                history_manager.save_turn(session_id, message, ai_response_content)
+
+                try:
+                    sys.stdout.buffer.write((ai_response_content + "\n").encode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.exception("Legal Agent 推演异常")
+                err_text = f"\n\n> [!CAUTION]\n> **法律辩法推理中断**: {str(e)}"
+                ai_response_content += err_text
+                yield err_text
+                history_manager.save_turn(session_id, message, ai_response_content)
+
+
+legal_stream_coordinator = LegalStreamCoordinator()

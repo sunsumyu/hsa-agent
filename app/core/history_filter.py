@@ -63,7 +63,10 @@ class HistoryContextFilter:
 
             filtered_parts.append(part)
 
-        return "\n\n---\n\n".join(filtered_parts)
+        # 4. [Matt Pocock Seam] 语义事实冲突仲裁与时序覆写 (Last-Write-Wins)
+        intermediate_notes = "\n\n---\n\n".join(filtered_parts)
+        from app.core.memory.conflict_arbiter import memory_conflict_arbiter
+        return memory_conflict_arbiter.resolve_note_conflicts(intermediate_notes, strip_superseded=True)
 
 # 单例导出
 history_context_filter = HistoryContextFilter()

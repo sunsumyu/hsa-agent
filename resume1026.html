@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>刘任_高级后端开发工程师_5年</title>
+  <style>
+    /* 全局与重置 */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    /* 屏幕预览模式：模拟逼真的 A4 纸张居中与阴影效果 */
+    body {
+      background-color: #525659; /* 类似专业 PDF 阅读器的深灰背景 */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      color: #222;
+      line-height: 1.5;
+      font-size: 10pt;
+      padding: 30px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* 单页 A4 容器（宽 210mm，高 297mm） */
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      height: 297mm; /* 严格固定单页 A4 高度，保证绝不溢出 */
+      background: #ffffff;
+      padding: 16mm 18mm;
+      margin-bottom: 25px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 头部信息 */
+    .header {
+      border-bottom: 2.5px solid #1a5276;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+    .name {
+      font-size: 22pt;
+      font-weight: 700;
+      color: #1a5276;
+      letter-spacing: 2px;
+    }
+    .target-role {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+    .info-bar {
+      margin-top: 6px;
+      font-size: 9.5pt;
+      color: #4a5568;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .info-bar span { display: inline-flex; align-items: center; }
+
+    /* 板块通用 */
+    .section { margin-bottom: 12px; }
+    .section-title {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #1a5276;
+      border-left: 4px solid #1a5276;
+      padding-left: 7px;
+      margin-bottom: 7px;
+      background: #f4f7fa;
+      padding-top: 2px;
+      padding-bottom: 2px;
+      border-radius: 0 3px 3px 0;
+    }
+
+    /* 列表与详情 */
+    ul { list-style-type: disc; padding-left: 17px; margin: 0; }
+    li { margin-bottom: 4px; text-align: justify; font-size: 9.5pt; color: #2d3748; }
+    li strong { color: #1a202c; }
+
+    /* 工作与项目条目 */
+    .item { margin-bottom: 8px; }
+    .item-header {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 700;
+      font-size: 10pt;
+      color: #1a202c;
+      margin-bottom: 2px;
+    }
+    .item-sub {
+      color: #4a5568;
+      font-size: 9pt;
+      margin-bottom: 4px;
+    }
+    .tag-group { margin-bottom: 5px; }
+    .tag {
+      display: inline-block;
+      background: #edf2f7;
+      color: #2b6cb0;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 8.5pt;
+      font-weight: 600;
+      margin-right: 4px;
+      margin-bottom: 2px;
+    }
+
+    /* 底部页码指示 */
+    .page-footer {
+      position: absolute;
+      bottom: 8mm;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      font-size: 8.5pt;
+      color: #a0aec0;
+    }
+
+    /* 打印与导出 PDF 专用规则 */
+    @media print {
+      body {
+        background: transparent;
+        padding: 0;
+        margin: 0;
+      }
+      .page {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 297mm !important;
+        margin: 0 !important;
+        padding: 14mm 16mm !important;
+        box-shadow: none !important;
+        page-break-after: always !important;
+      }
+      .page:last-child {
+        page-break-after: avoid !important;
+      }
+      .page-footer { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ================= 第一页 ================= -->
+  <div class="page">
+    <!-- 头部信息 -->
+    <div class="header">
+      <div class="header-top">
+        <div class="name">刘 任</div>
+        <div class="target-role">求职意向：高级后端开发工程师 / AI Agent 架构工程师</div>
+      </div>
+      <div class="info-bar">
+        <span>👨 男 ｜ 5年经验</span>
+        <span>🎓 本科 · 计算机科学与技术（桂林电子科技大学）</span>
+        <span>📍 湖南 · 长沙</span>
+        <span>📱 177-xxxx-xxxx</span>
+        <span>✉️ xxxx@qq.com</span>
+      </div>
+    </div>
+
+    <!-- 专业技能 -->
+    <div class="section">
+      <div class="section-title">专业技能</div>
+      <ul>
+        <li><strong>Java 核心底层与并发：</strong>深入掌握 JUC 并发编程（线程池参数定制、AQS 原理、CAS 原子操作）；熟悉 JVM 内存模型与 G1 垃圾回收，具备独立的线上 OOM 内存溢出与 CPU 满载问题诊断排障实战经验。</li>
+        <li><strong>微服务与架构设计：</strong>熟练使用 Spring Boot、Spring Cloud Alibaba（Nacos、Sentinel 动态限流与熔断降级）；善于运用状态机（StateMachine）、策略模式重构复杂业务流，具有 DDD（领域驱动设计）建模实践。</li>
+        <li><strong>存储与多级缓存治理：</strong>深入理解 MySQL InnoDB 索引底层原理、MVCC 隔离机制与锁机制；熟练掌握 Caffeine + Redis 二级缓存架构，熟练编写 Lua 脚本保证原子性，结合 Redisson 分布式锁与布隆过滤器解决并发超卖与缓存穿透。</li>
+        <li><strong>消息队列与服务运维：</strong>熟练使用 RabbitMQ 构建解耦链路，精通可靠投递、死信队列及延迟队列在订单关单与库存回源的应用；熟练使用 Docker 容器化编排、Nginx 反向代理及 Linux 运维。</li>
+        <li><strong>前沿技术与 AI Agent 架构落地：</strong>具备生产级 AI Agent 架构研发经验，精通 <strong>LangGraph 多智能体状态机编排与 Reflexion 自愈闭环</strong>；精通神经符号工程（基于 <code>sqlglot</code> AST 抽象语法树的安全卫士与数理矛盾检测）；熟练构建分层<strong>认知记忆系统（Cognitive Memory / RAG / 防投毒门禁）</strong>，拥有面向 ClickHouse 18GB+ 真实海量流水数据的 Text-to-SQL 落地经验。</li>
+      </ul>
+    </div>
+
+    <!-- 工作经历 -->
+    <div class="section">
+      <div class="section-title">工作经历</div>
+      <div class="item">
+        <div class="item-header">
+          <span>湖南众美健康数据科技有限公司 ｜ 研发部</span>
+          <span>2024.06 — 至今</span>
+        </div>
+        <div class="item-sub">职位：后端开发工程师 ｜ 负责省级医保智能审计 Agent 架构研发、神经符号安全门禁与认知记忆系统构建</div>
+      </div>
+      <div class="item">
+        <div class="item-header">
+          <span>深圳轻喜到家科技有限公司 ｜ 技术中心</span>
+          <span>2022.05 — 2024.04</span>
+        </div>
+        <div class="item-sub">职位：后端开发工程师 ｜ 负责核心订单履约链路、节假日高并发秒杀抢单治理与性能调优</div>
+      </div>
+      <div class="item">
+        <div class="item-header">
+          <span>群伦集团（群伦云联分公司） ｜ 信息技术部</span>
+          <span>2021.03 — 2022.05</span>
+        </div>
+        <div class="item-sub">职位：后端开发工程师 ｜ 负责教务资产中台与订单履约，主导多维统计大盘异步化性能优化</div>
+      </div>
+    </div>
+
+    <!-- 核心项目 1 -->
+    <div class="section">
+      <div class="section-title">核心项目经验</div>
+      <div class="item">
+        <div class="item-header">
+          <span>1. Argus: 医保基金全生命周期智能审计系统（省级海量结算量级）</span>
+          <span>2024.06 — 至今</span>
+        </div>
+        <div class="tag-group">
+          <span class="tag">LangGraph 多智能体</span><span class="tag">神经符号门禁 (sqlglot)</span><span class="tag">ClickHouse (18GB+)</span><span class="tag">认知记忆系统</span><span class="tag">Reflexion 自愈环</span>
+        </div>
+        <ul>
+          <li><strong>业务背景：</strong>面向国家/省级医保局监管场景，承载 <strong>18GB+ 海量结算流水</strong>穿透式监管。针对传统审计规则死板、覆盖面窄、大模型自由生成 SQL 幻觉多等核心痛点，主导研发神经符号驱动的自主审计 Agent 系统。</li>
+          <li><strong>多智能体认知解耦架构 (Plan-and-Solve)：</strong>基于 LangGraph 构建多智能体推理拓扑（Planner 意图规划 ➔ Coder 语法合成 ➔ Reflection 闭环反思 ➔ Consolidator 汇总）；结合 Checkpointer 状态机持久化机制，实现断点重试与长链路容错，复杂审计任务成功率由 <strong>85% 跃升至 95%+</strong>。</li>
+          <li><strong>自研 AST 神经符号门禁 (SQLGuardian)：</strong>为根除大模型单纯依赖 Prompt 产生的不可靠幻觉，基于 <code>sqlglot</code> 自研 AST 级防御引擎；在 ClickHouse 物理执行前，100% 静态拦截恒假矛盾谓词（如二元枚举全排除、区间倒置）及“单行伪排除反模式”，彻底杜绝全表穿透与假阳性雪崩。</li>
+          <li><strong>物理真实对齐与 Schema 注入：</strong>设计 <code>SchemaManager</code> 动态提取并同步底层 ClickHouse 物理表 Schema 与枚举契约，彻底根除字段虚构导致的 <code>Missing Column</code> 错误，SQL 首次执行成功率由 <strong>30% 飙升至 98%</strong>，SQL 召回准确率达 <strong>98%</strong>。</li>
+          <li><strong>分层认知记忆与防投毒门禁 (Cognitive Memory)：</strong>构建多级记忆体系（涵盖跨模态 CLIP/MarkItDown 感知记忆与语义经验库）；首创 Anti-Error-Replay 防投毒机制，经验入库前须经 AST 静态无矛盾校验，彻底阻断错误经验在向量检索中的自我污染。</li>
+          <li><strong>端到端性能跃升与 7 维度对账：</strong>设计 FastRoute 语义分流与高频 SQL 缓存策略，结合提示词动态压缩，平均任务延时从 <strong>45s 垂直压缩至 12s</strong>，单任务 Token 消耗降低 <strong>83%</strong>（21k+ 降至 3.5k）；输出锚定物理证据链的 7 维度 HSA-Benchmark 报告。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="page-footer">第 1 页 / 共 2 页</div>
+  </div>
+
+  <!-- ================= 第二页 ================= -->
+  <div class="page">
+    <div class="section">
+
+      <!-- 核心项目 2 -->
+      <div class="item">
+        <div class="item-header">
+          <span>2. 轻喜到家家政服务平台（高并发电商服务）</span>
+          <span>2022.05 — 2024.04</span>
+        </div>
+        <div class="tag-group">
+          <span class="tag">Spring Cloud Alibaba</span><span class="tag">Redis + Lua 防超卖</span><span class="tag">Caffeine 二级缓存</span><span class="tag">Sentinel 流控</span><span class="tag">RabbitMQ 延迟队列</span>
+        </div>
+        <ul>
+          <li><strong>项目背景：</strong>国内领先的家庭生活服务平台，涵盖客户管理、派单抢单、履约及支付结算等核心领域。支撑日常数万级订单流转及节假日保洁抢单等高并发峰值冲击。</li>
+          <li><strong>高并发抢单与防超卖：</strong>针对大促节假日保洁秒杀抢单，设计落地 <strong>Lua 脚本 + Redis 原子操作</strong> 完成库存预扣减，结合 Redisson 分布式锁保障幂等性，成功抗住峰值 <strong>QPS 1000+</strong> 流量冲击，大促期间零超卖、零故障。</li>
+          <li><strong>多级缓存与冷启动治理：</strong>针对首页分类与权限高频查询，搭建 <strong>Caffeine + Redis 二级缓存</strong> 架构并配合缓存预热，规避冷启动冲击，接口 TP99 从 <strong>200ms 降至 50ms</strong>。</li>
+          <li><strong>高可用防御治理：</strong>前置引入 Redisson 布隆过滤器拦截非法参数，降低缓存穿透风险 <strong>90%</strong>；配置 Sentinel 动态限流与熔断规则，异常请求拦截率达 <strong>95%+</strong>。</li>
+          <li><strong>订单生命周期与回源：</strong>利用 RabbitMQ 延迟队列优雅处理超时未支付订单的自动关单与库存回源，解耦主业务链路，系统整体吞吐量提升 <strong>35%</strong>。</li>
+        </ul>
+      </div>
+
+      <!-- 核心项目 3 -->
+      <div class="item" style="margin-top: 22px;">
+        <div class="item-header">
+          <span>3. 群伦集团（群伦云联分公司） ｜ 工程职业技能培训平台</span>
+          <span>2021.03 — 2022.05</span>
+        </div>
+        <div class="tag-group">
+          <span class="tag">Spring Boot</span><span class="tag">MySQL 慢SQL治理</span><span class="tag">Redis ZSET</span><span class="tag">CompletableFuture 异步编排</span>
+        </div>
+        <ul>
+          <li><strong>项目背景：</strong>面向工程行业的职业技能培训生态平台，提供在线学习、直播互动、题库考试一站式服务，集成 RBAC 权限体系与微服务链路监控。</li>
+          <li><strong>海量学员实时积分榜单：</strong>基于 Redis ZSET 数据结构设计并落地高并发排行榜方案，异步实时更新百万级学员学习进度与积分排名，彻底解决关系型数据库单表海量排序的 CPU 瓶颈。</li>
+          <li><strong>复杂大盘聚合接口性能调优：</strong>针对传统串行查询导致的长尾接口严重延迟，引入 CompletableFuture 异步多线程并行编排指标计算，合理调优隔离线程池，核心统计接口平均响应时间从 <strong>3s 压缩至 1s 内</strong>。</li>
+          <li><strong>百万级题库检索与慢 SQL 深度治理：</strong>针对教务中心题库多维检索导致的深分页慢查询问题，利用 <code>EXPLAIN</code> 分析执行计划，重构覆盖索引并采用<strong>子查询延迟关联</strong>消除大量回表开销，核心查询接口 P95 响应从 <strong>1.8s 压缩至 180ms</strong>。</li>
+        </ul>
+      </div>
+    </div>
+
+
+
+    <div class="page-footer">第 2 页 / 共 2 页</div>
+  </div>
+
+</body>
+</html>

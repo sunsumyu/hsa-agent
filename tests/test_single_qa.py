@@ -3,7 +3,7 @@
 用法: python tests/test_single_qa.py
 """
 import asyncio, time, sys, os
-if sys.platform == "win32":
+if __name__ == "__main__" and sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')

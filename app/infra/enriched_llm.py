@@ -7,17 +7,28 @@ Extracted from model_manager.py. These classes add fault-awareness (anti-chat
 guard, rate-limit retry, token estimation) to ChatOpenAI and ChatGoogleGenerativeAI.
 """
 
+import os
 import asyncio
 import time
+import requests
 from loguru import logger
 from typing import Dict, List, Any
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
 
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args, **kwargs):
+        def decorator(fn):
+            return fn
+        return decorator
+
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage
 from langchain_core.outputs import ChatResult, ChatGeneration
+from langchain_core.runnables import RunnableBinding
 from typing import Dict, List, Any, Optional, Sequence, Union, Callable
 
 from app.infra.usage_tracker import usage_tracker
@@ -69,9 +80,10 @@ class ResilientChatModel(BaseChatModel):
 
         for gen in result.generations:
             msg = gen.message
-            # 1. Claude/Thinking 内容归一化
+            # 1. Claude/Thinking 内容归一化与思维链沉淀
             if isinstance(msg.content, list):
                 text_parts = []
+                thinking_parts = []
                 for item in msg.content:
                     if isinstance(item, str):
                         if item: text_parts.append(item)
@@ -80,10 +92,33 @@ class ResilientChatModel(BaseChatModel):
                             text_parts.append(item["text"])
                         elif "text" in item and item["text"]:
                             text_parts.append(item["text"])
+                        elif item.get("type") == "thinking" and item.get("thinking"):
+                            thinking_parts.append(item["thinking"])
+
+                # 沉淀思维链至 additional_kwargs 供可观测链路与审计追溯
+                if thinking_parts and not msg.additional_kwargs.get("thinking"):
+                    msg.additional_kwargs["thinking"] = "\n".join(thinking_parts)
+
                 if text_parts or not getattr(msg, "tool_calls", None):
                     msg.content = "\n".join(text_parts).strip()
 
-            # 2. Anti-Chat Guard: 过滤无意义闲聊废话
+            # 2. 空内容与思维链溢出截断门禁 (Thinking Overflow & Empty-Content Guard)
+            stop_reason = (
+                getattr(msg, "response_metadata", {}).get("stop_reason")
+                or (gen.generation_info or {}).get("stop_reason")
+            )
+            content_str = str(msg.content).strip()
+            if not content_str and not getattr(msg, "tool_calls", None) and not _is_probe:
+                if stop_reason == "max_tokens":
+                    logger.warning(f"🚫 [THINKING_OVERFLOW] 节点 {self.endpoint_id} 思考链耗尽 max_tokens 导致正文截断为空，强行切流。")
+                    endpoint_pool_manager.record_failure(self.endpoint_id, "Thinking overflow: empty content due to max_tokens.")
+                    raise ValueError(f"Thinking overflow truncated empty content from {self.endpoint_id}")
+                else:
+                    logger.warning(f"🚫 [EMPTY_OUTPUT] 节点 {self.endpoint_id} 返回空消息体，触发自动熔断切流。")
+                    endpoint_pool_manager.record_failure(self.endpoint_id, "Empty message content returned.")
+                    raise ValueError(f"Empty message content returned from {self.endpoint_id}")
+
+            # 3. Anti-Chat Guard: 过滤无意义闲聊废话
             content_str = str(msg.content)
             chatty_keywords = ["你好", "很高兴为您服务", "我是一个大语言模型", "作为一个AI", "有什么可以帮您", "抱歉"]
             if not _is_probe and any(kw in content_str for kw in chatty_keywords) and len(content_str) < 300:
@@ -102,6 +137,19 @@ class ResilientChatModel(BaseChatModel):
                     "total_tokens": in_t + out_t
                 }
 
+    def _resolve_inner(self, kwargs: Dict[str, Any]):
+        """
+        bind_tools() 返回的是 RunnableBinding(bound=原生模型, kwargs={"tools": ...})。
+        RunnableBinding 会把 `_agenerate/_generate` 属性透传给原生模型，若直接调用会静默
+        丢掉绑定的 tools 等参数，因此这里拆包并合并 kwargs (调用方显式传入的优先)。
+        """
+        inner = self.inner_model
+        merged = dict(kwargs)
+        while isinstance(inner, RunnableBinding):
+            merged = {**inner.kwargs, **merged}
+            inner = inner.bound
+        return inner, merged
+
     def _should_ignore_breaker(self, err_msg: str) -> bool:
         """400 InvalidParameter 等请求级错误不熔断节点"""
         return "InvalidParameter" in err_msg or "Invalid messages" in err_msg
@@ -110,12 +158,13 @@ class ResilientChatModel(BaseChatModel):
         self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager=None, **kwargs
     ) -> ChatResult:
         attempt = 0
+        inner, kwargs = self._resolve_inner(kwargs)
         while True:
             try:
-                if hasattr(self.inner_model, "_agenerate"):
-                    result = await self.inner_model._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+                if hasattr(inner, "_agenerate"):
+                    result = await inner._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
                 else:
-                    res_msg = await self.inner_model.ainvoke(messages, stop=stop, **kwargs)
+                    res_msg = await inner.ainvoke(messages, stop=stop, **kwargs)
                     result = ChatResult(generations=[ChatGeneration(message=res_msg)])
                 self._enrich_result(result, messages)
                 return result
@@ -141,12 +190,13 @@ class ResilientChatModel(BaseChatModel):
         self, messages: List[BaseMessage], stop: Optional[List[str]] = None, run_manager=None, **kwargs
     ) -> ChatResult:
         attempt = 0
+        inner, kwargs = self._resolve_inner(kwargs)
         while True:
             try:
-                if hasattr(self.inner_model, "_generate"):
-                    result = self.inner_model._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+                if hasattr(inner, "_generate"):
+                    result = inner._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
                 else:
-                    res_msg = self.inner_model.invoke(messages, stop=stop, **kwargs)
+                    res_msg = inner.invoke(messages, stop=stop, **kwargs)
                     result = ChatResult(generations=[ChatGeneration(message=res_msg)])
                 self._enrich_result(result, messages)
                 return result
@@ -195,6 +245,7 @@ class Reranker:
         self.api_key = os.getenv(cfg.api_key_env)
         self.base_url = os.getenv(cfg.base_url_env, "https://ark.cn-beijing.volces.com/api/v3")
 
+    @traceable(name="reranker", run_type="retriever")
     def rerank(self, query: str, documents: List[str], top_n: int = 3) -> List[Dict]:
         if not documents: return []
         

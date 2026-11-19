@@ -1,0 +1,39 @@
+cause_of_action: "买卖合同纠纷"
+governing_laws:
+  - code: "PRC_CIVIL_CODE_595"
+    name: "中华人民共和国民法典"
+    article: "第五百九十五条"
+    title: "买卖合同的定义"
+  - code: "PRC_CIVIL_CODE_620"
+    name: "中华人民共和国民法典"
+    article: "第六百二十条"
+    title: "买受人的检验义务与质量异议期"
+  - code: "PRC_CIVIL_CODE_628"
+    name: "中华人民共和国民法典"
+    article: "第六百二十八条"
+    title: "买受人支付价款的期限与条件"
+
+essential_elements:
+  - element_id: "contract_formation"
+    name: "买卖合同成立与生效"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["买卖合同原件", "采购订单", "报价单确认函", "电子交易凭证"]
+
+  - element_id: "goods_delivery"
+    name: "标的物交付与签收"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["送货单", "收货签收凭条", "过磅单", "物流承运单"]
+
+  - element_id: "inspection_and_acceptance"
+    name: "质量验收与异议期抗辩"
+    burden_of_proof: "defendant"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["质量异议函", "检测报告", "往来沟通记录"]
+
+  - element_id: "payment_obligation"
+    name: "货款支付义务与到期履行"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["对账结算确认单", "发票", "催款通知书", "银行转账记录"]

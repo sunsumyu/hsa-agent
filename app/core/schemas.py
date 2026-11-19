@@ -1,7 +1,9 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Generic, TypeVar
 from enum import Enum
 import time
+
+T = TypeVar("T")
 
 class AgentRole(str, Enum):
     PLANNER = "planner"
@@ -100,3 +102,29 @@ class ResolveRequest(BaseModel):
     finding_b: str
     keep_a: bool
     keep_b: bool
+
+
+class ApiResponse(BaseModel, Generic[T]):
+    """
+    [Matt Pocock Deep Module] 统一 API 响应信封模型 (Universal Response Envelope)
+    提供标准化的成功/失败数据包结构，自动对齐 OpenAPI Schema，并兼顾既有前端字典消费习惯。
+    """
+    ok: bool = Field(default=True, description="业务执行是否成功")
+    data: Optional[T] = Field(default=None, description="业务有效载荷数据")
+    message: Optional[str] = Field(default=None, description="状态描述或提示文本")
+    error: Optional[str] = Field(default=None, description="错误信息（仅在 ok=False 时返回）")
+    code: int = Field(default=200, description="业务状态码")
+
+    @classmethod
+    def success(cls, data: Optional[T] = None, message: str = "success") -> "ApiResponse[T]":
+        return cls(ok=True, data=data, message=message, code=200)
+
+    @classmethod
+    def fail(cls, error: str, code: int = 400, message: Optional[str] = None) -> "ApiResponse[None]":
+        return cls(ok=False, data=None, error=error, message=message or error, code=code)
+
+    @classmethod
+    def from_exception(cls, exc: Exception, code: int = 400) -> "ApiResponse[None]":
+        err_msg = str(exc) or exc.__class__.__name__
+        return cls(ok=False, data=None, error=err_msg, message=err_msg, code=code)
+

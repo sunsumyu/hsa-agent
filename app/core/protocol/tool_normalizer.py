@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, List, Optional
 import sqlglot
 
+from app.core.protocol.clickhouse_healer import ClickHouseDialectHealer
+
 @dataclass(frozen=True)
 class NormalizedToolCallResult:
     tool_calls: List[dict]
@@ -18,160 +20,13 @@ class ToolResponseNormalizer:
     
     @classmethod
     def fix_shadowing_aliases(cls, sql: str) -> str:
-        """
-        [AST 级物理语法自愈]
-        1. 修复 ClickHouse 聚合别名遮蔽物理列问题 (Code: 184 ILLEGAL_AGGREGATION)：
-           当 SELECT 中的聚合别名与 WHERE/PREWHERE 子句中使用的物理列名同名时
-           (例如 min(setl_time) AS setl_time ... WHERE setl_time >= ...)，
-           ClickHouse 会将 WHERE 中的列解析为别名（即聚合函数），从而抛出非法聚合报错。
-           本方法将同名聚合别名自动重命名为 {agg_func}_{col_name}。
-        2. 修复 ClickHouse 字面量/非纯列别名遮蔽物理列问题 (查询结果全表匹配/逻辑失效)：
-           当 SELECT 中的别名与 WHERE/PREWHERE 子句中使用的物理列名同名，
-           且该别名并非原列直接透传 (例如 '999999999999' AS psn_no ... WHERE psn_no = '999999999999')，
-           ClickHouse 会在 WHERE 中用别名表达式替代物理列计算，导致条件恒真 (如 '999999999999' = '999999999999')。
-           自愈策略：为 WHERE/PREWHERE 中的未限定物理列补齐表限定符 (如 fqz_fymx_test.psn_no)，
-           或在无明确表名时将别名安全重命名为 target_{col_name}。
-        3. 修复 ClickHouse 中文/非 ASCII 标识符裸别名语法错误 (Code: 62 SYNTAX_ERROR)：
-           大模型生成的裸中文别名 (例如 AS 费用明细总笔数) 会导致词法分析器报错。
-           自动为其包裹引号转化为安全标识符。
-        """
-        if not sql:
-            return sql
-        try:
-            from sqlglot import exp
-            parsed = sqlglot.parse_one(sql, read="clickhouse")
-            if not parsed:
-                return sql
-
-            modified = False
-            for select_node in parsed.find_all(exp.Select):
-                where_node = select_node.args.get("where")
-                prewhere_node = select_node.args.get("prewhere")
-                if not where_node and not prewhere_node:
-                    for expr in select_node.selects:
-                        if isinstance(expr, exp.Alias):
-                            raw_alias = expr.alias
-                            needs_quote = any(ord(c) > 127 for c in raw_alias) or not raw_alias.isidentifier()
-                            current_ident = expr.args.get("alias")
-                            is_already_quoted = getattr(current_ident, "quoted", False)
-                            if needs_quote and not is_already_quoted:
-                                expr.set("alias", exp.to_identifier(raw_alias, quoted=True))
-                                modified = True
-                    continue
-
-                from_node = select_node.args.get("from_") or select_node.args.get("from")
-                table_target = None
-                if from_node:
-                    tbl = from_node.find(exp.Table)
-                    if tbl:
-                        table_target = tbl.alias or tbl.name
-
-                filter_cols = set()
-                for fn in (where_node, prewhere_node):
-                    if fn:
-                        for col in fn.find_all(exp.Column):
-                            filter_cols.add(col.name.lower())
-
-                shadow_cols_to_qualify = set()
-                for expr in select_node.selects:
-                    if isinstance(expr, exp.Alias):
-                        raw_alias = expr.alias
-                        alias_name = raw_alias.lower()
-                        has_agg = bool(list(expr.find_all(exp.AggFunc)))
-                        is_literal = isinstance(expr.this, exp.Literal)
-                        is_not_plain_col = not (isinstance(expr.this, exp.Column) and expr.this.name.lower() == alias_name)
-
-                        target_alias = raw_alias
-                        if filter_cols and has_agg and (alias_name in filter_cols):
-                            agg_node = next(expr.find_all(exp.AggFunc))
-                            func_name = agg_node.key.lower() if hasattr(agg_node, "key") else "agg"
-                            target_alias = f"{func_name}_{raw_alias}"
-                            modified = True
-                        elif filter_cols and (alias_name in filter_cols) and (is_literal or is_not_plain_col):
-                            if table_target:
-                                shadow_cols_to_qualify.add(alias_name)
-                            else:
-                                target_alias = f"target_{raw_alias}"
-                                modified = True
-
-                        needs_quote = any(ord(c) > 127 for c in target_alias) or not target_alias.isidentifier()
-                        current_ident = expr.args.get("alias")
-                        is_already_quoted = getattr(current_ident, "quoted", False)
-                        if needs_quote and not is_already_quoted:
-                            expr.set("alias", exp.to_identifier(target_alias, quoted=True))
-                            modified = True
-                        elif target_alias != raw_alias:
-                            expr.set("alias", exp.to_identifier(target_alias))
-                            modified = True
-
-                if shadow_cols_to_qualify and table_target:
-                    for fn in (where_node, prewhere_node):
-                        if fn:
-                            for col in fn.find_all(exp.Column):
-                                if not col.table and col.name.lower() in shadow_cols_to_qualify:
-                                    col.set("table", exp.to_identifier(table_target))
-                                    modified = True
-
-            if modified:
-                return parsed.sql(dialect="clickhouse")
-            return sql
-        except Exception:
-            return sql
+        """[Seam 接缝委托] 委托给专门的 ClickHouseDialectHealer 深模块治理 AST"""
+        return ClickHouseDialectHealer.heal(sql)
 
     @classmethod
     def clean_sql_ast(cls, sql: str) -> str:
-        """剥离首尾残留的 Markdown 代码块、XML/DSML 闭合标签与 JSON 结构杂质，严格保护 SQL 单引号字面量并修复别名遮蔽"""
-        if not sql:
-            return ""
-
-        cand = sql.strip()
-        # 0. 前置剥除可能包裹的 markdown 代码块标签 (```sql ... ``` 或 ``` ... ```)
-        cand = re.sub(r'^```(?:sql)?\s*', '', cand, flags=re.IGNORECASE).strip()
-        cand = re.sub(r'\s*```+$', '', cand).strip()
-        cand = cand.rstrip(';； \n\r\t')
-
-        # 1. 若已完全符合 ClickHouse 语法，保留原有单引号，只剔除分号空白并自愈别名遮蔽
-        try:
-            sqlglot.parse_one(cand, read="clickhouse")
-            return cls.fix_shadowing_aliases(cand)
-        except Exception:
-            pass
-
-        # 2. 切除任何 XML / DSML / HTML 结束标签及其后内容 (匹配任意形式的 </...>)
-        cand = re.split(r'</[^>]+>', cand)[0].strip()
-
-        # 3. 剥除首尾残留的 markdown 标记
-        cand = re.sub(r'^```(?:sql)?\s*', '', cand, flags=re.IGNORECASE).strip()
-        cand = re.sub(r'\s*```+$', '', cand).strip()
-
-        # 4. 剥除末尾残留的 JSON 闭合符号与转义杂质 (严禁剥除 SQL 字符串字面量单引号 ')
-        cand = re.sub(r'["\}\]\s]+$', '', cand).strip().rstrip(';； \n\r\t')
-
-        # 再次尝试 AST 解析确认
-        try:
-            sqlglot.parse_one(cand, read="clickhouse")
-            return cls.fix_shadowing_aliases(cand)
-        except Exception:
-            pass
-
-        # 5. 容错修复：如果单引号不成对（奇数个），尝试修复末尾单引号
-        if cand.count("'") % 2 == 1:
-            if cand.endswith("'"):
-                cand_fixed = cand[:-1].strip()
-                try:
-                    sqlglot.parse_one(cand_fixed, read="clickhouse")
-                    return cls.fix_shadowing_aliases(cand_fixed)
-                except Exception:
-                    pass
-            else:
-                cand_fixed = cand + "'"
-                try:
-                    sqlglot.parse_one(cand_fixed, read="clickhouse")
-                    return cls.fix_shadowing_aliases(cand_fixed)
-                except Exception:
-                    pass
-
-        return cls.fix_shadowing_aliases(cand)
+        """[Seam 接缝委托] 委托给 ClickHouseDialectHealer 消除语法杂质与别名遮蔽"""
+        return ClickHouseDialectHealer.heal(sql)
 
     TOOL_ALIASES = {
         "write_audit_notes": "write_audit_note",
@@ -208,6 +63,30 @@ class ToolResponseNormalizer:
 
         content_str = str(raw_content) if raw_content is not None else ""
         synthesized_sql = None
+
+        # 方言 0.1: <call:tool_name{json_args}> (Claude / Custom Tool Calling 格式)
+        call_match = re.search(r"<call:(\w+)\s*(\{[\s\S]*?\})>?", content_str)
+        if call_match:
+            tname = call_match.group(1).strip()
+            tname = cls.TOOL_ALIASES.get(tname, tname)
+            try:
+                args = json.loads(call_match.group(2).strip())
+                if isinstance(args, dict) and "sql" in args:
+                    clean_s = cls.clean_sql_ast(args["sql"])
+                    if cls._is_valid_sql_ast(clean_s):
+                        args["sql"] = clean_s
+                        synthesized_sql = clean_s
+                return NormalizedToolCallResult(
+                    tool_calls=[{
+                        "name": tname,
+                        "args": args,
+                        "id": "call_syntax_synthesized"
+                    }],
+                    synthesized_sql=synthesized_sql,
+                    is_synthesized=True
+                )
+            except Exception:
+                pass
 
         # 方言 0: 工业级 DSML / XML invoke 结构解析 (如 <｜｜DSML｜｜ invoke name="...">...)
         invokes = list(re.finditer(
@@ -342,11 +221,30 @@ class ToolResponseNormalizer:
         clean = re.sub(r"--[^\n]*", "", s).strip().upper()
         if clean.startswith("DESCRIBE") or clean.startswith("DESC ") or clean.startswith("SHOW "):
             return True
+
+        # [确定性接缝安全网] 拦截系统元数据表与臆造系统表，严禁自愈合成为审计工具调用
+        forbidden_metadata_tables = ("SQLITE_MASTER", "INFORMATION_SCHEMA", "SYSTEM.TABLES", "SYSTEM.COLUMNS", "PG_CATALOG")
+        if any(fbt in clean for fbt in forbidden_metadata_tables):
+            return False
+
         try:
             parsed = sqlglot.parse_one(s, read="clickhouse")
             if parsed is None:
                 return False
             from sqlglot import exp
+            
+            # 提取所有 Table 节点进行表名合法性校验
+            tables = list(parsed.find_all(exp.Table))
+            if tables:
+                for tbl in tables:
+                    tname = tbl.name or ""
+                    # 1. 严禁中文表名（如《定点医药机构宏观月度费用统计报表》），此类多为大模型客服回复中的伪代码示例
+                    if any(ord(c) > 127 for c in tname):
+                        return False
+                    # 2. 严禁 sqlite_master 等系统表
+                    if tname.lower() in ("sqlite_master", "sqlite_sequence", "tables", "columns"):
+                        return False
+
             if isinstance(parsed, (exp.Select, exp.Union, exp.Describe)):
                 return True
             if hasattr(parsed, "this") and isinstance(parsed.this, (exp.Select, exp.Union, exp.Describe)):

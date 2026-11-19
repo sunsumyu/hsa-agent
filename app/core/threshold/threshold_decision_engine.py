@@ -42,73 +42,17 @@ class ThresholdDecisionEngine:
     3. 根据业务场景 + 异常程度 → 选择动态分位数或固定阈值
     """
 
-    _config: Dict[str, Any] = None
-
     @classmethod
     def _load_config(cls) -> Dict[str, Any]:
-        """加载配置"""
-        if cls._config is None:
-            config_path = "configs/threshold_matrix.yaml"
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    cls._config = yaml.safe_load(f)
-            else:
-                logger.warning("⚠️ [ThresholdEngine] 配置文件不存在，使用默认配置")
-                cls._config = cls._default_config()
-        return cls._config
+        """加载配置（委托 threshold_config_provider）"""
+        from .threshold_config_provider import get_threshold_config
+        return get_threshold_config()
 
     @classmethod
     def _default_config(cls) -> Dict[str, Any]:
-        """默认配置"""
-        return {
-            "business_scenarios": {
-                "PHARMACY": {
-                    "name": "药店购药",
-                    "threshold_strategy": "DYNAMIC_QUANTILE",
-                    "hard_threshold_recommended": False,
-                    "description": "定点零售药店购药场景，金额通常较低"
-                },
-                "OUTPATIENT": {
-                    "name": "门诊就医",
-                    "threshold_strategy": "DYNAMIC_QUANTILE_OR_HARD",
-                    "hard_threshold_recommended": True,
-                    "default_hard_threshold": 5000,
-                    "description": "门诊就医场景，金额中等"
-                },
-                "INPATIENT": {
-                    "name": "住院就医",
-                    "threshold_strategy": "HARD_THRESHOLD_OR_DYNAMIC",
-                    "hard_threshold_recommended": True,
-                    "default_hard_threshold": 10000,
-                    "description": "住院就医场景，金额较高"
-                }
-            },
-            "anomaly_degree_mapping": {
-                "keywords_to_degree": {
-                    "HIGH": {"quantile": 0.99, "keywords": ["排名最高", "最大", "极端"]},
-                    "MEDIUM": {"quantile": 0.95, "keywords": ["大额", "异常"]},
-                    "LOW": {"quantile": 0.90, "keywords": ["偏高"]}
-                }
-            },
-            "safety_bounds": {
-                "min_threshold_by_scenario": {
-                    "PHARMACY": 50, "OUTPATIENT": 200,
-                    "INPATIENT": 2000, "SPECIAL_DISEASE": 100
-                },
-                "max_threshold_by_scenario": {
-                    "PHARMACY": 30000, "OUTPATIENT": 80000,
-                    "INPATIENT": 300000, "SPECIAL_DISEASE": 50000
-                }
-            },
-            "fallback": {
-                "baseline_calculation_failure": {
-                    "defaults": {
-                        "PHARMACY": 300, "OUTPATIENT": 2000,
-                        "INPATIENT": 8000, "SPECIAL_DISEASE": 500
-                    }
-                }
-            }
-        }
+        """默认配置（委托 threshold_config_provider）"""
+        from .threshold_config_provider import get_default_config
+        return get_default_config()
 
     @classmethod
     def decide(
@@ -300,9 +244,9 @@ class ThresholdDecisionEngine:
 
     @classmethod
     def _get_quantile_for_degree(cls, degree: str, config: Dict[str, Any]) -> float:
-        """获取异常程度对应的分位数"""
-        degree_mapping = config.get("anomaly_degree_mapping", {}).get("keywords_to_degree", {})
-        return degree_mapping.get(degree, {}).get("quantile", 0.95)
+        """获取异常程度对应的分位数 (委托 threshold_config_provider)"""
+        from .threshold_config_provider import get_quantile_for_degree
+        return get_quantile_for_degree(degree, config)
 
     @classmethod
     def _build_baseline_sql(
@@ -312,49 +256,21 @@ class ThresholdDecisionEngine:
         config: Dict[str, Any],
         table_metadata: Optional[Dict[str, Any]] = None
     ) -> str:
-        """构建 Phase 1 基线 SQL
-
-        使用配置文件中的模板生成 SQL
-        """
-        quantile_config = config.get("quantile_strategies", {})
-        scenario_config = quantile_config.get("by_business_scenario", {}).get(
-            context.business_type, {}
-        )
-
-        # 优先使用场景特定的模板
-        template = scenario_config.get(
-            "baseline_sql_template",
-            quantile_config.get("default", {}).get(
-                "baseline_sql_template",
-                "SELECT quantile({quantile})(medfee_sumamt) AS baseline FROM {table}"
-            )
-        )
-
-        sql = template.format(
-            quantile=quantile,
-            table=context.table_name
-        )
-
-        return sql
+        """构建 Phase 1 基线 SQL (委托 threshold_config_provider)"""
+        from .threshold_config_provider import build_baseline_sql
+        return build_baseline_sql(quantile, context, config, table_metadata)
 
     @classmethod
     def _get_safety_bounds(cls, business_type: str, config: Dict[str, Any]) -> Dict[str, float]:
-        """获取安全边界"""
-        bounds = config.get("safety_bounds", {})
-        min_bounds = bounds.get("min_threshold_by_scenario", {})
-        max_bounds = bounds.get("max_threshold_by_scenario", {})
-
-        return {
-            "min": min_bounds.get(business_type, bounds.get("global_min", 10)),
-            "max": max_bounds.get(business_type, bounds.get("global_max", 1000000))
-        }
+        """获取安全边界 (委托 threshold_config_provider)"""
+        from .threshold_config_provider import get_safety_bounds
+        return get_safety_bounds(business_type, config)
 
     @classmethod
     def _get_fallback_threshold(cls, business_type: str, config: Dict[str, Any]) -> float:
-        """获取降级默认阈值"""
-        fallback = config.get("fallback", {}).get("baseline_calculation_failure", {})
-        defaults = fallback.get("defaults", {})
-        return defaults.get(business_type, 500)
+        """获取降级默认阈值 (委托 threshold_config_provider)"""
+        from .threshold_config_provider import get_fallback_threshold
+        return get_fallback_threshold(business_type, config)
 
     @classmethod
     def _build_decision_reason(
@@ -366,37 +282,9 @@ class ThresholdDecisionEngine:
         intent: ThresholdIntent,
         scenario_config: Dict[str, Any]
     ) -> str:
-        """构建决策理由"""
-        parts = []
-
-        # 业务场景
-        parts.append(
-            f"业务场景: {context.business_type}"
-            f"({scenario_config.get('name', '未知')})"
-        )
-
-        # 异常程度
-        parts.append(f"异常程度: {intent.anomaly_degree}")
-
-        # 时间粒度
-        parts.append(f"时间粒度: {context.time_granularity}")
-
-        # 决策策略
-        parts.append(f"决策策略: {strategy}")
-
-        # 阈值信息
-        if hard_threshold:
-            parts.append(f"固定阈值: {hard_threshold}元")
-
-        if quantile:
-            parts.append(f"分位数: P{int(quantile * 100)}")
-
-        # 场景描述
-        scenario_desc = scenario_config.get("reason", "")
-        if scenario_desc:
-            parts.append(f"场景说明: {scenario_desc}")
-
-        return " | ".join(parts)
+        """构建决策理由 (委托 threshold_config_provider)"""
+        from .threshold_config_provider import build_decision_reason
+        return build_decision_reason(strategy, quantile, hard_threshold, context, intent, scenario_config)
 
     @classmethod
     def _log_decision(cls, decision: ThresholdDecision):

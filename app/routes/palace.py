@@ -2,53 +2,50 @@
 app/routes/palace.py
 ====================
 MemPalace 相关端点: 证据拓扑图谱 / 记忆时间轴 / 冲突检测与解决。
-从 main.py 提取，保持 API 路径不变。
+薄控制器设计 (Thin Controller)，接入统一 ResponseEnvelope，实现细节委托给深模块:
+- graph_state_orchestrator (图状态与时间轴编排)
+- evidence_graph_manager (证据知识图谱与多会话冲突提取)
 """
 
-from fastapi import APIRouter
+from typing import Optional
+from fastapi import APIRouter, Request
 from loguru import logger
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from app.core.agent_graph import get_graph_executor
+from app.core.graph_state_orchestrator import graph_state_orchestrator
+from app.memory.entity_extractor import evidence_graph_manager
 from app.core.schemas import ResolveRequest
+from app.api.envelope import ResponseEnvelope
 
 router = APIRouter()
 
 
 @router.get("/palace/graph")
 @router.get("/ins-fqz/palace/graph")
-async def get_palace_graph(session_id: str = None):
+async def get_palace_graph(session_id: Optional[str] = None):
     """[V4.9.6] MemPalace 证据拓扑图谱：将最近推演的 Findings 解析为可视化图结构"""
-    from app.memory.entity_extractor import get_latest_graph
-    graph = get_latest_graph(session_id)
-    return graph
+    return evidence_graph_manager.get_session_graph(session_id)
 
 
 @router.get("/palace/timeline")
 @router.get("/ins-fqz/palace/timeline")
-async def get_palace_timeline(session_id: str = "default_session"):
+async def get_palace_timeline(request: Request, session_id: str = "default_session"):
     """[V4.9.6] MemPalace 记忆时间轴：获取 Agent 推演时的离散记忆切片"""
     try:
-        async with AsyncSqliteSaver.from_conn_string("audit_checkpoints.db") as saver:
-            # [Bug fix V90.0] get_graph_executor 返回 (executor, model_id) 元组, 必须解包
-            agent, _ = get_graph_executor(checkpointer=saver)
-            state_snapshot = await agent.aget_state({"configurable": {"thread_id": session_id}})
-            if state_snapshot and getattr(state_snapshot, "values", None):
-                events = state_snapshot.values.get("timeline_events", [])
-                return {"session_id": session_id, "events": list(events)}
-            return {"session_id": session_id, "events": []}
+        app_state = getattr(getattr(request, "app", None), "state", None)
+        saver = getattr(app_state, "saver", None) if app_state else None
+        events = await graph_state_orchestrator.get_timeline_events(session_id, checkpointer=saver)
+        return ResponseEnvelope.success(session_id=session_id, events=events)
     except Exception as e:
         logger.error(f"Error fetching timeline: {e}")
-        return {"session_id": session_id, "events": [], "error": str(e)}
+        return ResponseEnvelope.error(error=str(e), session_id=session_id, events=[], status_code=500)
 
 
 @router.get("/palace/conflicts")
 @router.get("/ins-fqz/palace/conflicts")
-async def api_get_conflicts():
-    """[V4.9.6] 检测当前记忆系统中的逻辑冲突"""
-    from app.memory.entity_extractor import _latest_findings
-    from app.skills.conflict_detector import detect_conflicts
-    return {"conflicts": detect_conflicts(_latest_findings)}
+async def api_get_conflicts(session_id: Optional[str] = None):
+    """[V4.9.6] 检测当前记忆系统（或指定会话）中的逻辑冲突"""
+    conflicts = evidence_graph_manager.detect_session_conflicts(session_id)
+    return ResponseEnvelope.success(conflicts=conflicts)
 
 
 @router.post("/palace/conflicts/resolve")
@@ -56,6 +53,7 @@ async def api_get_conflicts():
 async def api_resolve_conflict(req: ResolveRequest):
     """[V4.9.6] 用户手动解决证据冲突"""
     from app.skills.conflict_detector import mark_resolved
+
     mark_resolved(req.finding_a, req.keep_a)
     mark_resolved(req.finding_b, req.keep_b)
-    return {"status": "success", "message": "冲突已解决"}
+    return ResponseEnvelope.success(status="success", message="冲突已解决")

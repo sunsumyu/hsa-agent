@@ -13,8 +13,8 @@ from app.core.memory.storage.vector import VectorStorage
 from app.infra.neo4j_manager import field_kg
 
 class MetadataMappingLayer:
-    """[V110.0] 企业级“语义—物理”映射层：解决业务术语混淆及字段幻觉"""
-    def __init__(self, kb_path="configs/audit_knowledge_base.json"):
+    """[V110.0] 企业级“语义—物理”映射层：解决业务术语混淆及字段幻觉 (SSOT)"""
+    def __init__(self, kb_path: str = "configs/audit_knowledge_base.json"):
         self.kb_path = kb_path
         self.ontology = self._load_ontology()
 
@@ -30,10 +30,11 @@ class MetadataMappingLayer:
         return {"职工医保": {"physical": "insutype='310'", "caveats": "注意区分统筹与个账"}}
 
     def detect(self, text: str) -> str:
-        """识别关键词并返回避坑指南"""
+        """识别关键词（支持多候选词/拆分）并返回格式化避坑指南"""
         guides = []
         for term, meta in self.ontology.items():
-            if term in text:
+            sub_terms = term.split('/')
+            if any(st in text for st in sub_terms if st):
                 guides.append(f"### 💡 {term} 业务避坑指南\n- **物理映射建议**: {meta['physical']}\n- **风险提示**: {meta.get('caveats', '无')}")
         return "\n\n".join(guides)
 

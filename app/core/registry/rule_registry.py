@@ -11,6 +11,7 @@ app.core.registry.rule_registry — 审计规则 & SQL 模板注册器
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -18,8 +19,12 @@ import yaml
 from loguru import logger
 
 
-_CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "configs"
-_RULES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "rules"
+_REPO_ROOT = next(
+    (p for p in Path(__file__).resolve().parents if (p / "configs").is_dir()),
+    Path(__file__).resolve().parent.parent.parent.parent,
+)
+_CONFIGS_DIR = _REPO_ROOT / "configs"
+_RULES_DIR = _CONFIGS_DIR / "rules"
 
 
 # ── SQL Template Registry ─────────────────────────────────────
@@ -60,12 +65,17 @@ class SQLTemplateEntry:
 
 
 class SQLTemplateRegistry:
-    """从 rules/sql_templates.yaml 加载所有 SQL 模板。"""
+    """从 rules/sql_templates.yaml 加载所有 SQL 模板。
+
+    并发契约: 双重检查锁 + 局部构建整体替换 (与 SchemaRegistry 同款)。
+    缓存引用只被原子替换、从不清空, 读取方永远看不到中途的空缓存。
+    """
 
     def __init__(self, rules_dir: Optional[Path] = None):
         self._dir = rules_dir or _RULES_DIR
         self._cache: Dict[str, SQLTemplateEntry] = {}
         self._loaded = False
+        self._lock = threading.Lock()
 
     def get(self, rule_id: str) -> Optional[SQLTemplateEntry]:
         self._ensure_loaded()
@@ -97,35 +107,50 @@ class SQLTemplateRegistry:
         return list(self._cache.keys())
 
     def reload(self) -> None:
-        self._cache.clear()
-        self._loaded = False
-        self._ensure_loaded()
+        """强制重新加载。
+
+        与首次加载共用同一把锁; 先在锁内构建完整新缓存再整体替换引用,
+        reload 窗口内并发读取方要么看到完整旧缓存, 要么看到完整新缓存,
+        不会读到中途被清空的空缓存 (旧实现先 clear 再重载, get 会拿到 None)。
+        """
+        with self._lock:
+            self._cache = self._load_all()
+            self._loaded = True
 
     def _ensure_loaded(self) -> None:
+        """惰性加载守卫 (双重检查锁)。"""
         if self._loaded:
             return
+
+        with self._lock:
+            if self._loaded:
+                return
+            self._cache = self._load_all()
+            self._loaded = True
+
+    def _load_all(self) -> Dict[str, SQLTemplateEntry]:
+        """实际加载逻辑; 调用方必须持有 self._lock。构建局部缓存并整体返回。"""
+        cache: Dict[str, SQLTemplateEntry] = {}
 
         yaml_path = self._dir / "sql_templates.yaml"
         if not yaml_path.exists():
             logger.warning(f"[RuleRegistry] SQL templates not found: {yaml_path}")
-            self._loaded = True
-            return
+            return cache
 
         try:
             with open(yaml_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
 
             for rule_id, rule_data in data.get("templates", {}).items():
-                entry = SQLTemplateEntry(rule_id.upper(), rule_data)
-                self._cache[rule_id.upper()] = entry
+                cache[rule_id.upper()] = SQLTemplateEntry(rule_id.upper(), rule_data)
 
             logger.info(
-                f"[RuleRegistry] Loaded {len(self._cache)} SQL templates from {yaml_path}"
+                f"[RuleRegistry] Loaded {len(cache)} SQL templates from {yaml_path}"
             )
         except Exception as e:
             logger.error(f"[RuleRegistry] Failed to load SQL templates: {e}")
 
-        self._loaded = True
+        return cache
 
 
 # ── Routing Rule Registry ─────────────────────────────────────
@@ -142,20 +167,28 @@ class RoutingRuleEntry:
 
 
 class RoutingRuleRegistry:
-    """从 configs/routing_rules.yaml 加载路由规则。"""
+    """从 configs/routing_rules.yaml 加载路由规则。
+
+    并发契约: 双重检查锁 + 局部构建整体替换。
+    旧实现 _ensure_loaded 对 _rules 直接 append 且从不清空, 并发首载会产出
+    重复路由规则 (业务结果错误); reload 先 clear 再重载, 会让遍历方静默跳过元素。
+    """
 
     def __init__(self, config_path: Optional[Path] = None):
         self._path = config_path or (_CONFIGS_DIR / "routing_rules.yaml")
         self._rules: List[RoutingRuleEntry] = []
         self._loaded = False
+        self._lock = threading.Lock()
 
     def get_rules(self) -> List[RoutingRuleEntry]:
+        """返回规则快照 (浅拷贝): 调用方遍历时并发 reload 不受影响, 也无法误改注册表。"""
         self._ensure_loaded()
-        return self._rules
+        return list(self._rules)
 
     def get_rules_as_dicts(self) -> List[Dict]:
         """返回字典列表, 兼容 FastAuditRouter 现有接口。"""
         self._ensure_loaded()
+        rules = self._rules  # 引用快照读: reload 只整体替换, 迭代期间不会原地清空
         return [
             {
                 "target_id": r.target_id,
@@ -164,37 +197,48 @@ class RoutingRuleRegistry:
                 "fuzzy_groups": r.fuzzy_groups,
                 "description": r.description,
             }
-            for r in self._rules
+            for r in rules
         ]
 
     def reload(self) -> None:
-        self._rules.clear()
-        self._loaded = False
-        self._ensure_loaded()
+        """先在锁内构建完整新列表再整体替换引用, reload 窗口不暴露空列表。"""
+        with self._lock:
+            self._rules = self._load_all()
+            self._loaded = True
 
     def _ensure_loaded(self) -> None:
+        """惰性加载守卫 (双重检查锁)。"""
         if self._loaded:
             return
 
+        with self._lock:
+            if self._loaded:
+                return
+            self._rules = self._load_all()
+            self._loaded = True
+
+    def _load_all(self) -> List[RoutingRuleEntry]:
+        """实际加载逻辑; 调用方必须持有 self._lock。构建局部列表并整体返回。"""
+        rules: List[RoutingRuleEntry] = []
+
         if not self._path.exists():
             logger.warning(f"[RoutingRules] Config not found: {self._path}")
-            self._loaded = True
-            return
+            return rules
 
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
 
             for rule_data in data.get("rules", []):
-                self._rules.append(RoutingRuleEntry(rule_data))
+                rules.append(RoutingRuleEntry(rule_data))
 
             logger.info(
-                f"[RoutingRules] Loaded {len(self._rules)} routing rules from {self._path}"
+                f"[RoutingRules] Loaded {len(rules)} routing rules from {self._path}"
             )
         except Exception as e:
             logger.error(f"[RoutingRules] Failed to load routing rules: {e}")
 
-        self._loaded = True
+        return rules
 
 
 # ── 统一门面 ──────────────────────────────────────────────────

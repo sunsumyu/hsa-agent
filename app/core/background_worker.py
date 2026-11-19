@@ -19,8 +19,20 @@ class BackgroundWorker:
             max_workers=max_workers,
             thread_name_prefix="Argus-BG-Worker"
         )
-        self.loop = asyncio.get_event_loop()
+        self._loop = None
         logger.info(f"⚙️ [BackgroundWorker] 后台异步流水线已就绪 | Max Workers: {max_workers}")
+
+    @property
+    def loop(self):
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            try:
+                return asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                return loop
 
     def submit(self, func: Callable, *args, **kwargs):
         """
