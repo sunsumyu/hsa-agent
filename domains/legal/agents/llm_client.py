@@ -47,7 +47,7 @@ async def ainvoke_legal_json(
     system_prompt: str,
     user_prompt: str,
     *,
-    timeout: float = 25.0,
+    timeout: float = 5.0,
 ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     """调用 LLM 并解析为 JSON dict；失败返回 (None, {})。"""
     text, usage = await ainvoke_legal_text(system_prompt, user_prompt, timeout=timeout)
@@ -63,7 +63,7 @@ async def ainvoke_legal_text(
     system_prompt: str,
     user_prompt: str,
     *,
-    timeout: float = 25.0,
+    timeout: float = 5.0,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """调用 LLM 并返回纯文本及用量元数据；失败返回 (None, {})。"""
     try:
