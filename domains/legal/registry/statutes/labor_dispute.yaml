@@ -1,0 +1,39 @@
+cause_of_action: "劳动争议纠纷"
+governing_laws:
+  - code: "PRC_LABOR_CONTRACT_LAW_10_82"
+    name: "中华人民共和国劳动合同法"
+    article: "第十条、第八十二条"
+    title: "书面劳动合同订立与未订立二倍工资差额"
+  - code: "PRC_LABOR_CONTRACT_LAW_47_87"
+    name: "中华人民共和国劳动合同法"
+    article: "第四十七条、第八十七条"
+    title: "违法解除劳动合同赔偿金2N计算标准"
+  - code: "PRC_LABOR_DISPUTE_ARBITRATION_27"
+    name: "中华人民共和国劳动争议调解仲裁法"
+    article: "第二十七条"
+    title: "劳动仲裁一年时效与劳动关系存续期间追索劳动报酬"
+
+essential_elements:
+  - element_id: "employment_relationship_establishment"
+    name: "劳动关系确立与实际用工事实"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["工作证/厂牌", "工资发放银行流水", "打卡考勤记录", "社保个人权益记录单", "入职登记表"]
+
+  - element_id: "double_wage_for_unsigned_contract"
+    name: "未订立书面合同及二倍工资起止期"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["用人单位未提供合同证明", "入职通知书", "月度工资核算单"]
+
+  - element_id: "unlawful_termination_grounds"
+    name: "用人单位解除劳动合同事由合法性"
+    burden_of_proof: "defendant"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["解除劳动关系通知书", "规章制度民主公示及送达签收单", "重大过错处分依据"]
+
+  - element_id: "labor_arbitration_limitation"
+    name: "一年劳动争议仲裁时效合规性"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["离职证明/解除通知时间", "劳动仲裁申请受理通知书", "催要离职补偿凭据"]

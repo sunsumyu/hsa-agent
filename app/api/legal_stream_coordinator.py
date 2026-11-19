@@ -29,7 +29,13 @@ class LegalStreamCoordinator:
         self._graph = build_legal_graph(checkpointer=self._checkpointer, enable_hitl=True)
 
     def _detect_cause(self, message: str) -> str:
+        construction_keywords = ["工程", "施工", "承包", "分包", "转包", "资质", "实际施工人", "竣工", "工程款", "签证", "优先受偿权"]
+        labor_keywords = ["劳动", "辞退", "开除", "解雇", "二倍工资", "经济补偿金", "赔偿金", "加班费", "仲裁", "离职", "用人单位"]
         sales_keywords = ["买卖", "货款", "交货", "收货", "产品", "货物", "采购", "标的物"]
+        if any(kw in message for kw in construction_keywords):
+            return "建设工程施工合同纠纷"
+        if any(kw in message for kw in labor_keywords):
+            return "劳动争议纠纷"
         if any(kw in message for kw in sales_keywords):
             return "买卖合同纠纷"
         return "民间借贷纠纷"

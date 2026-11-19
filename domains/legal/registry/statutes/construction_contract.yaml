@@ -1,0 +1,45 @@
+cause_of_action: "建设工程施工合同纠纷"
+governing_laws:
+  - code: "PRC_CIVIL_CODE_791"
+    name: "中华人民共和国民法典"
+    article: "第七百九十一条"
+    title: "发包人与承包人订立建设工程合同及禁止非法转包分包"
+  - code: "PRC_CIVIL_CODE_807"
+    name: "中华人民共和国民法典"
+    article: "第八百零七条"
+    title: "建设工程价款优先受偿权"
+  - code: "SPC_CONSTRUCTION_INTERPRETATION_2021"
+    name: "最高人民法院关于审理建设工程施工合同纠纷案件适用法律问题的解释（一）"
+    article: "第一条、第四十三条"
+    title: "施工资质审查与实际施工人突破合同相对性追索工程欠款"
+
+essential_elements:
+  - element_id: "contract_validity_and_qualification"
+    name: "合同效力与施工资质审查"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["建设工程施工合同", "中标通知书", "施工企业资质证书", "安全生产许可证"]
+
+  - element_id: "project_completion_or_delivery"
+    name: "工程竣工验收合格或实际使用"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["工程竣工验收报告", "五方责任主体签字验收表", "工程交付接收单", "实际占用使用证明"]
+
+  - element_id: "settlement_and_visa_verification"
+    name: "工程量签证与造价结算依据"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["工程决算审价报告", "监理工程师工程量签证单", "设计变更确认单", "工程款对账单"]
+
+  - element_id: "actual_contractor_burden"
+    name: "实际施工人突破相对性与发包人欠付款项范围"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["班组施工承包协议", "工人工资发放表", "材料采购发票", "发包人欠付总包工程款审计报告"]
+
+  - element_id: "priority_of_construction_lien"
+    name: "工程价款优先受偿权除斥期间"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["优先受偿权主张函", "竣工日证明材料", "折价或拍卖申请书"]

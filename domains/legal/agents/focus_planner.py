@@ -39,7 +39,39 @@ class FocusPlanner:
         schema = statute_registry.get_cause_of_action(cause_of_action)
         foci: List[DisputeFocus] = []
 
-        if "合意" in user_input or "借条" in user_input or "货款" in user_input or "投资" in user_input:
+        if "建设工程" in cause_of_action or "施工" in user_input or "工程款" in user_input:
+            slice_eng = SyllogismSlice(
+                element_id="project_completion",
+                element_name="工程竣工验收与工程款结算",
+                statute_basis="民法典第791条、第807条",
+                is_satisfied=True,
+            )
+            foci.append(DisputeFocus(
+                focus_id="FOCUS-01",
+                issue_statement="建设工程施工合同效力认定、实际施工人突破相对性追索及工程款结算依据是否充分",
+                cause_of_action=cause_of_action,
+                governing_statutes=["最高人民法院关于审理建设工程施工合同纠纷案件适用法律问题的解释（一）第一条、第四十三条"],
+                elements=[slice_eng],
+                adjudication_tendency="待结合竣工验收及签证资料认定",
+                confidence_score=0.65,
+            ))
+        elif "劳动" in cause_of_action or "二倍工资" in user_input or "赔偿金" in user_input or "辞退" in user_input:
+            slice_labor = SyllogismSlice(
+                element_id="employment_relationship",
+                element_name="劳动关系与违法解除赔偿",
+                statute_basis="劳动合同法第82条、第87条",
+                is_satisfied=True,
+            )
+            foci.append(DisputeFocus(
+                focus_id="FOCUS-01",
+                issue_statement="未订立书面劳动合同二倍工资差额起止期计算及解除劳动合同事由合法性审查",
+                cause_of_action=cause_of_action,
+                governing_statutes=["中华人民共和国劳动合同法第十条、第四十七条、第八十七条"],
+                elements=[slice_labor],
+                adjudication_tendency="待用人单位举证解除合法性",
+                confidence_score=0.7,
+            ))
+        elif "合意" in user_input or "借条" in user_input or "货款" in user_input or "投资" in user_input:
             slice_consensus = SyllogismSlice(
                 element_id="consensus",
                 element_name="借贷/交易合意",
