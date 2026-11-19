@@ -144,12 +144,14 @@ async def human_evidence_node(state: LegalCaseState):
 async def reporter_node(state: LegalCaseState):
     adjudicator = JudgeAdjudicator()
     meta = dict(state.get("metadata") or {})
+    user_role = meta.get("user_role", "judge")
     disposition, usage = await adjudicator.aadjudicate(
         state.get("dialectic_history", []),
         user_question=meta.get("user_question", ""),
         cause_of_action=meta.get("cause", "民间借贷纠纷"),
         evidence_items=state.get("evidence_items", []),
         gate_error=state.get("error_log"),
+        user_role=user_role,
     )
     meta = _merge_usage(meta, usage)
     return {

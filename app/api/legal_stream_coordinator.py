@@ -40,6 +40,17 @@ class LegalStreamCoordinator:
             return "买卖合同纠纷"
         return "民间借贷纠纷"
 
+    def _detect_role(self, message: str) -> str:
+        if "【身份：原告律师】" in message or "【角色：原告律师】" in message:
+            return "plaintiff"
+        if "【身份：被告律师】" in message or "【角色：被告律师】" in message:
+            return "defendant"
+        if "【身份：企业法务】" in message or "【角色：企业法务】" in message:
+            return "corporate"
+        if "【身份：大众维权】" in message or "【角色：大众维权】" in message or "【身份：当事人】" in message:
+            return "citizen"
+        return "judge"
+
     async def coordinate_legal_stream(
         self,
         *,
@@ -59,20 +70,30 @@ class LegalStreamCoordinator:
             is_resuming = bool(snapshot and snapshot.next)
 
             cause = self._detect_cause(message)
+            role = self._detect_role(message)
             if is_resuming and snapshot.values:
-                cause = (snapshot.values.get("metadata") or {}).get("cause", cause)
+                prev_meta = snapshot.values.get("metadata") or {}
+                cause = prev_meta.get("cause", cause)
+                role = prev_meta.get("user_role", role)
 
             yield "[[[ENGINE:Argus-Legal-Agent]]]"
-            yield "[[[VERSION:Argus-Legal-v1.1]]]\n\n"
+            yield "[[[VERSION:Argus-Legal-v2.0]]]\n\n"
             if is_resuming:
                 yield "[[[STATUS: 🔄 已接收补充材料，正在恢复辩法推演...]]]\n\n"
                 graph_input: Any = Command(resume=message)
             else:
-                yield "[[[STATUS: ⚖️ 正在分析民商事案件事实与争议焦点...]]]\n\n"
+                role_status = {
+                    "plaintiff": "⚔️ 正在以【原告代理律师】视角拟定胜诉突围策略...",
+                    "defendant": "🛡️ 正在以【被告代理律师】视角挖掘原告证据硬伤与防御狙击...",
+                    "corporate": "🏢 正在以【企业法务总监】视角测算追偿可行性与草拟催告函...",
+                    "citizen": "🤝 正在以【当事人维权顾问】视角生成通俗白话指引与避坑清单...",
+                    "judge": "⚖️ 正在以【法官审判员】中立视角梳理案件事实与三段论要件...",
+                }.get(role, "⚖️ 正在分析民商事案件事实与争议焦点...")
+                yield f"[[[STATUS: {role_status}]]]\n\n"
                 graph_input = LegalCaseState(
                     thread_id=session_id,
                     messages=[],
-                    metadata={"cause": cause, "user_question": message},
+                    metadata={"cause": cause, "user_question": message, "user_role": role},
                     current_step="INIT",
                     error_log=None,
                     retry_count=0,
