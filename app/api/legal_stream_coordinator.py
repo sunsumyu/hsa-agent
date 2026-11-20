@@ -21,6 +21,7 @@ from domains.legal.agents.contract_reviewer import contract_reviewer
 from domains.legal.agents.contract_drafter import contract_drafter
 from domains.legal.agents.consultation_advisor import consultation_advisor
 from domains.legal.agents.evidence_examiner import evidence_examiner
+from domains.legal.agents.execution_advisor import execution_advisor
 from app.memory.history import history_manager
 from app.infra.redis_client import redis_manager
 
@@ -42,6 +43,8 @@ class LegalStreamCoordinator:
             return "consultation"
         if "【模式：证据质证】" in message or "【模式：质证审查】" in message or "模式：证据质证" in message or "【模式：质证】" in message:
             return "evidence_examination"
+        if "【模式：强制执行】" in message or "【模式：执行查控】" in message or "模式：强制执行" in message or "【模式：执行】" in message or "模式：执行查控" in message:
+            return "execution_advisory"
         return "dialectic"
 
 
@@ -147,6 +150,20 @@ class LegalStreamCoordinator:
                     prompt_tok = int(usage.get("prompt", 0))
                     comp_tok = int(usage.get("completion", 0))
                     yield f"\n\n[[[RESOURCE: {{'role': 'EXAMINER', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+                    history_manager.save_turn(session_id, message, text)
+                    try:
+                        sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+                    except Exception:
+                        pass
+                    return
+
+                if mode == "execution_advisory":
+                    yield "[[[STATUS: ⚡ 正在审查执行依据、排查财产线索与制定强制执行方案...]]]\n\n"
+                    text, usage = await execution_advisor.aadvise(message)
+                    yield text
+                    prompt_tok = int(usage.get("prompt", 0))
+                    comp_tok = int(usage.get("completion", 0))
+                    yield f"\n\n[[[RESOURCE: {{'role': 'EXECUTION', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
                     history_manager.save_turn(session_id, message, text)
                     try:
                         sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))

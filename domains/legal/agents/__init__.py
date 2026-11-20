@@ -6,6 +6,7 @@ from domains.legal.agents.contract_reviewer import ContractReviewer, contract_re
 from domains.legal.agents.contract_drafter import ContractDrafter, contract_drafter
 from domains.legal.agents.consultation_advisor import ConsultationAdvisor, consultation_advisor
 from domains.legal.agents.evidence_examiner import EvidenceExaminer, evidence_examiner
+from domains.legal.agents.execution_advisor import ExecutionAdvisor, execution_advisor
 
 __all__ = [
     "FactExtractor", "fact_extractor",
@@ -16,6 +17,7 @@ __all__ = [
     "ContractDrafter", "contract_drafter",
     "ConsultationAdvisor", "consultation_advisor",
     "EvidenceExaminer", "evidence_examiner",
+    "ExecutionAdvisor", "execution_advisor",
 ]
 
 

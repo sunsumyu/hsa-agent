@@ -71,11 +71,25 @@ def test_evidence_examiner_fallback():
     assert "证据链闭环度诊断" in report
 
 
+def test_execution_advisor_fallback():
+    from domains.legal.agents.execution_advisor import execution_advisor
+    prompt = "胜诉判决生效后，借款人名下无房产，只有微信零钱和几家投资公司的股权，请制定强制执行方案并追加未实缴出资股东。"
+    report = execution_advisor.advise_fallback(prompt)
+    assert "## ⚡ 【强制执行实务与财产查控方案】" in report
+    assert "2年" in report or "时效" in report
+    assert "总对总" in report
+    assert "续冻" in report
+    assert "限制消费令" in report or "限高" in report
+    assert "追加" in report
+
+
 def test_coordinator_detect_mode():
     assert legal_stream_coordinator._detect_mode("【模式：合同审查】\n审查这份合同") == "contract_review"
     assert legal_stream_coordinator._detect_mode("【模式：合同起草】\n起草借条") == "contract_draft"
     assert legal_stream_coordinator._detect_mode("【模式：诉前咨询】\n如何要回欠款") == "consultation"
     assert legal_stream_coordinator._detect_mode("【模式：证据质证】\n审查这三份证据") == "evidence_examination"
+    assert legal_stream_coordinator._detect_mode("【模式：强制执行】\n查控被执行人财产") == "execution_advisory"
+    assert legal_stream_coordinator._detect_mode("【模式：执行查控】\n申请限高老赖") == "execution_advisory"
     assert legal_stream_coordinator._detect_mode("【模式：诉讼推演】\n开庭答辩") == "dialectic"
     assert legal_stream_coordinator._detect_mode("张三向李四借款20万元逾期未还") == "dialectic"
 
