@@ -64,3 +64,21 @@ def test_coordinator_detect_mode():
     assert legal_stream_coordinator._detect_mode("【模式：诉前咨询】\n如何要回欠款") == "consultation"
     assert legal_stream_coordinator._detect_mode("【模式：诉讼推演】\n开庭答辩") == "dialectic"
     assert legal_stream_coordinator._detect_mode("张三向李四借款20万元逾期未还") == "dialectic"
+
+
+@pytest.mark.asyncio
+async def test_legal_knowledge_endpoints():
+    from app.routes.legal_chat import get_statutes, get_precedents
+    
+    # 检索法条
+    res_statutes = await get_statutes(query="利息")
+    assert "statutes" in res_statutes
+    assert len(res_statutes["statutes"]) > 0
+    assert any("民间借贷" in s["cause_of_action"] for s in res_statutes["statutes"])
+    
+    # 检索指导案例
+    res_precedents = await get_precedents(query="转账凭证")
+    assert "precedents" in res_precedents
+    assert len(res_precedents["precedents"]) > 0
+    assert "汤长龙" in res_precedents["precedents"][0]["case_name"]
+

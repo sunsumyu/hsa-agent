@@ -106,3 +106,61 @@ async def legal_chat_endpoint(req: LegalChatRequest):
             "Content-Type": "text/event-stream; charset=utf-8"
         }
     )
+
+from domains.legal.registry.statute_registry import statute_registry
+from domains.legal.registry.precedent_registry import precedent_registry
+
+@router.get("/statutes")
+async def get_statutes(query: Optional[str] = None, cause: Optional[str] = None):
+    """检索民商事法条与法定证明要件知识库"""
+    results = []
+    for cause_name, schema in statute_registry._cache.items():
+        if cause and cause != "全部" and cause not in cause_name:
+            continue
+        
+        filtered_laws = schema.governing_laws
+        filtered_elements = schema.essential_elements
+        
+        if query:
+            q = query.strip().lower()
+            filtered_laws = [
+                law for law in schema.governing_laws
+                if q in law.name.lower() or q in law.article.lower() or q in law.title.lower() or q in cause_name.lower()
+            ]
+            filtered_elements = [
+                el for el in schema.essential_elements
+                if q in el.name.lower() or any(q in ev.lower() for ev in el.accepted_evidence_types) or q in cause_name.lower()
+            ]
+            if not filtered_laws and not filtered_elements:
+                continue
+                
+        results.append({
+            "cause_of_action": cause_name,
+            "governing_laws": [l.model_dump() for l in filtered_laws],
+            "essential_elements": [e.model_dump() for e in filtered_elements]
+        })
+    return {"statutes": results}
+
+@router.get("/precedents")
+async def get_precedents(query: Optional[str] = None, cause: Optional[str] = None):
+    """检索最高人民法院指导案例与民商事司法裁判要旨知识库"""
+    results = []
+    for case in precedent_registry._cases:
+        if cause and cause != "全部" and cause not in case.cause_of_action:
+            continue
+        if query:
+            q = query.strip().lower()
+            matched = (
+                q in case.case_name.lower()
+                or q in case.case_number.lower()
+                or q in case.cause_of_action.lower()
+                or q in case.key_facts.lower()
+                or q in case.referee_summary.lower()
+                or q in case.application_rule.lower()
+                or any(q in kw.lower() for kw in case.keywords)
+            )
+            if not matched:
+                continue
+        results.append(case.model_dump())
+    return {"precedents": results}
+
