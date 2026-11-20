@@ -71,6 +71,44 @@ class FocusPlanner:
                 adjudication_tendency="待用人单位举证解除合法性",
                 confidence_score=0.7,
             ))
+        elif "交通事故" in cause_of_action or "交强险" in user_input or "交警" in user_input or "相撞" in user_input:
+            slice_traffic = SyllogismSlice(
+                element_id="insurance_compensation",
+                element_name="交强险先行全额赔偿与商业险责任比例划分",
+                statute_basis="民法典第1213条、交强险条例第21条",
+                is_satisfied=True,
+            )
+            foci.append(DisputeFocus(
+                focus_id="FOCUS-01",
+                issue_statement="机动车交通事故中承保交强险保险公司是否应在法定责任限额内先行足额赔偿（不分过错打折），以及超出部分按过错比例在商业三者险内分担",
+                cause_of_action=cause_of_action,
+                governing_statutes=[
+                    "中华人民共和国民法典第一千二百零八条、第一千二百一十三条",
+                    "最高人民法院指导案例第24号：荣宝英诉王阳、永诚财险案",
+                ],
+                elements=[slice_traffic],
+                adjudication_tendency="支持交强险限额内先行全额赔付，超出部分按主次责任分摊",
+                confidence_score=0.85,
+            ))
+        elif "租赁" in cause_of_action or "退租" in user_input or "商铺" in user_input or "租金" in user_input:
+            slice_lease = SyllogismSlice(
+                element_id="lease_termination_and_damages",
+                element_name="提前退租解约效力、押金冲抵及违约金合理性审查",
+                statute_basis="民法典第585条、第703条",
+                is_satisfied=True,
+            )
+            foci.append(DisputeFocus(
+                focus_id="FOCUS-01",
+                issue_statement="承租人提前退租解约效力认定、押金是否应当冲抵退还，以及出租人主张的违约金是否过分高于其实际空置期合理损失",
+                cause_of_action=cause_of_action,
+                governing_statutes=[
+                    "中华人民共和国民法典第五百八十五条第二款、第七百零三条",
+                    "最高人民法院关于审理城镇房屋租赁合同纠纷案件司法解释第六条",
+                ],
+                elements=[slice_lease],
+                adjudication_tendency="待结合出租人减损义务及实际空置期损失依法酌减违约金",
+                confidence_score=0.75,
+            ))
         elif "合意" in user_input or "借条" in user_input or "货款" in user_input or "投资" in user_input:
             slice_consensus = SyllogismSlice(
                 element_id="consensus",

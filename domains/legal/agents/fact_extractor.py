@@ -110,6 +110,46 @@ class FactExtractor:
                 submission_status=sub_status,
             ))
 
+        if _has_keyword_affirmatively(text, ("事故认定", "交警认定", "医疗费发票", "伤残鉴定", "交强险", "保单")):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title="交通事故责任认定书及医疗损害鉴定材料",
+                evidence_type="书证",
+                content_summary="证明侵权事实、交警责任划分比例、保险承保情况及人身损害诊疗支出",
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
+
+        if _has_keyword_affirmatively(text, ("租赁合同", "租房合同", "押金收据", "押金收条", "退租交接", "房屋交接", "钥匙移交")):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title="房屋租赁合同及退租交接凭据",
+                evidence_type="书证",
+                content_summary="证明租赁关系成立、押金交付、租期解除通知及房屋实际腾退交付状态",
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
+
+        if _has_keyword_affirmatively(text, ("竣工验收", "工程结算", "工程价款审核", "实际施工人", "挂靠")):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title="建设工程施工与竣工结算审核资料",
+                evidence_type="书证",
+                content_summary="证明建设工程五方验收合格、审定工程总造价及发承包人欠款数额",
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
+
+        if _has_keyword_affirmatively(text, ("代发工资", "工资流水", "钉钉打卡", "考勤记录", "解除通知", "离职证明", "移出工作群")):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title="劳动关系存续与单方解除用工凭证",
+                evidence_type="电子数据",
+                content_summary="证明事实劳动关系用工事实、发放工资标准及单方违法辞退事实",
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
+
         if not is_submitted and evidence_list:
             missing_list.append("上述陈述提及凭证的扫描件/原件核验材料")
 
