@@ -219,3 +219,7 @@ class FactExtractor:
 
         missing = [str(m) for m in (data.get("missing_evidence") or []) if m]
         return facts_list, evidence_list, missing, usage
+
+
+fact_extractor = FactExtractor()
+

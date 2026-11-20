@@ -20,8 +20,10 @@ from domains.legal.state.case_state import LegalCaseState
 from domains.legal.agents.contract_reviewer import contract_reviewer
 from domains.legal.agents.contract_drafter import contract_drafter
 from domains.legal.agents.consultation_advisor import consultation_advisor
+from domains.legal.agents.evidence_examiner import evidence_examiner
 from app.memory.history import history_manager
 from app.infra.redis_client import redis_manager
+
 
 
 class LegalStreamCoordinator:
@@ -38,7 +40,10 @@ class LegalStreamCoordinator:
             return "contract_draft"
         if "【模式：诉前咨询】" in message or "【模式：协商调解】" in message or "模式：诉前咨询" in message or "【模式：咨询】" in message:
             return "consultation"
+        if "【模式：证据质证】" in message or "【模式：质证审查】" in message or "模式：证据质证" in message or "【模式：质证】" in message:
+            return "evidence_examination"
         return "dialectic"
+
 
     def _detect_cause(self, message: str) -> str:
         construction_keywords = ["工程", "施工", "承包", "分包", "转包", "资质", "实际施工人", "竣工", "工程款", "签证", "优先受偿权"]
@@ -134,6 +139,21 @@ class LegalStreamCoordinator:
                     except Exception:
                         pass
                     return
+
+                if mode == "evidence_examination":
+                    yield "[[[STATUS: 📑 正在执行证据法定三性审查与举证质证推演...]]]\n\n"
+                    text, usage = await evidence_examiner.aexamine(message)
+                    yield text
+                    prompt_tok = int(usage.get("prompt", 0))
+                    comp_tok = int(usage.get("completion", 0))
+                    yield f"\n\n[[[RESOURCE: {{'role': 'EXAMINER', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+                    history_manager.save_turn(session_id, message, text)
+                    try:
+                        sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+                    except Exception:
+                        pass
+                    return
+
 
             if is_resuming:
                 yield "[[[STATUS: 🔄 已接收补充材料，正在恢复辩法推演...]]]\n\n"

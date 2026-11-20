@@ -58,12 +58,27 @@ def test_consultation_advisor_fallback():
     assert "加速到期条款" in advice
 
 
+def test_evidence_examiner_fallback():
+    from domains.legal.agents.evidence_examiner import evidence_examiner
+    sample_evidence = (
+        "原告出具借条一张载明借款20万元，并出具招商银行电子回单附言写明'借款交付'，以及双方微信催款记录。"
+    )
+    report = evidence_examiner.examine_fallback(sample_evidence)
+    assert "## 📑 【证据法定三性审查与举证质证意见表】" in report
+    assert "三性" in report or "真实性" in report
+    assert "借条" in report
+    assert "转账" in report
+    assert "证据链闭环度诊断" in report
+
+
 def test_coordinator_detect_mode():
     assert legal_stream_coordinator._detect_mode("【模式：合同审查】\n审查这份合同") == "contract_review"
     assert legal_stream_coordinator._detect_mode("【模式：合同起草】\n起草借条") == "contract_draft"
     assert legal_stream_coordinator._detect_mode("【模式：诉前咨询】\n如何要回欠款") == "consultation"
+    assert legal_stream_coordinator._detect_mode("【模式：证据质证】\n审查这三份证据") == "evidence_examination"
     assert legal_stream_coordinator._detect_mode("【模式：诉讼推演】\n开庭答辩") == "dialectic"
     assert legal_stream_coordinator._detect_mode("张三向李四借款20万元逾期未还") == "dialectic"
+
 
 
 @pytest.mark.asyncio
