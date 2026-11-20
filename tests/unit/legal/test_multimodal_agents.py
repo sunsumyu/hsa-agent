@@ -111,3 +111,21 @@ async def test_legal_knowledge_endpoints():
     assert len(res_precedents["precedents"]) > 0
     assert "汤长龙" in res_precedents["precedents"][0]["case_name"]
 
+
+@pytest.mark.asyncio
+async def test_parse_legal_document():
+    from app.routes.legal_chat import parse_legal_document, DocumentParseRequest
+    
+    req = DocumentParseRequest(
+        filename="张三借条原件_2023.pdf",
+        content="张三向李四借款20万元，借期1年，年利率12%，2023年5月10日出具。"
+    )
+    res = await parse_legal_document(req)
+    assert res["filename"] == "张三借条原件_2023.pdf"
+    assert "借条" in res["inferred_type"]
+    assert "合意" in res["chain_position"]
+    assert "20" in res["amount_str"]
+    assert "真实性" in res["three_attributes_rating"]["authenticity"]
+    assert "【物证/电子数据提取核验】" in res["formatted_evidence_text"]
+
+
