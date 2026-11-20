@@ -17,6 +17,9 @@ from loguru import logger
 
 from domains.legal.graph import build_legal_graph
 from domains.legal.state.case_state import LegalCaseState
+from domains.legal.agents.contract_reviewer import contract_reviewer
+from domains.legal.agents.contract_drafter import contract_drafter
+from domains.legal.agents.consultation_advisor import consultation_advisor
 from app.memory.history import history_manager
 from app.infra.redis_client import redis_manager
 
@@ -27,6 +30,15 @@ class LegalStreamCoordinator:
     def __init__(self):
         self._checkpointer = MemorySaver()
         self._graph = build_legal_graph(checkpointer=self._checkpointer, enable_hitl=True)
+
+    def _detect_mode(self, message: str) -> str:
+        if "【模式：合同审查】" in message or "【模式：审查】" in message or "模式：合同审查" in message:
+            return "contract_review"
+        if "【模式：合同起草】" in message or "【模式：起草】" in message or "模式：合同起草" in message:
+            return "contract_draft"
+        if "【模式：诉前咨询】" in message or "【模式：协商调解】" in message or "模式：诉前咨询" in message or "【模式：咨询】" in message:
+            return "consultation"
+        return "dialectic"
 
     def _detect_cause(self, message: str) -> str:
         construction_keywords = ["工程", "施工", "承包", "分包", "转包", "资质", "实际施工人", "竣工", "工程款", "签证", "优先受偿权"]
@@ -78,6 +90,51 @@ class LegalStreamCoordinator:
 
             yield "[[[ENGINE:Argus-Legal-Agent]]]"
             yield "[[[VERSION:Argus-Legal-v2.0]]]\n\n"
+
+            mode = self._detect_mode(message)
+            if not is_resuming and mode != "dialectic":
+                if mode == "contract_review":
+                    yield "[[[STATUS: 🔍 正在执行合同智能审查与高危红线排查...]]]\n\n"
+                    text, usage = await contract_reviewer.areview(message)
+                    yield text
+                    prompt_tok = int(usage.get("prompt", 0))
+                    comp_tok = int(usage.get("completion", 0))
+                    yield f"\n\n[[[RESOURCE: {{'role': 'REVIEWER', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+                    history_manager.save_turn(session_id, message, text)
+                    try:
+                        sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+                    except Exception:
+                        pass
+                    return
+
+                if mode == "contract_draft":
+                    yield "[[[STATUS: 📝 正在依据民法典及行业规范起草合规合同草案...]]]\n\n"
+                    text, usage = await contract_drafter.adraft(message)
+                    yield text
+                    prompt_tok = int(usage.get("prompt", 0))
+                    comp_tok = int(usage.get("completion", 0))
+                    yield f"\n\n[[[RESOURCE: {{'role': 'DRAFTER', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+                    history_manager.save_turn(session_id, message, text)
+                    try:
+                        sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+                    except Exception:
+                        pass
+                    return
+
+                if mode == "consultation":
+                    yield "[[[STATUS: 💬 正在梳理法律关系、博弈筹码与定制诉前谈判方案...]]]\n\n"
+                    text, usage = await consultation_advisor.aadvise(message)
+                    yield text
+                    prompt_tok = int(usage.get("prompt", 0))
+                    comp_tok = int(usage.get("completion", 0))
+                    yield f"\n\n[[[RESOURCE: {{'role': 'ADVISOR', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+                    history_manager.save_turn(session_id, message, text)
+                    try:
+                        sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
+                    except Exception:
+                        pass
+                    return
+
             if is_resuming:
                 yield "[[[STATUS: 🔄 已接收补充材料，正在恢复辩法推演...]]]\n\n"
                 graph_input: Any = Command(resume=message)
