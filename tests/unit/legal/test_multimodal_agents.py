@@ -94,6 +94,15 @@ def test_coordinator_detect_mode():
     assert legal_stream_coordinator._detect_mode("张三向李四借款20万元逾期未还") == "dialectic"
 
 
+def test_coordinator_detect_cause():
+    assert legal_stream_coordinator._detect_cause("原告总包起诉被告支付工程款及签证费用") == "建设工程施工合同纠纷"
+    assert legal_stream_coordinator._detect_cause("员工被违法解除劳动合同主张2N赔偿金及加班费") == "劳动争议纠纷"
+    assert legal_stream_coordinator._detect_cause("买卖合同采购钢材交付后未付剩余货款") == "买卖合同纠纷"
+    assert legal_stream_coordinator._detect_cause("商铺租期3年提前退租房东扣押金并索要租金") == "房屋租赁合同纠纷"
+    assert legal_stream_coordinator._detect_cause("交通事故交警认定对方全责索赔交强险与医疗费") == "机动车交通事故责任纠纷"
+    assert legal_stream_coordinator._detect_cause("张三向李四借款20万元并出具借条原件") == "民间借贷纠纷"
+
+
 
 @pytest.mark.asyncio
 async def test_legal_knowledge_endpoints():

@@ -52,12 +52,18 @@ class LegalStreamCoordinator:
         construction_keywords = ["工程", "施工", "承包", "分包", "转包", "资质", "实际施工人", "竣工", "工程款", "签证", "优先受偿权"]
         labor_keywords = ["劳动", "辞退", "开除", "解雇", "二倍工资", "经济补偿金", "赔偿金", "加班费", "仲裁", "离职", "用人单位"]
         sales_keywords = ["买卖", "货款", "交货", "收货", "产品", "货物", "采购", "标的物"]
+        lease_keywords = ["租赁", "租房", "商铺", "退租", "押金", "转租", "房东", "租客", "免租期", "租金"]
+        traffic_keywords = ["交通事故", "撞车", "交强险", "三者险", "商业险", "事故责任认定", "全责", "次责", "同等责任", "主责", "伤残等级"]
         if any(kw in message for kw in construction_keywords):
             return "建设工程施工合同纠纷"
         if any(kw in message for kw in labor_keywords):
             return "劳动争议纠纷"
         if any(kw in message for kw in sales_keywords):
             return "买卖合同纠纷"
+        if any(kw in message for kw in lease_keywords):
+            return "房屋租赁合同纠纷"
+        if any(kw in message for kw in traffic_keywords):
+            return "机动车交通事故责任纠纷"
         return "民间借贷纠纷"
 
     def _detect_role(self, message: str) -> str:
