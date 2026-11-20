@@ -92,7 +92,7 @@ class LegalStreamCoordinator:
             yield "[[[VERSION:Argus-Legal-v2.0]]]\n\n"
 
             mode = self._detect_mode(message)
-            if not is_resuming and mode != "dialectic":
+            if mode != "dialectic":
                 if mode == "contract_review":
                     yield "[[[STATUS: 🔍 正在执行合同智能审查与高危红线排查...]]]\n\n"
                     text, usage = await contract_reviewer.areview(message)
