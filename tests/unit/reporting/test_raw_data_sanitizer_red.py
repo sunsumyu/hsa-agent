@@ -36,3 +36,35 @@ def test_raw_data_sanitizer_heals_datetime_and_chunks():
     assert len(result) == 2
     assert "2024-03-15" in result[0]["time"]
     assert "2024-03-16" in result[1]["time"]
+
+
+def test_heals_datetime_with_microseconds():
+    # 生产日志中 16 次 ast.Call 失败的根因形态之一：微秒第 7 参数
+    from app.data.raw_data_sanitizer import RawDataSanitizer
+
+    corrupted = '{"t": datetime.datetime(2024, 3, 15, 12, 7, 45, 123456)}'
+    result = RawDataSanitizer.sanitize_and_parse(corrupted)
+    assert len(result) == 1
+    assert result[0]["t"] == "2024-03-15 12:07:45.123456"
+
+
+def test_heals_datetime_with_flat_tzinfo_tail():
+    # 根因形态之二：扁平 tzinfo 装饰尾参
+    from app.data.raw_data_sanitizer import RawDataSanitizer
+
+    corrupted = "{'t': datetime.datetime(2024, 3, 15, 12, 7, 45, tzinfo=timezone.utc), 'fee': 1}"
+    result = RawDataSanitizer.sanitize_and_parse(corrupted)
+    assert len(result) == 1
+    assert result[0]["t"] == "2024-03-15 12:07:45"
+    assert result[0]["fee"] == 1
+
+
+def test_nested_paren_tzinfo_falls_back_without_losing_row():
+    # 边界：嵌套括号尾参（timezone(timedelta(hours=8))）不做文本级重写（防跨括号误吞），
+    # 行数据经第4轨兜底救回，数值字段完整，时间值保留原始形态（不崩溃、不丢行）
+    from app.data.raw_data_sanitizer import RawDataSanitizer
+
+    corrupted = "{'t': datetime.datetime(2024, 3, 15, 12, 7, 45, tzinfo=timezone(timedelta(hours=8)))}"
+    result = RawDataSanitizer.sanitize_and_parse(corrupted)
+    assert len(result) == 1
+    assert "t" in result[0]
