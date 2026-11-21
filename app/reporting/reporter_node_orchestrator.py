@@ -62,6 +62,23 @@ def handle_synthesis_bypass(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def reconcile_evidence_counts(parsed_count: int, evidence_row_count: Optional[int]) -> Optional[str]:
+    """
+    [证据对账] 双源交叉核对: 证据通道可解析行数 (extractor 侧写入) vs 解析实得行数 (sanitizer 侧产出)。
+    返回告警消息; 一致或通道计数缺失（旧会话兼容）返回 None。
+    审计语义: 数字可以少算(可复核留痕), 不可以编造(污染对账)。
+    """
+    if evidence_row_count is None:
+        return None
+    if parsed_count < int(evidence_row_count):
+        lost = int(evidence_row_count) - parsed_count
+        return (
+            f"通道记录 {evidence_row_count} 行, 解析实得 {parsed_count} 行 "
+            f"(丢失 {lost} 行) — 建议人工复核"
+        )
+    return None
+
+
 async def orchestrate_standard_report(
     state: Dict[str, Any],
     config: Any,
@@ -72,6 +89,11 @@ async def orchestrate_standard_report(
     """
     raw_data_list = report_renderer.clean_and_parse_raw_data(state.get("raw_data"))
     hard_count, hard_sum = AuditMetricEvaluator.extract_totals(raw_data_list)
+
+    # [证据对账] 双源交叉核对, 解析丢失不留静默缺口
+    reconcile_msg = reconcile_evidence_counts(len(raw_data_list), state.get("evidence_row_count"))
+    if reconcile_msg:
+        logger.warning(f"🚨 [EVIDENCE_RECONCILE] {reconcile_msg}")
 
     # 1. 仲裁与生成审计结论 [Matt Pocock Deep Module: conclusion_orchestrator]
     llm_conclusion, is_restricted = await resolve_conclusion(

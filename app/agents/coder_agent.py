@@ -212,6 +212,7 @@ class AuditCoderAgent:
 
         return {
             "raw_data": processed["raw_data"],
+            "evidence_row_count": processed["evidence_row_count"],
             "sql_query": processed["sql_query"],
             "sql_history": processed["sql_history"], # [V178.9] 证据链持久化
             "methodology": processed["methodology"],

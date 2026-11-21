@@ -79,6 +79,7 @@ class TaskArtifacts(TypedDict, total=False):
     sql_query: str
     sql_history: Annotated[List[str], _overwrite_list]
     raw_data: str
+    evidence_row_count: int  # [证据对账] 证据通道中实际可解析的行数（与 raw_data Append-Only 同步累加）
     sql_validated: bool
     execution_trace: List[str]
     schema_hint: Optional[str]

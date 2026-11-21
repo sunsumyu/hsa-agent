@@ -61,6 +61,7 @@ class ExecutionSubState(TypedDict, total=False):
     sql_query: Optional[str]
     final_sql: Optional[str]
     raw_data: Optional[Any]
+    evidence_row_count: Optional[int]  # [\u8bc1\u636e\u5bf9\u8d26] \u8bc1\u636e\u901a\u9053\u53ef\u89e3\u6790\u884c\u6570\uff08Append-Only \u7d2f\u52a0\uff09
     sql_validated: Optional[bool]
     execution_trace: Optional[List[str]]
     temp_table: Optional[str]
@@ -254,6 +255,7 @@ async def execution_engine_node(
         "max_retries": 2,
         "sql_history": [],
         "execution_trace": list(state.get("execution_trace") or []),
+        "evidence_row_count": int(state.get("evidence_row_count") or 0),
     }
 
     # 2. 调用已编译子图
@@ -265,6 +267,7 @@ async def execution_engine_node(
         "sql_query",
         "final_sql",
         "raw_data",
+        "evidence_row_count",
         "sql_validated",
         "execution_trace",
         "temp_table",

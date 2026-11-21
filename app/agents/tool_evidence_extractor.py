@@ -23,6 +23,7 @@ from langchain_core.messages import ToolMessage
 from app.skills.probe_guard import is_probe_query
 from app.agents.evidence_truncation_policy import truncate_evidence_data
 from app.agents.core_sql_resolver import resolve_core_audit_sql
+from app.data.raw_data_sanitizer import RawDataSanitizer
 
 
 @dataclass
@@ -36,12 +37,14 @@ class ProcessedToolResults:
     execution_trace: List[str]
     has_error: bool
     error_msg: str
+    evidence_row_count: int = 0  # [证据对账] 证据通道中实际可解析的行数 (Append-Only 累加)
 
     def to_dict(self) -> Dict[str, Any]:
         """向后兼容字典接口供 LangGraph State 使用"""
         return {
             "tool_msgs": self.tool_msgs,
             "raw_data": self.raw_data,
+            "evidence_row_count": self.evidence_row_count,
             "sql_query": self.sql_query,
             "sql_history": self.sql_history,
             "methodology": self.methodology,
@@ -146,21 +149,33 @@ class ToolEvidenceExtractor:
         new_chunk = "\n---\n".join(raw_data_list) if raw_data_list else ""
         existing_raw = state.get("raw_data", "")
 
+        appended = False
         if existing_raw and new_chunk:
             if new_chunk.strip() not in existing_raw:
                 new_raw_data = f"{existing_raw}\n---\n{new_chunk}"
+                appended = True
             else:
                 new_raw_data = existing_raw
         elif new_chunk:
             new_raw_data = new_chunk
+            appended = True
         else:
             new_raw_data = existing_raw
+
+        # [证据对账] 用与 Reporter 完全相同的解析器统计通道实际可解析行数，Append-Only 累加。
+        # 截断损失由 truncate_evidence_data 的 total_records 汇总行自证；此处计数是解析丢失的对照基准。
+        carried_before = int(state.get("evidence_row_count") or 0)
+        if appended and new_chunk:
+            evidence_row_count = carried_before + len(RawDataSanitizer.sanitize_and_parse(new_chunk))
+        else:
+            evidence_row_count = carried_before
 
         final_methodology = "\n\n".join(methodologies) if methodologies else state.get("methodology", "")
 
         return ProcessedToolResults(
             tool_msgs=tool_msgs,
             raw_data=new_raw_data,
+            evidence_row_count=evidence_row_count,
             sql_query=core_sql,
             sql_history=accumulated_sql_history,
             methodology=final_methodology,
