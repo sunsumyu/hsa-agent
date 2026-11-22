@@ -7,7 +7,7 @@ Provides a completely transparent redirect for all legacy imports as files are r
   - app/core/context/
   - app/core/registry/
 - app/agents/
-- app/memory/
+- app/core/memory/
 - app/skills/
 - app/infra/
 - app/reporting/
@@ -52,11 +52,11 @@ DEPRECATED_MAPPINGS = {
     "reflection_agent": "app.agents.reflection_agent",
 
     # Memory
-    "experience": "app.memory.experience",
-    "history": "app.memory.history",
-    "entity_extractor": "app.memory.entity_extractor",
-    "message_sanitizer": "app.memory.message_sanitizer",
-    "semantic_memory": "app.memory.semantic_memory",
+    "experience": "app.core.memory.experience",
+    "history": "app.core.memory.history",
+    "entity_extractor": "app.core.memory.entity_extractor",
+    "message_sanitizer": "app.core.memory.message_sanitizer",
+    "semantic_memory": "app.core.memory.semantic_memory",
 
     # Skills
     "audit_rules": "app.skills.audit_rules",

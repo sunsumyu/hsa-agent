@@ -22,7 +22,7 @@ from domains.legal.agents.contract_drafter import contract_drafter
 from domains.legal.agents.consultation_advisor import consultation_advisor
 from domains.legal.agents.evidence_examiner import evidence_examiner
 from domains.legal.agents.execution_advisor import execution_advisor
-from app.memory.history import history_manager
+from app.core.memory.history import history_manager
 from app.infra.redis_client import redis_manager
 
 

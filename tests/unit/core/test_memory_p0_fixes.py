@@ -169,7 +169,7 @@ def test_memory_hub_periodic_gc_start_stop():
 
 def test_legacy_cognitive_memory_manager_recall_context_returns_string():
     """验证旧版 CognitiveMemoryManager.recall_context 正常返回并桥接 MemoryHub 工作记忆"""
-    from app.memory.semantic_memory import CognitiveMemoryManager
+    from app.core.memory.semantic_memory import CognitiveMemoryManager
 
     mgr = CognitiveMemoryManager()
     mgr.working.add("旧版工作记忆线索")

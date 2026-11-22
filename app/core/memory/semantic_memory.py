@@ -14,8 +14,8 @@ from langchain_core.embeddings import Embeddings
 from loguru import logger
 from app.core.memory import memory_hub
 from app.infra.redis_client import redis_manager
-from app.memory.decay_scoring import compute_decayed_score
-from app.memory.vector_adapter_factory import get_vector_adapter
+from app.core.memory.decay_scoring import compute_decayed_score
+from app.core.memory.vector_adapter_factory import get_vector_adapter
 # from sentence_transformers import SentenceTransformer, util - Lazy loaded below
 
 # ============================================================
@@ -214,7 +214,7 @@ semantic_memory_manager = cognitive_memory_manager
 # ============================================================
 # 4. 动作压缩与语义缓存层 (委托至 action_cache 深模块)
 # ============================================================
-from app.memory.action_cache import (
+from app.core.memory.action_cache import (
     ActionCacheManager,
     action_cache_manager,
     sql_cache_manager,

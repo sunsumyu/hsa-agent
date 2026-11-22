@@ -138,7 +138,7 @@ def semantic_classify_domains(user_question: str) -> List[Dict]:
     # 3. 语义向量通道 (Embedding，尽力而为容错)
     embedding_scores = []
     try:
-        from app.memory.semantic_memory import cognitive_memory_manager
+        from app.core.memory.semantic_memory import cognitive_memory_manager
         if cognitive_memory_manager.semantic:
             docs = cognitive_memory_manager.semantic.recall_expert_knowledge(user_question, top_k=3)
             for doc in docs:

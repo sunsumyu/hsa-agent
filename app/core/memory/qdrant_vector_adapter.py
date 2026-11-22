@@ -1,5 +1,5 @@
 """
-app/memory/qdrant_vector_adapter.py
+app/core/memory/qdrant_vector_adapter.py
 ===================================
 [Matt Pocock Deep Module] Qdrant Cloud 向量存储与检索适配器
 

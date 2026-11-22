@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from langchain_core.documents import Document
-from app.memory.qdrant_vector_adapter import qdrant_vector_adapter, path_to_collection_name
+from app.core.memory.qdrant_vector_adapter import qdrant_vector_adapter, path_to_collection_name
 
 class MockDeterministicEmbeddings:
     """提供非全零的测试嵌入，以在 CI / 离线模式下正确计算余弦相似度"""

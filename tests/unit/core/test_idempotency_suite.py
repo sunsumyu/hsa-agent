@@ -18,7 +18,7 @@ import tempfile
 import pytest
 from unittest.mock import MagicMock
 
-from app.memory.action_cache import ActionCacheManager
+from app.core.memory.action_cache import ActionCacheManager
 from app.core.tool_engine.models import ToolResult, ExecuteAuditSqlInput
 from app.core.tool_engine.engine import ToolEngine
 from app.core.task_pool import TaskPoolManager

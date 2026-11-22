@@ -1,5 +1,5 @@
 """
-app/memory/faiss_vector_adapter.py
+app/core/memory/faiss_vector_adapter.py
 ==================================
 [Matt Pocock Deep Module] FAISS 本地向量库持久化与检索适配器
 

@@ -19,7 +19,7 @@ from loguru import logger
 from langchain_core.messages import HumanMessage
 
 from app.orchestration.agent_graph import get_graph_executor
-from app.memory.history import history_manager
+from app.core.memory.history import history_manager
 from app.infra.usage_tracker import usage_tracker
 from app.infra.model_manager import model_manager
 from app.infra.redis_client import redis_manager

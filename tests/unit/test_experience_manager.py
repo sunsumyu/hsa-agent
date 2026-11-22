@@ -1,12 +1,12 @@
 from unittest.mock import MagicMock
 import pytest
-from app.memory.experience import ExperienceManager
+from app.core.memory.experience import ExperienceManager
 
 def test_experience_manager_anti_poisoning_rejects_contradiction(monkeypatch, tmp_path):
     """验证经验库防投毒门禁：包含恒假逻辑矛盾的 SQL 必须被拒绝入库，防止错误自强化重放"""
     # 隔离测试 pool 文件路径
     test_pool_file = str(tmp_path / "test_pool.json")
-    monkeypatch.setattr("app.memory.experience.POOL_FILE", test_pool_file)
+    monkeypatch.setattr("app.core.memory.experience.POOL_FILE", test_pool_file)
     
     mgr = ExperienceManager()
     mock_vs = MagicMock()
@@ -29,7 +29,7 @@ def test_experience_manager_anti_poisoning_rejects_contradiction(monkeypatch, tm
 def test_experience_manager_accepts_valid_golden_sql(monkeypatch, tmp_path):
     """验证合规有效的 SQL 可以正常沉淀为语义经验"""
     test_pool_file = str(tmp_path / "test_pool.json")
-    monkeypatch.setattr("app.memory.experience.POOL_FILE", test_pool_file)
+    monkeypatch.setattr("app.core.memory.experience.POOL_FILE", test_pool_file)
     
     mgr = ExperienceManager()
     valid_sql = "SELECT psn_no, sum(det_item_fee_sumamt) FROM fqz_fymx_test WHERE gend LIKE '1%' GROUP BY psn_no"

@@ -57,7 +57,7 @@ def test_evaluate_action_cache_stale_version(monkeypatch):
         def evict(self, q):
             pass
 
-    monkeypatch.setattr("app.memory.semantic_memory.action_cache_manager", MockCacheMgr())
+    monkeypatch.setattr("app.core.memory.semantic_memory.action_cache_manager", MockCacheMgr())
     result = evaluate_action_cache("排查男性妇科结算", target_prompt_ver="2.0")
     assert result is None
 
@@ -77,7 +77,7 @@ def test_evaluate_action_cache_dirty_limit_evicted(monkeypatch):
         def evict(self, q):
             evicted_keys.append(q)
 
-    monkeypatch.setattr("app.memory.semantic_memory.action_cache_manager", MockCacheMgr())
+    monkeypatch.setattr("app.core.memory.semantic_memory.action_cache_manager", MockCacheMgr())
     result = evaluate_action_cache("全量排查男性妇科", target_prompt_ver="2.0")
     assert result is None
     assert "全量排查男性妇科" in evicted_keys
@@ -97,7 +97,7 @@ def test_evaluate_action_cache_hit_valid(monkeypatch):
         def evict(self, q):
             pass
 
-    monkeypatch.setattr("app.memory.semantic_memory.action_cache_manager", MockCacheMgr())
+    monkeypatch.setattr("app.core.memory.semantic_memory.action_cache_manager", MockCacheMgr())
     result = evaluate_action_cache("核查男性妇科", target_prompt_ver="2.0")
     assert result is not None
     assert result["cache_hit"] is True

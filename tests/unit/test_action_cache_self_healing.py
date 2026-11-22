@@ -12,7 +12,7 @@ Testing Seam: ActionCacheManager.get_or_compute & contract assertion
 import os
 import pytest
 import json
-from app.memory.semantic_memory import ActionCacheManager
+from app.core.memory.semantic_memory import ActionCacheManager
 
 
 class TestActionCacheSelfHealing:

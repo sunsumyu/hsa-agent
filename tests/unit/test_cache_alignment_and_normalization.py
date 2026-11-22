@@ -1,7 +1,7 @@
 import pytest
 import os
 from langchain_core.messages import SystemMessage, HumanMessage
-from app.memory.semantic_memory import ActionCacheManager
+from app.core.memory.semantic_memory import ActionCacheManager
 from app.core.context.context_builder import ContextBuilder, ContextPacket
 
 def test_action_cache_normalization_clean_text():

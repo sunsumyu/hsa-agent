@@ -111,7 +111,7 @@ class ContextBuilder:
             structured_messages = await self._compress_messages_budget(structured_messages)
 
         # 5. Pairing Guard (工具调用配对安全网)
-        from app.memory.message_sanitizer import ensure_tool_pairing
+        from app.core.memory.message_sanitizer import ensure_tool_pairing
         structured_messages = ensure_tool_pairing(structured_messages)
 
         logger.info(f"✅ [ContextBuilder] GSSC 治理成功！共精选出 {len(selected_packets)} 个黄金上下文信息包。")
@@ -193,7 +193,7 @@ class ContextBuilder:
 
         # 2. Gather Cognitive Memories
         try:
-            from app.memory.semantic_memory import cognitive_memory_manager
+            from app.core.memory.semantic_memory import cognitive_memory_manager
             cognitive_memory_manager._init_components()
             if cognitive_memory_manager.semantic:
                 docs = cognitive_memory_manager.semantic.recall_expert_knowledge(query)

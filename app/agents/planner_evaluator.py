@@ -34,7 +34,7 @@ def evaluate_action_cache(
     if disable_cache or not user_input:
         return None
 
-    from app.memory.semantic_memory import action_cache_manager
+    from app.core.memory.semantic_memory import action_cache_manager
 
     candidate = action_cache_manager.search(user_input)
     if not candidate:

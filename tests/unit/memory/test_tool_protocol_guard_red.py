@@ -1,10 +1,10 @@
 """
-Red test for app/memory/tool_protocol_guard.py
+Red test for app/core/memory/tool_protocol_guard.py
 Testing deep module extraction of Tool Call Protocol pairing, compactor, and past turn pruning.
 """
 import pytest
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
-from app.memory.tool_protocol_guard import (
+from app.core.memory.tool_protocol_guard import (
     ensure_tool_pairing,
     prune_past_turn_tools,
     compress_tool_content,

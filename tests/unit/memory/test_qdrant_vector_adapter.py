@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from langchain_core.documents import Document
 
-from app.memory.qdrant_vector_adapter import (
+from app.core.memory.qdrant_vector_adapter import (
     QdrantVectorAdapter,
     path_to_collection_name,
 )
@@ -12,7 +12,7 @@ def test_path_to_collection_name():
     assert path_to_collection_name("store\\experiences\\") == "argus_store_experiences"
     assert path_to_collection_name("simple") == "argus_simple"
 
-@patch("app.memory.qdrant_vector_adapter.QdrantClient")
+@patch("app.core.memory.qdrant_vector_adapter.QdrantClient")
 def test_qdrant_vector_adapter_add_and_search(mock_qdrant_client_cls):
     mock_client = MagicMock()
     mock_qdrant_client_cls.return_value = mock_client

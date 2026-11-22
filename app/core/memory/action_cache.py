@@ -1,5 +1,5 @@
 """
-app/memory/action_cache.py
+app/core/memory/action_cache.py
 ==========================
 [V227.0] 动作压缩与规范化语义缓存层 (Action Cache Deep Module)
 

@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.documents import Document
 
-from app.memory.experience import ExperienceManager, POOL_FILE, INDEX_PATH
+from app.core.memory.experience import ExperienceManager, POOL_FILE, INDEX_PATH
 
 
 def test_experience_module_import_clean_without_deprecation_warning():
@@ -19,8 +19,8 @@ def test_experience_module_import_clean_without_deprecation_warning():
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
         import importlib
-        import app.memory.experience
-        importlib.reload(app.memory.experience)
+        import app.core.memory.experience
+        importlib.reload(app.core.memory.experience)
         
         community_warnings = [
             w for w in recorded
@@ -33,8 +33,8 @@ def test_experience_manager_save_and_retrieve_flow(tmp_path, monkeypatch):
     """验证经验保存与语义检索格式化输出"""
     test_pool = str(tmp_path / "test_pool.json")
     test_index = str(tmp_path / "faiss_index")
-    monkeypatch.setattr("app.memory.experience.POOL_FILE", test_pool)
-    monkeypatch.setattr("app.memory.experience.INDEX_PATH", test_index)
+    monkeypatch.setattr("app.core.memory.experience.POOL_FILE", test_pool)
+    monkeypatch.setattr("app.core.memory.experience.INDEX_PATH", test_index)
 
     mgr = ExperienceManager()
     
@@ -50,7 +50,7 @@ def test_experience_manager_save_and_retrieve_flow(tmp_path, monkeypatch):
     )
     fake_adapter.search.return_value = [fake_doc]
     monkeypatch.setattr(mgr, "_adapter", fake_adapter)
-    monkeypatch.setattr("app.memory.experience.get_embeddings", lambda: MagicMock())
+    monkeypatch.setattr("app.core.memory.experience.get_embeddings", lambda: MagicMock())
 
     # 1. 保存正常有效经验
     mgr.save_audit_experience(
@@ -76,8 +76,8 @@ def test_experience_manager_pool_rebuild_index_on_demand(tmp_path, monkeypatch):
     """验证当索引丢失但 pool.json 存在时，经验管理器能自动按需触发重建"""
     test_pool = str(tmp_path / "test_pool.json")
     test_index = str(tmp_path / "faiss_index")
-    monkeypatch.setattr("app.memory.experience.POOL_FILE", test_pool)
-    monkeypatch.setattr("app.memory.experience.INDEX_PATH", test_index)
+    monkeypatch.setattr("app.core.memory.experience.POOL_FILE", test_pool)
+    monkeypatch.setattr("app.core.memory.experience.INDEX_PATH", test_index)
 
     # 事先写入 pool.json
     pool_data = [
@@ -93,7 +93,7 @@ def test_experience_manager_pool_rebuild_index_on_demand(tmp_path, monkeypatch):
     fake_adapter.search.return_value = []
     fake_adapter.add_documents.return_value = True
     monkeypatch.setattr(mgr, "_adapter", fake_adapter)
-    monkeypatch.setattr("app.memory.experience.get_embeddings", lambda: MagicMock())
+    monkeypatch.setattr("app.core.memory.experience.get_embeddings", lambda: MagicMock())
 
     # 触发检索或初始化，当没有现成索引时应从 pool 重建
     mgr.get_relevant_experience(["意图1"])

@@ -31,8 +31,8 @@ from typing import List, Dict, Any
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage, BaseMessage
 
 from app.core.context.context_builder import ContextBuilder, ContextPacket
-from app.memory.semantic_memory import WorkingMemory, ActionCacheManager, cognitive_memory_manager
-from app.memory.message_sanitizer import ensure_tool_pairing
+from app.core.memory.semantic_memory import WorkingMemory, ActionCacheManager, cognitive_memory_manager
+from app.core.memory.message_sanitizer import ensure_tool_pairing
 from app.core.schemas import RoleConfigV2
 
 # 10 轮递进式审计用户交互场景

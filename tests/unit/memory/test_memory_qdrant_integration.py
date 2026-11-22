@@ -2,8 +2,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from langchain_core.documents import Document
 
-from app.memory.experience import ExperienceManager
-from app.memory.semantic_memory import SemanticMemory
+from app.core.memory.experience import ExperienceManager
+from app.core.memory.semantic_memory import SemanticMemory
 
 def test_experience_manager_uses_vector_adapter_factory():
     mock_adapter = MagicMock()

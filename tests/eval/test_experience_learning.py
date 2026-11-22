@@ -2,7 +2,7 @@ import asyncio
 import os
 import json
 from loguru import logger
-from app.memory.experience import POOL_FILE
+from app.core.memory.experience import POOL_FILE
 
 import pytest
 

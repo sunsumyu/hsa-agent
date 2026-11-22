@@ -1,5 +1,5 @@
 """
-app/memory/experience.py
+app/core/memory/experience.py
 ========================
 [Matt Pocock Deep Module] 长期审计经验语义记忆沉淀与检索中枢
 
@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from langchain_core.documents import Document
 
-from app.memory.faiss_vector_adapter import faiss_vector_adapter, FaissVectorAdapter
-from app.memory.vector_adapter_factory import get_vector_adapter
+from app.core.memory.faiss_vector_adapter import faiss_vector_adapter, FaissVectorAdapter
+from app.core.memory.vector_adapter_factory import get_vector_adapter
 
 
 def get_embeddings():

@@ -11,8 +11,8 @@ app/consolidator_agent.py
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from loguru import logger
-from app.memory.experience import experience_manager
-from app.memory.semantic_memory import action_cache_manager
+from app.core.memory.experience import experience_manager
+from app.core.memory.semantic_memory import action_cache_manager
 
 @dataclass(frozen=True)
 class ConsolidationPayload:

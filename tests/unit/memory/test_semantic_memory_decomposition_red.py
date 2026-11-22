@@ -10,9 +10,9 @@ tests/unit/memory/test_semantic_memory_decomposition_red.py
 
 import pytest
 from datetime import datetime, timedelta
-from app.memory.decay_scoring import compute_decayed_score
-from app.memory.faiss_vector_adapter import FaissVectorAdapter
-from app.memory.semantic_memory import WorkingMemory, CognitiveMemoryManager
+from app.core.memory.decay_scoring import compute_decayed_score
+from app.core.memory.faiss_vector_adapter import FaissVectorAdapter
+from app.core.memory.semantic_memory import WorkingMemory, CognitiveMemoryManager
 
 
 def test_decay_scoring_calculation():

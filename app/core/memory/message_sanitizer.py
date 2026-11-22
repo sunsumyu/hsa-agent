@@ -16,7 +16,7 @@ app/message_sanitizer.py
     - 兼容所有 LangChain 项目
 
 使用方式：
-    from app.memory.message_sanitizer import sanitize_for_thinking_mode, trim_and_sanitize
+    from app.core.memory.message_sanitizer import sanitize_for_thinking_mode, trim_and_sanitize
 
     # 在传递消息给 LLM 前净化
     safe_msgs = sanitize_for_thinking_mode(state["messages"])
@@ -32,7 +32,7 @@ import re as _re
 from typing import List, Any, Optional, Dict
 
 # [Matt Pocock Deep Module] Tool call protocol pairing, compactor, and pruning
-from app.memory.tool_protocol_guard import (
+from app.core.memory.tool_protocol_guard import (
     compress_tool_content,
     ensure_tool_pairing,
     prune_past_turn_tools,

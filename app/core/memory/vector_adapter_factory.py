@@ -1,5 +1,5 @@
 """
-app/memory/vector_adapter_factory.py
+app/core/memory/vector_adapter_factory.py
 ====================================
 [Matt Pocock Deep Module] 向量存储适配器工厂与容灾路由
 
@@ -13,8 +13,8 @@ import os
 from typing import Any, Optional
 from loguru import logger
 
-from app.memory.faiss_vector_adapter import faiss_vector_adapter, FaissVectorAdapter
-from app.memory.qdrant_vector_adapter import qdrant_vector_adapter, QdrantVectorAdapter
+from app.core.memory.faiss_vector_adapter import faiss_vector_adapter, FaissVectorAdapter
+from app.core.memory.qdrant_vector_adapter import qdrant_vector_adapter, QdrantVectorAdapter
 
 
 def get_vector_adapter(backend: Optional[str] = None) -> Any:

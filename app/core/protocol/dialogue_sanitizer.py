@@ -14,7 +14,7 @@ app/core/protocol/dialogue_sanitizer.py
 from __future__ import annotations
 from typing import List, Any, Sequence
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
-from app.memory.message_sanitizer import ensure_tool_pairing
+from app.core.memory.message_sanitizer import ensure_tool_pairing
 
 
 def sanitize_dialogue_protocol(messages: Sequence[Any]) -> List[BaseMessage]:

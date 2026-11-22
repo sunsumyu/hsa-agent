@@ -3,8 +3,8 @@ import json
 import tempfile
 import pytest
 from unittest.mock import patch
-from app.memory.action_cache import ActionCacheManager
-from app.memory.history import HistoryManager
+from app.core.memory.action_cache import ActionCacheManager
+from app.core.memory.history import HistoryManager
 
 def test_action_cache_persist_uses_atomic_replace():
     """RED 测试：ActionCacheManager 持久化必须使用 os.replace 原子替换，杜绝半包写入风险"""

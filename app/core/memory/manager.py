@@ -246,7 +246,7 @@ class MemoryHub:
                 storage = self._get_tenant_storage(t_id)
                 
                 # 物理实体提取 (调用 LLM/NLP)
-                from app.memory.entity_extractor import extract_graph
+                from app.core.memory.entity_extractor import extract_graph
                 graph_data = extract_graph([content])
                 extracted_entities = []
                 for node in graph_data.get("nodes", []):

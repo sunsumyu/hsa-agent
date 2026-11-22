@@ -48,9 +48,9 @@ async def test_chat_stream_coordinator_yields_engine_headers_and_events():
     mock_executor.astream_events = fake_stream_events
 
     with patch("app.api.chat_stream_coordinator.get_graph_executor", return_value=(mock_executor, "deepseek-chat")):
-        with patch("app.memory.history.HistoryManager.get_history", return_value=[]):
-            with patch("app.memory.history.HistoryManager.save_turn") as mock_save:
-                with patch("app.memory.history.HistoryManager.dump_debug_history") as mock_dump:
+        with patch("app.core.memory.history.HistoryManager.get_history", return_value=[]):
+            with patch("app.core.memory.history.HistoryManager.save_turn") as mock_save:
+                with patch("app.core.memory.history.HistoryManager.dump_debug_history") as mock_dump:
                     mock_request = MagicMock(spec=Request)
                     mock_request.app.state.saver = None
                     mock_bg = MagicMock(spec=BackgroundTasks)
@@ -93,8 +93,8 @@ async def test_chat_stream_coordinator_exception_handling():
     mock_executor.astream_events = broken_stream_events
 
     with patch("app.api.chat_stream_coordinator.get_graph_executor", return_value=(mock_executor, "qwen-max")):
-        with patch("app.memory.history.HistoryManager.get_history", return_value=[]):
-            with patch("app.memory.history.HistoryManager.save_turn") as mock_save:
+        with patch("app.core.memory.history.HistoryManager.get_history", return_value=[]):
+            with patch("app.core.memory.history.HistoryManager.save_turn") as mock_save:
                 with patch("app.infra.usage_tracker.UsageTracker.record_failure") as mock_fail:
                     mock_request = MagicMock(spec=Request)
                     mock_request.app.state.saver = None

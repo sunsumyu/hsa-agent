@@ -1,5 +1,5 @@
 """
-app/memory/decay_scoring.py
+app/core/memory/decay_scoring.py
 ===========================
 [Matt Pocock Deep Module] 记忆时间衰减与相关度评分计算纯函数
 

@@ -1,9 +1,9 @@
 """
-Unit tests for app/memory/message_sanitizer.py.
+Unit tests for app/core/memory/message_sanitizer.py.
 """
 import pytest
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from app.memory.message_sanitizer import (
+from app.core.memory.message_sanitizer import (
     sanitize_for_thinking_mode,
     remove_noise,
     dedup_messages,
@@ -183,7 +183,7 @@ class TestTrimAndSanitize:
 
 class TestPrunePastTurnTools:
     def test_prunes_past_tools_keeps_active_tools(self):
-        from app.memory.message_sanitizer import prune_past_turn_tools
+        from app.core.memory.message_sanitizer import prune_past_turn_tools
         # Turn 1: Completed turn
         h1 = HumanMessage(content="Q1")
         ai1_tc = AIMessage(content="Calling sql", tool_calls=[{"name": "sql", "args": {}, "id": "tc1"}])
@@ -210,7 +210,7 @@ class TestPrunePastTurnTools:
         assert len(pruned) == 5
 
     def test_single_turn_not_pruned(self):
-        from app.memory.message_sanitizer import prune_past_turn_tools
+        from app.core.memory.message_sanitizer import prune_past_turn_tools
         h1 = HumanMessage(content="Q1")
         ai1_tc = AIMessage(content="Calling sql", tool_calls=[{"name": "sql", "args": {}, "id": "tc1"}])
         t1 = ToolMessage(content="Result 1", tool_call_id="tc1")

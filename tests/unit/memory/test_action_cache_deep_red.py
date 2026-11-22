@@ -1,7 +1,7 @@
 """
 tests/unit/memory/test_action_cache_deep_red.py
 ===============================================
-Red unit tests for ActionCacheManager deep module (app/memory/action_cache.py).
+Red unit tests for ActionCacheManager deep module (app/core/memory/action_cache.py).
 Tests:
 - normalize_question: cleans prefixes, polite phrases, punctuation, action suffixes
 - save & dual-index lookup: exact key and canonical key
@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from app.memory.action_cache import ActionCacheManager, action_cache_manager
+from app.core.memory.action_cache import ActionCacheManager, action_cache_manager
 
 
 @pytest.fixture

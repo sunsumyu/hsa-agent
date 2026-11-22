@@ -69,9 +69,9 @@ def register_services():
 
     # ── Memory ────────────────────────────────────────────────
     ServiceProvider.register("history_manager", lambda: __import__(
-        "app.memory.history", fromlist=["HistoryManager"]).HistoryManager())
+        "app.core.memory.history", fromlist=["HistoryManager"]).HistoryManager())
     ServiceProvider.register("experience_manager", lambda: __import__(
-        "app.memory.experience", fromlist=["ExperienceManager"]).ExperienceManager())
+        "app.core.memory.experience", fromlist=["ExperienceManager"]).ExperienceManager())
 
     logger.info(f"[Bootstrap] {len(ServiceProvider.list_services())} services registered")
     logger.debug(f"[Bootstrap] Services: {ServiceProvider.list_services()}")

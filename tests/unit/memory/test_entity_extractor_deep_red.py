@@ -13,7 +13,7 @@ Matt Pocock Deep Module 风格的单元测试：
 """
 
 import pytest
-from app.memory.entity_extractor import (
+from app.core.memory.entity_extractor import (
     EvidenceKnowledgeGraphManager,
     evidence_graph_manager,
     extract_graph,
@@ -128,7 +128,7 @@ def test_detect_session_conflicts_delegation():
 
 
 def test_spacy_fallback_graceful(monkeypatch):
-    from app.memory import entity_extractor
+    from app.core.memory import entity_extractor
 
     # 模拟 spacy 导入失败
     monkeypatch.setattr(entity_extractor, "_NLP", None)

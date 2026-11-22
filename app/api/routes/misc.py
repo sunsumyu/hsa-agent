@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request
 from loguru import logger
 
 from app.infra.model_manager import model_manager
-from app.memory.history import history_manager
+from app.core.memory.history import history_manager
 from app.infra.usage_tracker import usage_tracker
 from app.api.envelope import ResponseEnvelope
 
