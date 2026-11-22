@@ -25,6 +25,8 @@ class MemoryHealthInspector:
         storage_pool: Dict[str, Any],
         memory_mode: str = "LOCAL",
         redis_client: Optional[Any] = None,
+        vector_storage: Optional[Any] = None,
+        relational_storage: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """巡检并收集全域记忆存储健康度量指标"""
         now_ts = datetime.now().timestamp()
@@ -54,6 +56,10 @@ class MemoryHealthInspector:
         else:
             perceptual_status = "NOT_ATTACHED"
 
+        # 语义层 & 情景层运行期度量采集
+        sem_stats = self._safe_storage_stats(vector_storage)
+        epi_stats = self._safe_storage_stats(relational_storage)
+
         return {
             "version": "V4.6.0",
             "timestamp": datetime.now().isoformat(),
@@ -67,10 +73,12 @@ class MemoryHealthInspector:
                 "l1_semantic": {
                     "status": "ONLINE",
                     "backend": "FAISS (LOCAL) / Milvus (ENTERPRISE)",
+                    **sem_stats,
                 },
                 "l2_episodic": {
                     "status": "ONLINE",
                     "backend": "SQLite (LOCAL) / PostgreSQL (ENTERPRISE)",
+                    **epi_stats,
                 },
                 "l3_perceptual": {
                     "status": perceptual_status,
@@ -84,15 +92,45 @@ class MemoryHealthInspector:
             },
         }
 
+    @staticmethod
+    def _safe_storage_stats(storage: Optional[Any]) -> Dict[str, Any]:
+        """安全采集存储后端的条数与命中率度量"""
+        if storage is None or not hasattr(storage, "get_stats"):
+            return {}
+        try:
+            st = storage.get_stats()
+            total = int(getattr(st, "total_items", 0) or 0)
+            hits = int(getattr(st, "hits", 0) or 0)
+            misses = int(getattr(st, "misses", 0) or 0)
+            size_bytes = int(getattr(st, "storage_size_bytes", 0) or 0)
+            total_queries = hits + misses
+            hit_rate = round(hits / total_queries, 4) if total_queries > 0 else 0.0
+            return {
+                "total_items": total,
+                "hits": hits,
+                "misses": misses,
+                "hit_rate": hit_rate,
+                "storage_size_bytes": size_bytes,
+            }
+        except Exception:
+            return {}
+
     def format_summary(self, stats: Dict[str, Any]) -> str:
         """根据健康信标指标生成人类可读的 Prompt 注入紧凑摘要"""
-        l0 = stats.get("layers", {}).get("l0_working", {}).get("active", 0)
-        perceptual_status = stats.get("layers", {}).get("l3_perceptual", {}).get("status", "ONLINE")
+        layers = stats.get("layers", {})
+        l0 = layers.get("l0_working", {}).get("active", 0)
+        l1 = layers.get("l1_semantic", {})
+        l2 = layers.get("l2_episodic", {})
+        perceptual_status = layers.get("l3_perceptual", {}).get("status", "ONLINE")
         mode = stats.get("memory_mode", "LOCAL")
+
+        sem_info = f"{l1['total_items']}条(命中率{l1.get('hit_rate', 0.0):.0%})" if "total_items" in l1 else "ONLINE"
+        epi_info = f"{l2['total_items']}条" if "total_items" in l2 else "ONLINE"
         return (
             f"🧠 记忆中枢 [{mode}] | "
             f"L0工作记忆: {l0}项活跃 | "
-            f"语义/情景: ONLINE | "
+            f"语义: {sem_info} | "
+            f"情景: {epi_info} | "
             f"感知层: {perceptual_status}"
         )
 

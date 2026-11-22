@@ -335,6 +335,32 @@ class MemoryConflictArbiter:
 
         return fallback_time
 
+    def find_superseded_indices(self, new_text: str, existing_texts: List[str]) -> List[int]:
+        """
+        [长期库写入冲突检测] 对比新写入命题与既有命题列表，返回被新命题覆写/去重的旧条目索引。
+        1. 内容完全一致 -> 视为重复，覆写旧条目
+        2. 实体与属性槽位一致 (非 GLOBAL/GENERAL 泛化槽位) -> 视为时序信念修正，覆写旧条目
+        """
+        if not new_text or not existing_texts:
+            return []
+
+        now = datetime.datetime.now()
+        new_norm = new_text.strip()
+        new_ent, new_attr, _ = self._extract_semantic_slot(new_norm, now=now)
+        has_specific_slot = not (new_ent == "GLOBAL" and new_attr == "GENERAL")
+
+        superseded: List[int] = []
+        for idx, old_text in enumerate(existing_texts):
+            old_norm = (old_text or "").strip()
+            if old_norm == new_norm:
+                superseded.append(idx)
+                continue
+            if has_specific_slot:
+                old_ent, old_attr, _ = self._extract_semantic_slot(old_norm, now=now)
+                if old_ent == new_ent and old_attr == new_attr:
+                    superseded.append(idx)
+        return superseded
+
 
 # 单例导出
 memory_conflict_arbiter = MemoryConflictArbiter()

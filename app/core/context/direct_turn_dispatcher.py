@@ -273,6 +273,9 @@ class DirectTurnDispatcher:
         )
 
     def _handle_security_block(self, ctx: DirectTurnContext) -> Dict[str, Any]:
+        logger.warning(
+            f"🛡️ [SecurityBlockFastPath] 网关层快速拦截违规查询 (未进入 LLM 流水线): {ctx.user_input[:80]}"
+        )
         block_msg = (
             "🛡️ **[安全审计拦截提示]**：系统检测到输入包含高危破坏性指令（敏感 DDL / 注入字符）或越权规避指令。\n\n"
             "- **拦截原因**：依据《医疗保障基金智能审核合规安全规范》，系统已启用 AST 静态沙箱保护，严禁执行破坏性删表、元数据越权或非医保审计类指令；\n"

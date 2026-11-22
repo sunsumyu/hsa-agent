@@ -45,8 +45,15 @@ async def lifespan(app: FastAPI):
             logger.info(">>> [系统启明] 检测到今日首启，自动触发全量算力节点体检")
             usage_tracker.reset_blacklists() # 强制清除可能存在的历史误封
             asyncio.create_task(model_manager.run_health_check())
+
+        # 启动记忆中枢后台周期性三维 GC
+        from app.core.memory.manager import memory_hub
+        memory_hub.start_periodic_gc(interval_seconds=3600)
         
         yield
+
+        # 停止记忆中枢后台 GC
+        memory_hub.stop_periodic_gc()
         
         # [V39.0] 优雅离场：在 FastAPI 关机前物理固化所有观测数据
         from app.core.observability import shutdown_observability

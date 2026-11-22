@@ -61,19 +61,42 @@ class SemanticMemory:
             logger.warning(f"HyDE 生成失败: {e}")
             return ""
 
-    async def recall(self, query: str, limit: int = 12, use_hyde: bool = True, config: Any = None, tenant_id: str = "default") -> List[MemoryItem]:
+    @staticmethod
+    def _should_use_hyde(query: str, use_hyde: Optional[bool]) -> bool:
+        """动态判定是否触发 HyDE：显式参数优先，自动模式下跳过短词/纯标识符查询以降低延迟"""
+        if use_hyde is not None:
+            return use_hyde
+        import re
+        q = (query or "").strip()
+        if len(q) < 15:
+            return False
+        if re.fullmatch(r"[A-Za-z0-9_.\-]+", q):
+            return False
+        return True
+
+    async def recall(
+        self,
+        query: str,
+        limit: int = 12,
+        use_hyde: Optional[bool] = None,
+        config: Any = None,
+        tenant_id: str = "default",
+        storage: Optional[VectorStorage] = None,
+    ) -> List[MemoryItem]:
         """
         语义召回核心：HyDE 混合检索 + 动态弹性阈值。
         """
         search_query = query
-        if use_hyde:
+        if self._should_use_hyde(query, use_hyde):
             logger.info(f"🧠 [SemanticMemory] 启动 HyDE 推理增强...")
             hyde_context = await self._generate_hyde_context(query, config)
-            search_query = f"{query} {hyde_context}"
-            logger.info(f"🔍 [SemanticMemory] 混合查询载荷 (前50字): {search_query[:50]}...")
+            if hyde_context:
+                search_query = f"{query} {hyde_context}"
+                logger.info(f"🔍 [SemanticMemory] 混合查询载荷 (前50字): {search_query[:50]}...")
         
-        # 1. 向量召回 (基础上限 10)
-        results = await self.storage.search(search_query, limit=10, tenant_id=tenant_id)
+        # 1. 向量召回 (优先使用租户分片存储)
+        target_storage = storage or self.storage
+        results = await target_storage.search(search_query, limit=10, tenant_id=tenant_id)
         
         # 2. [V178.9] 图谱增强：补齐确定性语义断层
         # 针对医保高频词（妇科、性别、团伙等）进行实体扩张

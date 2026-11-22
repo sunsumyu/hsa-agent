@@ -30,12 +30,19 @@ class EpisodicMemory:
         await self.storage.add([item])
         logger.info(f"💾 [EpisodicMemory] 已固化审计情景: {question[:20]}...")
 
-    async def recall_experience(self, query: str, limit: int = 3, tenant_id: str = "default") -> List[MemoryItem]:
+    async def recall_experience(
+        self,
+        query: str,
+        limit: int = 3,
+        tenant_id: str = "default",
+        storage: Optional[RelationalStorage] = None,
+    ) -> List[MemoryItem]:
         """
         召回历史审计经验
         """
         logger.debug(f"🔍 [EpisodicMemory] 正在回溯相关经验: {query[:30]}...")
-        return await self.storage.search(query, limit=limit, tenant_id=tenant_id)
+        target_storage = storage or self.storage
+        return await target_storage.search(query, limit=limit, tenant_id=tenant_id)
 
     def format_experience_for_prompt(self, items: List[MemoryItem]) -> str:
         """

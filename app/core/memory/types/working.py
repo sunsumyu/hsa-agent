@@ -32,37 +32,49 @@ class WorkingMemory:
         self._prefix = key_prefix
         self.cache: Dict[str, Dict[str, Any]] = {}
 
-    def store(self, key: str, value: Any, ttl: int = 3600) -> None:
+    @staticmethod
+    def _scoped_key(key: str, tenant_id: str = "default") -> str:
+        """为非默认租户生成隔离键，默认租户保持原键以兼容既有行为"""
+        tid = tenant_id or "default"
+        return key if tid == "default" else f"{tid}:{key}"
+
+    def store(self, key: str, value: Any, ttl: int = 3600, tenant_id: str = "default") -> None:
         """
         工业级二级工作记忆存储
         L0: 本地进程内存 (极速响应)
         L1: Redis 分布式集群 (跨进程一致性)
         """
+        tid = tenant_id or "default"
+        scoped_key = self._scoped_key(key, tid)
+
         # 1. 物理写入 Redis (核心分布式同步层)
         try:
             underlying = getattr(self._redis, "client", self._redis)
             if underlying:
-                full_key = f"{self._prefix}{key}"
+                full_key = f"{self._prefix}{scoped_key}"
                 serialized_val = json.dumps(value, ensure_ascii=False)
                 underlying.setex(full_key, ttl, serialized_val)
         except Exception as e:
             logger.warning(f"⚠️ [WorkingMemory] Redis 同步失败，降级使用本地存储: {e}")
 
         # 2. 同步更新本地 L0 缓存
-        self.cache[key] = {
+        self.cache[scoped_key] = {
             "val": value,
             "expire": datetime.now().timestamp() + ttl,
+            "tenant_id": tid,
         }
 
-    def recall(self, key: str) -> Optional[Any]:
+    def recall(self, key: str, tenant_id: str = "default") -> Optional[Any]:
         """
         分布式工作记忆召回
         执行 L0 -> L1 穿透检索与反向预热
         """
         now_ts = datetime.now().timestamp()
+        tid = tenant_id or "default"
+        scoped_key = self._scoped_key(key, tid)
 
         # 路径 A: 命中本地有效 L0
-        item = self.cache.get(key)
+        item = self.cache.get(scoped_key)
         if item and item.get("expire", 0) > now_ts:
             return item["val"]
 
@@ -70,14 +82,15 @@ class WorkingMemory:
         try:
             underlying = getattr(self._redis, "client", self._redis)
             if underlying:
-                full_key = f"{self._prefix}{key}"
+                full_key = f"{self._prefix}{scoped_key}"
                 data = underlying.get(full_key)
                 if data:
                     val = json.loads(data)
                     # 反向补回本地 L0 提高后续命中率
-                    self.cache[key] = {
+                    self.cache[scoped_key] = {
                         "val": val,
                         "expire": now_ts + 3600,
+                        "tenant_id": tid,
                     }
                     return val
         except Exception as e:
@@ -85,25 +98,29 @@ class WorkingMemory:
 
         return None
 
-    def search(self, query: str, limit: int = 5) -> List[MemoryItem]:
-        """工作记忆混合检索：基于词法匹配的高性能召回"""
+    def search(self, query: str, limit: int = 5, tenant_id: str = "default") -> List[MemoryItem]:
+        """工作记忆混合检索：基于词法匹配的高性能召回（带租户隔离）"""
         results: List[MemoryItem] = []
         query_lower = (query or "").lower()
         now_ts = datetime.now().timestamp()
+        tid = tenant_id or "default"
 
         for key, item in list(self.cache.items()):
             if item.get("expire", 0) < now_ts:
+                continue
+            if item.get("tenant_id", "default") != tid:
                 continue
 
             content_str = str(item.get("val", "")).lower()
             if query_lower in content_str:
                 expire_ts = item.get("expire", now_ts + 3600)
+                raw_key = key[len(tid) + 1:] if tid != "default" and key.startswith(f"{tid}:") else key
                 results.append(
                     MemoryItem(
                         content=item["val"],
                         memory_type="working",
                         importance=0.6,
-                        metadata={"key": key, "source": "working_cache_l0"},
+                        metadata={"key": raw_key, "tenant_id": tid, "source": "working_cache_l0"},
                         timestamp=datetime.fromtimestamp(expire_ts - 3600),
                     )
                 )

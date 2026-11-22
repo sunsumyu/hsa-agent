@@ -30,7 +30,8 @@ async def orchestrate_aligner_node(state: AuditState, config: Optional[RunnableC
         logger.warning("[AlignerNode] 未能从状态中提取到有效的用户提问，跳过对齐流")
         return {}
 
-    # 2. [SPEC-227] 执行上下文指代消解与任务意图分类
+    # 2. [SPEC-227/V228] 执行上下文指代消解与任务意图分类
+    # (TurnAnalysis 数据类契约，通过 __iter__ 兼容旧三元组解包，真实返回与测试 mock 返回均可消费)
     resolved_query, turn_type, key_entities = coreference_rewriter.resolve_coreference(raw_input, state)
     user_input = resolved_query
     logger.info(f"🧭 [AlignerNode] 当前轮次意图分类: {turn_type} | 命题消解: 「{user_input[:50]}...」")

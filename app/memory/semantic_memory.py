@@ -174,6 +174,11 @@ class CognitiveMemoryManager:
         
         if importance >= self.config.importance_threshold:
             self.semantic.learn_experience(topic, content)
+            # 桥接同步至统一记忆中枢 MemoryHub 工作记忆，打通新旧双入口
+            try:
+                memory_hub.store_working(f"legacy:{topic}", content)
+            except Exception as e:
+                logger.debug(f"[CognitiveMemoryManager] 桥接写入 MemoryHub 跳过: {e}")
 
     def add_message(self, session_id: str, message: Any, importance: float = 0.5):
         """[兼容性接口] 将消息对象适配为审计事件记录"""
@@ -181,7 +186,7 @@ class CognitiveMemoryManager:
         self.add_audit_event(content, importance=importance, topic=f"session_{session_id}")
 
     def recall_context(self, session_id: str, query: str) -> str:
-        """从工作记忆和长期语义库中联合召回"""
+        """从工作记忆和长期语义库中联合召回（桥接 MemoryHub 工作记忆）"""
         self._init_components()
         results = ["【工作记忆 (近期)】"]
         recent = self.working.buffer
@@ -191,6 +196,16 @@ class CognitiveMemoryManager:
         if expert_knowledge:
             results.append("\n【审计经验召回 (跨会话)】")
             results.extend([f"  (经验) {doc.page_content[:200]}" for doc in expert_knowledge])
+
+        try:
+            hub_hits = memory_hub.search_working(query, limit=2)
+            if hub_hits:
+                results.append("\n【记忆中枢工作记忆】")
+                results.extend([f"  - {str(h.content)[:200]}" for h in hub_hits])
+        except Exception as e:
+            logger.debug(f"[CognitiveMemoryManager] 桥接检索 MemoryHub 跳过: {e}")
+
+        return "\n".join(results)
             
 # 全局单例
 cognitive_memory_manager = CognitiveMemoryManager()

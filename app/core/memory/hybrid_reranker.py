@@ -11,15 +11,30 @@ app/core/memory/hybrid_reranker.py
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from datetime import datetime
-from typing import List, Set
+from typing import Any, List, Set
 from app.core.memory.base import MemoryItem
 
 
 class HybridReranker:
     """记忆启发式混合精排深模块"""
+
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        """将 str/dict/list 等多态记忆内容归一化为确定性文本，用于关键词匹配与哈希去重"""
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, (dict, list)):
+            try:
+                return json.dumps(content, sort_keys=True, ensure_ascii=False)
+            except TypeError:
+                return str(content)
+        return str(content)
 
     def rerank(
         self,
@@ -47,20 +62,21 @@ class HybridReranker:
             time_decay = 1.0 / (1.0 + 0.05 * delta_days)
 
             # D. 关键字硬匹配激励
-            match_count = sum(1 for kw in query_keywords if kw in (item.content or ""))
+            content_text = self._content_to_text(item.content)
+            match_count = sum(1 for kw in query_keywords if kw in content_text)
             keyword_boost = min(match_count * 0.15, 0.3)
 
             final_score = (base_score * 0.3) + importance_boost + (time_decay * 0.1) + keyword_boost
             item.metadata["rerank_score"] = round(final_score, 4)
-            scored_items.append((final_score, item))
+            scored_items.append((final_score, content_text, item))
 
         scored_items.sort(key=lambda x: x[0], reverse=True)
 
         # 物理哈希去重
         seen_content: Set[int] = set()
         unique_results: List[MemoryItem] = []
-        for _, item in scored_items:
-            content_hash = hash(item.content)
+        for _, content_text, item in scored_items:
+            content_hash = hash(content_text)
             if content_hash not in seen_content:
                 unique_results.append(item)
                 seen_content.add(content_hash)

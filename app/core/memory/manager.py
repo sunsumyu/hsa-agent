@@ -30,6 +30,7 @@ from app.core.memory.eviction_engine import eviction_engine, MemoryEvictionEngin
 from app.core.memory.health_inspector import health_inspector, MemoryHealthInspector
 from app.core.memory.pii_scrubber import pii_scrubber, PIIScrubber
 from app.core.memory.hybrid_reranker import hybrid_reranker, HybridReranker
+from app.core.memory.conflict_arbiter import memory_conflict_arbiter
 
 class MemoryHub:
     """
@@ -64,6 +65,7 @@ class MemoryHub:
         
         # [V4.0] 感知记忆独立存储
         self.perceptual_vector_storage = VectorStorage(storage_dir="data/memory_v4/perceptual")
+        self.graph_storage = GraphStorage()
         
         # 2. 初始化逻辑层 (Types)
         self.semantic = SemanticMemory(storage=self.vector_storage)
@@ -73,6 +75,8 @@ class MemoryHub:
         self.working_cache = self.working.cache  # 内存 L0 缓存共享同一字典引用
         self.eviction_engine = eviction_engine
         self.health_inspector = health_inspector
+        self._gc_timer = None
+        self._gc_running = False
         
         logger.info(f"🧠 [MemoryHub] 工业级记忆中枢已加固 (V4.6.0) | 二阶段检索 | PII脱敏 | L0-L1分布式工作记忆")
 
@@ -93,7 +97,7 @@ class MemoryHub:
         results = await self.recall(text, limit=limit, tenant_id=t_id)
         
         # 2. 补全工作记忆 (L0)
-        working_hits = self.search_working(text, limit=3)
+        working_hits = self.search_working(text, limit=3, tenant_id=t_id)
         
         # 3. 最终融合与去重
         final_list = self._rerank_results(text, results + working_hits, limit)
@@ -102,6 +106,7 @@ class MemoryHub:
     async def recall(self, query: str, limit: int = 5, tenant_id: str = "default") -> List[MemoryItem]:
         """
         [V4.6] 企业级两阶段召回 (Two-Stage Retrieval)
+        并发检索语义、感知与情景记忆，并按租户物理分片路由。
         """
         # 1. 物理初筛 (3倍超量召回)
         top_k = limit * 3
@@ -109,14 +114,15 @@ class MemoryHub:
         # 获取当前租户的存储句柄
         storage = self._get_tenant_storage(tenant_id)
         
-        # 执行并发召回
-        semantic_tasks = [
-            self.semantic.recall(query, limit=top_k, tenant_id=tenant_id),
-            self.perceptual.recall(query, limit=top_k, tenant_id=tenant_id)
+        # 执行并发召回 (语义 + 感知 + 情景)
+        recall_tasks = [
+            self.semantic.recall(query, limit=top_k, tenant_id=tenant_id, storage=storage["vector"]),
+            self.perceptual.recall(query, limit=top_k, tenant_id=tenant_id),
+            self.episodic.recall_experience(query, limit=top_k, tenant_id=tenant_id, storage=storage["relational"]),
         ]
         
         import asyncio
-        results = await asyncio.gather(*semantic_tasks)
+        results = await asyncio.gather(*recall_tasks)
         all_candidates = [item for sublist in results for item in sublist]
         
         # 2. 物理精排
@@ -130,17 +136,20 @@ class MemoryHub:
         """[V4.0 Deep Module] 核心评分函数：融合相似度、重要性与时间衰减"""
         return hybrid_reranker.calculate_hybrid_score(item)
 
-    def store_working(self, key: str, value: Any, ttl: int = 3600):
+    def store_working(self, key: str, value: Any, ttl: int = 3600, tenant_id: Optional[str] = None):
         """[V4.6 Deep Module] 工业级二级工作记忆存储"""
-        self.working.store(key, value, ttl=ttl)
+        t_id = tenant_id or tenant_context.get() or "default"
+        self.working.store(key, value, ttl=ttl, tenant_id=t_id)
 
-    def recall_working(self, key: str) -> Optional[Any]:
+    def recall_working(self, key: str, tenant_id: Optional[str] = None) -> Optional[Any]:
         """[V4.6 Deep Module] 分布式工作记忆召回"""
-        return self.working.recall(key)
+        t_id = tenant_id or tenant_context.get() or "default"
+        return self.working.recall(key, tenant_id=t_id)
 
-    def search_working(self, query: str, limit: int = 5) -> List[MemoryItem]:
+    def search_working(self, query: str, limit: int = 5, tenant_id: Optional[str] = None) -> List[MemoryItem]:
         """[V4.0 Deep Module] 工作记忆混合检索：基于词法匹配的高性能召回"""
-        return self.working.search(query, limit=limit)
+        t_id = tenant_id or tenant_context.get() or "default"
+        return self.working.search(query, limit=limit, tenant_id=t_id)
 
     async def consolidate(self, key: str, importance_threshold: float = 0.7):
         """
@@ -212,7 +221,7 @@ class MemoryHub:
         # 2. 工作记忆同步处理
         if memory_type == "working":
             key = metadata.get("key", f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-            self.store_working(key, safe_content)
+            self.store_working(key, safe_content, tenant_id=t_id)
             return f"✅ [Working] 已存入 L0 缓存 (Key: {key})"
             
         # 3. 长期记忆异步处理 (非阻塞主审计流程)
@@ -255,16 +264,22 @@ class MemoryHub:
                 import asyncio
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-                
-                if m_type == "semantic":
-                    loop.run_until_complete(storage["vector"].add([item]))
-                    loop.run_until_complete(self.graph_storage.add([item]))
-                elif m_type == "episodic":
-                    loop.run_until_complete(storage["relational"].add([item]))
-                elif m_type == "perceptual":
-                    loop.run_until_complete(self.perceptual.add_image(metadata.get("file_path", ""), content, importance, **metadata))
-                
-                loop.close()
+                try:
+                    if m_type == "semantic":
+                        if hasattr(storage["vector"], "upsert_with_conflict_resolution"):
+                            loop.run_until_complete(
+                                storage["vector"].upsert_with_conflict_resolution(item, arbiter=memory_conflict_arbiter)
+                            )
+                        else:
+                            loop.run_until_complete(storage["vector"].add([item]))
+                        if hasattr(self, "graph_storage") and self.graph_storage is not None:
+                            loop.run_until_complete(self.graph_storage.add([item]))
+                    elif m_type == "episodic":
+                        loop.run_until_complete(storage["relational"].add([item]))
+                    elif m_type == "perceptual":
+                        loop.run_until_complete(self.perceptual.add_image(metadata.get("file_path", ""), content, importance, **metadata))
+                finally:
+                    loop.close()
                 logger.info(f"✨ [MemoryHub] 异步入库完成 | Type: {m_type} | Tenant: {t_id}")
             except Exception as e:
                 logger.error(f"❌ [MemoryHub] 异步入库失败: {e}")
@@ -292,6 +307,49 @@ class MemoryHub:
             max_age_days=max_age_days,
         )
 
+    def start_periodic_gc(
+        self,
+        interval_seconds: int = 3600,
+        strategy: str = "combined",
+        threshold: float = 0.2,
+        max_age_days: int = 30,
+    ) -> None:
+        """启动后台周期性三维记忆 GC 调度（守护线程定时器）"""
+        import threading
+        self.stop_periodic_gc()
+        self._gc_running = True
+
+        def _run_and_reschedule():
+            if not self._gc_running:
+                return
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    self.forget_memories(strategy=strategy, threshold=threshold, max_age_days=max_age_days)
+                )
+            except Exception as e:
+                logger.error(f"❌ [MemoryHub] 定时 GC 执行异常: {e}")
+            finally:
+                loop.close()
+
+            if self._gc_running:
+                self._gc_timer = threading.Timer(interval_seconds, _run_and_reschedule)
+                self._gc_timer.daemon = True
+                self._gc_timer.start()
+
+        self._gc_timer = threading.Timer(interval_seconds, _run_and_reschedule)
+        self._gc_timer.daemon = True
+        self._gc_timer.start()
+        logger.info(f"🕒 [MemoryHub] 已启动后台周期性记忆 GC | 间隔: {interval_seconds}s")
+
+    def stop_periodic_gc(self) -> None:
+        """停止后台周期性记忆 GC 调度"""
+        self._gc_running = False
+        if self._gc_timer is not None:
+            self._gc_timer.cancel()
+            self._gc_timer = None
+
     def get_stats(self) -> Dict[str, Any]:
         """
         [V4.6 Deep Module] 企业级健康信标
@@ -303,6 +361,8 @@ class MemoryHub:
             storage_pool=self.storage_pool,
             memory_mode=getattr(settings, "memory_mode", "LOCAL"),
             redis_client=redis_manager,
+            vector_storage=self.vector_storage,
+            relational_storage=self.relational_storage,
         )
 
     def get_summary(self) -> str:

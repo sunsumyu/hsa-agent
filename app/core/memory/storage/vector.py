@@ -95,6 +95,51 @@ class VectorStorage(BaseStorage):
         except Exception as e:
             logger.error(f"保存向量索引失败: {e}")
 
+    def _rebuild_index(self):
+        """基于当前 self.items 重建 FAISS 索引"""
+        if not self.items:
+            self.index = None
+            return
+        texts = [str(item.content) for item in self.items]
+        embeddings = np.array(self._embeddings.embed_documents(texts)).astype('float32')
+        faiss.normalize_L2(embeddings)
+        dimension = embeddings.shape[1]
+        self.index = faiss.IndexFlatIP(dimension)
+        self.index.add(embeddings)
+
+    async def upsert_with_conflict_resolution(self, item: MemoryItem, arbiter=None) -> int:
+        """
+        [冲突消解写入] 同租户下检索被新记忆覆写/去重的旧条目并替换，避免只追加不更新。
+        返回被淘汰的旧条目数量。
+        """
+        tenant_id = item.metadata.get("tenant_id", "default")
+        same_tenant_indices = [
+            i for i, existing in enumerate(self.items)
+            if existing.metadata.get("tenant_id", "default") == tenant_id
+        ]
+        if not same_tenant_indices:
+            await self.add([item])
+            return 0
+
+        existing_texts = [str(self.items[i].content) for i in same_tenant_indices]
+        if arbiter is not None and hasattr(arbiter, "find_superseded_indices"):
+            rel_superseded = arbiter.find_superseded_indices(str(item.content), existing_texts)
+        else:
+            new_norm = str(item.content).strip()
+            rel_superseded = [idx for idx, t in enumerate(existing_texts) if t.strip() == new_norm]
+
+        if not rel_superseded:
+            await self.add([item])
+            return 0
+
+        remove_abs_indices = {same_tenant_indices[idx] for idx in rel_superseded}
+        self.items = [it for i, it in enumerate(self.items) if i not in remove_abs_indices]
+        self.items.append(item)
+        self._rebuild_index()
+        self._save()
+        logger.info(f"🔄 [VectorStorage] 冲突消解覆写完成 | 移除旧条目: {len(remove_abs_indices)} 条")
+        return len(remove_abs_indices)
+
     async def forget(self, threshold: float) -> int:
         """根据重要性阈值清理向量记忆并重建索引"""
         original_count = len(self.items)
@@ -105,18 +150,7 @@ class VectorStorage(BaseStorage):
             return 0
             
         self.items = new_items
-        if not self.items:
-            self.index = None
-        else:
-            # 重建索引
-            texts = [str(item.content) for item in self.items]
-            embeddings = np.array(self._embeddings.embed_documents(texts)).astype('float32')
-            faiss.normalize_L2(embeddings)
-            
-            dimension = embeddings.shape[1]
-            self.index = faiss.IndexFlatIP(dimension)
-            self.index.add(embeddings)
-            
+        self._rebuild_index()
         self._save()
         return original_count - len(self.items)
 
