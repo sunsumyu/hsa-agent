@@ -66,7 +66,7 @@ def test_response_envelope_from_result_error():
 
 def test_update_state_success(client, monkeypatch):
     """测试 /agent/update_state 成功返回统一信封"""
-    from app.core.graph_state_orchestrator import graph_state_orchestrator
+    from app.orchestration.graph_state_orchestrator import graph_state_orchestrator
     async def mock_intervene(*args, **kwargs):
         return {"status": "success", "message": "状态已更新，下次推演将使用新线索"}
     monkeypatch.setattr(graph_state_orchestrator, "intervene_findings", mock_intervene)
@@ -84,7 +84,7 @@ def test_update_state_success(client, monkeypatch):
 
 def test_update_state_session_not_found(client, monkeypatch):
     """测试 /agent/update_state 会话不存在时返回标准 404 错误信封"""
-    from app.core.graph_state_orchestrator import graph_state_orchestrator
+    from app.orchestration.graph_state_orchestrator import graph_state_orchestrator
     async def mock_intervene(*args, **kwargs):
         return {"status": "error", "message": "会话不存在或未初始化"}
     monkeypatch.setattr(graph_state_orchestrator, "intervene_findings", mock_intervene)
@@ -102,7 +102,7 @@ def test_update_state_session_not_found(client, monkeypatch):
 
 def test_fork_session_success(client, monkeypatch):
     """测试 /agent/fork 成功返回统一信封"""
-    from app.core.graph_state_orchestrator import graph_state_orchestrator
+    from app.orchestration.graph_state_orchestrator import graph_state_orchestrator
     async def mock_fork(*args, **kwargs):
         return {"status": "success", "targetSession": "sess-child-1"}
     monkeypatch.setattr(graph_state_orchestrator, "fork_session", mock_fork)
@@ -119,7 +119,7 @@ def test_fork_session_success(client, monkeypatch):
 
 def test_fork_session_source_not_found(client, monkeypatch):
     """测试 /agent/fork 源会话不存在时返回 404 错误信封"""
-    from app.core.graph_state_orchestrator import graph_state_orchestrator
+    from app.orchestration.graph_state_orchestrator import graph_state_orchestrator
     async def mock_fork(*args, **kwargs):
         return {"status": "error", "message": "源会话不存在"}
     monkeypatch.setattr(graph_state_orchestrator, "fork_session", mock_fork)

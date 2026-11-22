@@ -31,7 +31,7 @@ if sys.platform == "win32":
 
 sys.path.insert(0, os.path.abspath("."))
 from app.infra.db_conn import get_clickhouse_client
-from app.core.agent_graph import workflow
+from app.orchestration.agent_graph import workflow
 from app.reporting.audit_metric_evaluator import AuditMetricEvaluator
 
 USER_PERSPECTIVE_CASES_V6 = [

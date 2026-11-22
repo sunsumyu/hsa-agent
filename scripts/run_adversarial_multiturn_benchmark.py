@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.abspath("."))
 from langchain_core.messages import HumanMessage, AIMessage
 from app.core.bootstrap import register_services
 from app.core.observability import init_observability
-from app.core.agent_graph import workflow
+from app.orchestration.agent_graph import workflow
 from app.core.context.context_builder import ContextPacket
 
 # 5 轮极端边界与对抗剧本

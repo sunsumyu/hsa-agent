@@ -23,7 +23,7 @@ from app.core.planning.audit_intent_planner import AuditIntentPlanner, AuditArch
 from app.core.guardrails.contradiction_detector import ContradictionDetector
 from app.core.context.gates import QualityGate
 from app.agents.coder_quality_guard import check_pre_execution_gate
-from app.core.graph_route_coordinator import route_sqlexec_post, route_critic_post
+from app.orchestration.graph_route_coordinator import route_sqlexec_post, route_critic_post
 from app.core.reflection.audit_reflection_engine import AuditReflectionEngine
 from app.agents.reflection_diagnostic_policy import ReflectionDiagnosticPolicy
 

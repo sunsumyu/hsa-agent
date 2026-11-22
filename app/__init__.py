@@ -21,7 +21,7 @@ from loguru import logger
 # Map legacy app.<module> name to new deeply nested app.<subpackage>.<module> path
 DEPRECATED_MAPPINGS = {
     # Core Orchestration
-    "agent_graph": "app.core.agent_graph",
+    "agent_graph": "app.orchestration.agent_graph",
     "booster": "app.core.booster",
     "logging_config": "app.core.logging_config",
     "observability": "app.core.observability",

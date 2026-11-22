@@ -31,7 +31,7 @@ def setup_di():
 
 def test_subgraph_state_isolation():
     """断言 1: 子图拥有独立的状态定义，包含内部私有临时变量"""
-    from app.core.subgraphs.execution_subgraph import ExecutionSubState
+    from app.orchestration.subgraphs.execution_subgraph import ExecutionSubState
     annotations = ExecutionSubState.__annotations__
 
     # 必须具备的内部自愈变量
@@ -47,7 +47,7 @@ def test_subgraph_state_isolation():
 @pytest.mark.asyncio
 async def test_execution_subgraph_direct_success():
     """断言 2: 一次性执行成功直通路径，不触发 Critic 反思"""
-    from app.core.subgraphs.execution_subgraph import build_execution_subgraph
+    from app.orchestration.subgraphs.execution_subgraph import build_execution_subgraph
 
     subgraph = build_execution_subgraph(max_retries=2)
     assert subgraph is not None
@@ -86,7 +86,7 @@ async def test_execution_subgraph_direct_success():
 @pytest.mark.asyncio
 async def test_execution_subgraph_self_healing_loop():
     """断言 3: 首次执行失败触发 Critic 自愈诊断，次轮修正成功后平滑退出"""
-    from app.core.subgraphs.execution_subgraph import build_execution_subgraph
+    from app.orchestration.subgraphs.execution_subgraph import build_execution_subgraph
 
     subgraph = build_execution_subgraph(max_retries=2)
 
@@ -139,7 +139,7 @@ async def test_execution_subgraph_self_healing_loop():
 @pytest.mark.asyncio
 async def test_parent_projection_clean_seam():
     """断言 4: [深模块接缝] execution_engine_node 对父图交付时必须做投影收敛，杜绝局部脏数据泄漏"""
-    from app.core.subgraphs.execution_subgraph import execution_engine_node
+    from app.orchestration.subgraphs.execution_subgraph import execution_engine_node
 
     parent_state = {
         "metadata": {"user_question": "排查保妇康栓"},
@@ -162,7 +162,7 @@ async def test_parent_projection_clean_seam():
         "sql_history": ["SELECT 1", "SELECT 2"],
     }
 
-    with patch("app.core.subgraphs.execution_subgraph.compiled_execution_subgraph.ainvoke", new_callable=AsyncMock) as mock_sub:
+    with patch("app.orchestration.subgraphs.execution_subgraph.compiled_execution_subgraph.ainvoke", new_callable=AsyncMock) as mock_sub:
         mock_sub.return_value = mock_sub_res
 
         output_patch = await execution_engine_node(parent_state, RunnableConfig())
@@ -181,7 +181,7 @@ async def test_parent_projection_clean_seam():
 @pytest.mark.asyncio
 async def test_execution_subgraph_escape_hatch():
     """断言 5: 达到最大重试次数时逃生舱熔断，优雅退出至 END，防止死循环"""
-    from app.core.subgraphs.execution_subgraph import build_execution_subgraph
+    from app.orchestration.subgraphs.execution_subgraph import build_execution_subgraph
 
     subgraph = build_execution_subgraph(max_retries=1)
 
@@ -226,7 +226,7 @@ async def test_execution_subgraph_escape_hatch():
 async def test_sqlexec_node_subgraph_feature_flag_routing():
     """断言 6: [平滑迁移特性开关] sqlexec_node 在 use_execution_subgraph=True 时无缝分流至子图"""
     from app.core.config import settings
-    from app.core.agent_graph import sqlexec_node
+    from app.orchestration.agent_graph import sqlexec_node
 
     parent_state = {
         "metadata": {"user_question": "排查保妇康栓"},
@@ -247,7 +247,7 @@ async def test_sqlexec_node_subgraph_feature_flag_routing():
 
     # 2. 开启 use_execution_subgraph = True 时无缝分流至 execution_engine_node
     with patch.object(settings, "use_execution_subgraph", True), \
-         patch("app.core.subgraphs.execution_subgraph.execution_engine_node", new_callable=AsyncMock) as mock_engine:
+         patch("app.orchestration.subgraphs.execution_subgraph.execution_engine_node", new_callable=AsyncMock) as mock_engine:
         mock_engine.return_value = {"sql_query": "SELECT 2", "raw_data": "subgraph_ok", "sql_validated": True}
         res_subgraph = await sqlexec_node(parent_state, RunnableConfig())
         assert mock_engine.call_count == 1

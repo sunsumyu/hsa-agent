@@ -3,7 +3,7 @@ import os
 import json
 import time
 from loguru import logger
-from app.core.agent_graph import get_graph_executor
+from app.orchestration.agent_graph import get_graph_executor
 from app.infra.usage_tracker import usage_tracker
 
 # 2024 生产实战测试用例

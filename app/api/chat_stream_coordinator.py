@@ -18,7 +18,7 @@ from fastapi import BackgroundTasks, Request
 from loguru import logger
 from langchain_core.messages import HumanMessage
 
-from app.core.agent_graph import get_graph_executor
+from app.orchestration.agent_graph import get_graph_executor
 from app.memory.history import history_manager
 from app.infra.usage_tracker import usage_tracker
 from app.infra.model_manager import model_manager

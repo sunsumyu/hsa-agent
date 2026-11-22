@@ -116,7 +116,7 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
 
     # [Matt Pocock Deep Module] 当开启子图架构时，直接委托给 Execution Subgraph
     if getattr(settings, "use_execution_subgraph", False):
-        from app.core.subgraphs.execution_subgraph import execution_engine_node
+        from app.orchestration.subgraphs.execution_subgraph import execution_engine_node
         res = await execution_engine_node(state, config)
         logger.info(f"🔍 [DEBUG Graph Subgraph] sqlexec_node returned: sql_query = {repr(res.get('sql_query'))}")
         pipeline_tracker.on_node_end("SQLEXEC", state, res)
@@ -191,7 +191,7 @@ async def human_approval_node(state: AuditState, config: RunnableConfig):
 # ============================================================
 # 路由逻辑与工作流构建 (委托至 graph_route_coordinator 深模块)
 # ============================================================
-from app.core.graph_route_coordinator import (
+from app.orchestration.graph_route_coordinator import (
     route_planner_post as _route_planner_post,
     route_critic_post as _route_critic_post,
     route_sqlexec_post as _route_sqlexec_post,

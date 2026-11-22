@@ -39,7 +39,7 @@ async def get_session_timeline_events(
                 return list(events)
             return []
 
-        from app.core.agent_graph import get_graph_executor
+        from app.orchestration.agent_graph import get_graph_executor
         if checkpointer is None:
             try:
                 from app.core.checkpointer import create_checkpointer
@@ -75,7 +75,7 @@ async def intervene_session_findings(
     """人工干预指定会话的推演线索，注入 ⟦OVERWRITE⟧ 指令以在后续轮次生效。"""
     try:
         if executor is None:
-            from app.core.agent_graph import get_graph_executor
+            from app.orchestration.agent_graph import get_graph_executor
             exec_instance, _ = get_graph_executor(checkpointer=checkpointer)
         else:
             exec_instance = executor
@@ -103,7 +103,7 @@ async def fork_session_thread(
     """将源会话的图状态完整克隆到目标会话线程，用于分支探索或对比回放。"""
     try:
         if executor is None:
-            from app.core.agent_graph import get_graph_executor
+            from app.orchestration.agent_graph import get_graph_executor
             exec_instance, _ = get_graph_executor(checkpointer=checkpointer)
         else:
             exec_instance = executor

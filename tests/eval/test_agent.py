@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 os.environ["CLICKHOUSE_DB"] = "hsa_sandbox"
 load_dotenv(override=True)
 
-from app.core.agent_graph import get_graph_executor as get_executor
+from app.orchestration.agent_graph import get_graph_executor as get_executor
 from app.core.registry.prompt_registry import prompt_registry
 from app.core.registry.rule_registry import rule_registry
 

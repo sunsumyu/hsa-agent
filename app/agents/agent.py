@@ -5,7 +5,7 @@ import pydantic
 from loguru import logger
 
 # [DEPRECATED] 此模块已被 agent_graph.py 完全取代，仅保留供旧版测试脚本兼容。
-# 新代码应使用: from app.core.agent_graph import get_graph_executor
+# 新代码应使用: from app.orchestration.agent_graph import get_graph_executor
 warnings.warn(
     "app.agent is deprecated. Use app.agent_graph.get_graph_executor instead.",
     DeprecationWarning,
@@ -144,7 +144,7 @@ def get_tools():
 # 导出动态构建函数，支持根据前端 model_id 实时切换算力
 def get_executor(model_id: str = None):
     # [V33.6 架构归一化] 切换至 hardened AgentGraph
-    from app.core.agent_graph import AgentGraph
+    from app.orchestration.agent_graph import AgentGraph
     
     config = None
     if model_id:

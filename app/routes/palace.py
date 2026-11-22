@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from loguru import logger
 
-from app.core.graph_state_orchestrator import graph_state_orchestrator
+from app.orchestration.graph_state_orchestrator import graph_state_orchestrator
 from app.memory.entity_extractor import evidence_graph_manager
 from app.core.schemas import ResolveRequest
 from app.api.envelope import ResponseEnvelope

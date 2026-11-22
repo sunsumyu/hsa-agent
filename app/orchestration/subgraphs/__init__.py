@@ -6,7 +6,7 @@ LangGraph 领域子图包
 遵循 Matt Pocock 深模块哲学：局部自愈微循环内聚于子图内部，向顶层主图暴露最小接缝。
 """
 
-from app.core.subgraphs.execution_subgraph import (
+from app.orchestration.subgraphs.execution_subgraph import (
     ExecutionSubState,
     build_execution_subgraph,
     compiled_execution_subgraph,

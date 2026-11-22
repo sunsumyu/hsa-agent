@@ -12,7 +12,7 @@ Tests:
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.core.graph_state_orchestrator import (
+from app.orchestration.graph_state_orchestrator import (
     format_findings_overwrite,
     get_session_timeline_events,
     intervene_session_findings,

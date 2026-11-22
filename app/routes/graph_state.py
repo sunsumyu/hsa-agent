@@ -6,7 +6,7 @@ app/routes/graph_state.py
 """
 
 from fastapi import APIRouter, Request
-from app.core.graph_state_orchestrator import graph_state_orchestrator
+from app.orchestration.graph_state_orchestrator import graph_state_orchestrator
 from app.api.envelope import ResponseEnvelope
 
 router = APIRouter()

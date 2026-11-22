@@ -65,7 +65,7 @@ class TestRealWorldColloquialConflicts:
         2. aligner_node 直通返回亲切、专业的人设对话，并更新用户画像；
         3. 坚决不进入 Planner/SQL 流程，绝对严禁生成具有法律条款的《医保专项稽核报告》。
         """
-        from app.core.agent_graph import aligner_node
+        from app.orchestration.agent_graph import aligner_node
         from langchain_core.messages import HumanMessage
 
         user_input = "我喜欢吃鸡肉"
@@ -99,7 +99,7 @@ class TestRealWorldColloquialConflicts:
         2. 自动沉淀至便签簿与交互偏好中；
         3. 给出明确的设置生效确认，不跑无谓 SQL。
         """
-        from app.core.agent_graph import aligner_node
+        from app.orchestration.agent_graph import aligner_node
         from langchain_core.messages import HumanMessage
 
         user_input = "我喜欢用表格排版，不要用纯文字"
@@ -145,7 +145,7 @@ class TestRealWorldColloquialConflicts:
         assert "六盘水市水城县九龙村卫生室" in entities
 
         # 2. 状态机就地响应验证 (调用 aligner_node)
-        from app.core.agent_graph import aligner_node
+        from app.orchestration.agent_graph import aligner_node
         from langchain_core.messages import HumanMessage
         res = await aligner_node({"messages": [HumanMessage(content=user_turn)], **mock_state}, config={})
         

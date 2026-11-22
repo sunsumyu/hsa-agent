@@ -21,7 +21,7 @@ from langchain_core.runnables import RunnableConfig
 
 def test_route_sqlexec_post_triggers_human_approval():
     """验证：当触发安全红线或高危 SQL 时，路由必须精确切断执行并导向 HUMAN_APPROVAL"""
-    from app.core.graph_route_coordinator import route_sqlexec_post
+    from app.orchestration.graph_route_coordinator import route_sqlexec_post
     
     # 模拟包含 DROP TABLE 的危险高危审计状态
     state = {
@@ -35,7 +35,7 @@ def test_route_sqlexec_post_triggers_human_approval():
 
 def test_workflow_human_approval_edge_leads_to_end():
     """验证：HUMAN_APPROVAL 节点必须直连 END 终点，以确保任务挂起后图执行优雅停止"""
-    from app.core.agent_graph import _build_workflow_skeleton
+    from app.orchestration.agent_graph import _build_workflow_skeleton
     from langgraph.graph import END
 
     wf = _build_workflow_skeleton()
@@ -50,7 +50,7 @@ def test_workflow_human_approval_edge_leads_to_end():
 @pytest.mark.asyncio
 async def test_human_approval_node_suspension_contract():
     """验证：human_approval_node 能够正确提取 thread_id、挂起任务并生成符合契约的状态增量"""
-    from app.core.agent_graph import human_approval_node
+    from app.orchestration.agent_graph import human_approval_node
     from app.core.task_pool import TaskPoolManager
 
     mock_pool = TaskPoolManager()
@@ -62,7 +62,7 @@ async def test_human_approval_node_suspension_contract():
     config: RunnableConfig = {"configurable": {"thread_id": "audit-test-session-001"}}
 
     # 使用 monkeypatch 或局部替换验证
-    from app.core import agent_graph
+    from app.orchestration import agent_graph
     orig_pool = agent_graph.task_pool
     try:
         agent_graph.task_pool = mock_pool
@@ -147,7 +147,7 @@ def test_task_pool_defensive_against_none_metadata():
 
 def test_findings_overwrite_formatting():
     """验证：人工干预线索覆盖格式化协议 (⟦OVERWRITE⟧)"""
-    from app.core.graph_state_orchestrator import format_findings_overwrite
+    from app.orchestration.graph_state_orchestrator import format_findings_overwrite
 
     # 列表形式输入
     findings_list = ["线索 A: 异常跨院就诊", "线索 B: 超频次报销"]
@@ -164,7 +164,7 @@ def test_findings_overwrite_formatting():
 @pytest.mark.asyncio
 async def test_intervene_session_findings_nonexistent():
     """验证：对不存在的会话进行人工干预时，必须优雅返回 error 状态而非异常溃退"""
-    from app.core.graph_state_orchestrator import intervene_session_findings
+    from app.orchestration.graph_state_orchestrator import intervene_session_findings
 
     mock_executor = AsyncMock()
     mock_executor.aget_state.return_value = None
@@ -181,7 +181,7 @@ async def test_intervene_session_findings_nonexistent():
 @pytest.mark.asyncio
 async def test_intervene_session_findings_success_flow():
     """验证：对挂起会话进行人工干预成功时，通过 aupdate_state 安全注入 ⟦OVERWRITE⟧ 数据"""
-    from app.core.graph_state_orchestrator import intervene_session_findings
+    from app.orchestration.graph_state_orchestrator import intervene_session_findings
 
     mock_executor = AsyncMock()
     # 模拟已有状态快照
@@ -206,7 +206,7 @@ async def test_intervene_session_findings_success_flow():
 @pytest.mark.asyncio
 async def test_fork_session_thread_isolation():
     """验证：打断后支持时间旅行分叉克隆，目标线程继承状态切片"""
-    from app.core.graph_state_orchestrator import fork_session_thread
+    from app.orchestration.graph_state_orchestrator import fork_session_thread
 
     mock_executor = AsyncMock()
     mock_snapshot = MagicMock()

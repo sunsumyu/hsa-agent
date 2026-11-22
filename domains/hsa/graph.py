@@ -9,7 +9,7 @@ agents with deterministic SQL AST and medical rule guardrails.
 from __future__ import annotations
 from typing import Any, Dict, Optional
 
-from app.core.agent_graph import (
+from app.orchestration.agent_graph import (
     build_graph as build_hsa_audit_graph,
     get_graph_executor,
     workflow as hsa_workflow,

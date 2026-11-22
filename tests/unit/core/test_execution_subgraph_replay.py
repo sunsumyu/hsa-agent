@@ -94,7 +94,7 @@ def _install_llm_replay(coder_sqls):
 
 async def _run_engine(coder_sqls):
     """在仅隔离外设的前提下，端到端驱动 execution_engine_node。"""
-    from app.core.subgraphs.execution_subgraph import execution_engine_node
+    from app.orchestration.subgraphs.execution_subgraph import execution_engine_node
     from app.agents.coder_agent import AuditCoderAgent
     from app.skills.sql.sql_validator import sql_validator
 
