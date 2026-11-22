@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import AsyncMock, patch
-from app.skills.semantic_encyclopedia_parser import SemanticEncyclopediaParser
-from app.skills.semantic_hyde_generator import SemanticHydeGenerator
-from app.skills.semantic_prompt_formatter import SemanticPromptFormatter
-from app.skills.semantic_layer import SemanticRetriever, semantic_retriever
+from app.skills.schema.semantic_encyclopedia_parser import SemanticEncyclopediaParser
+from app.skills.schema.semantic_hyde_generator import SemanticHydeGenerator
+from app.skills.schema.semantic_prompt_formatter import SemanticPromptFormatter
+from app.skills.schema.semantic_layer import SemanticRetriever, semantic_retriever
 
 
 def test_semantic_encyclopedia_parser_core_seeds():

@@ -1,7 +1,7 @@
 import pytest
 from app.skills.security import SecurityViolationError
-from app.skills.sql_injection_guard import SQLInjectionGuard
-from app.skills.sql_ast_security_auditor import SQLASTSecurityAuditor
+from app.skills.sql.sql_injection_guard import SQLInjectionGuard
+from app.skills.sql.sql_ast_security_auditor import SQLASTSecurityAuditor
 
 
 class TestSQLInjectionGuard:

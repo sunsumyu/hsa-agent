@@ -7,14 +7,14 @@ tests/unit/skills/test_sql_linter_rules_red.py
 
 import pytest
 
-from app.skills.sql_linter_rules import (
+from app.skills.sql.sql_linter_rules import (
     validate_pk_group_by,
     validate_dynamic_governance,
     validate_join_cartesian,
     run_sql_linter_pipeline,
 )
-from app.skills.sql_equivalence_checker import check_sql_semantic_equivalence
-from app.skills.sql_validator import SQLLogicValidator, sql_validator
+from app.skills.sql.sql_equivalence_checker import check_sql_semantic_equivalence
+from app.skills.sql.sql_validator import SQLLogicValidator, sql_validator
 
 
 def test_validate_pk_group_by_blocks_unique_ids():

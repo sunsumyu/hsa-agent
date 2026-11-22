@@ -6,7 +6,7 @@ import pytest
 
 
 def test_schema_domain_router_import_and_defaults():
-    from app.skills.schema_domain_router import (
+    from app.skills.schema.schema_domain_router import (
         classify_question_domains,
         semantic_classify_domains,
         resolve_target_tables,
@@ -29,7 +29,7 @@ def test_schema_domain_router_import_and_defaults():
 
 
 def test_schema_domain_routing_keywords():
-    from app.skills.schema_domain_router import (
+    from app.skills.schema.schema_domain_router import (
         classify_question_domains,
         resolve_target_tables,
     )
@@ -53,7 +53,7 @@ def test_schema_domain_routing_keywords():
 
 
 def test_schema_domain_ontology_hints():
-    from app.skills.schema_domain_router import (
+    from app.skills.schema.schema_domain_router import (
         get_ontology_hints,
         semantic_classify_domains,
     )
@@ -70,7 +70,7 @@ def test_schema_domain_ontology_hints():
 
 
 def test_schema_injector_delegation_facade():
-    from app.skills.schema_injector import schema_injector
+    from app.skills.schema.schema_injector import schema_injector
     # 验证门面委托一致性
     c_res = schema_injector.classify("药品处方目录")
     assert c_res[0]["domain"] == "drug_catalog"

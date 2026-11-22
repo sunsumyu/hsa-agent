@@ -6,11 +6,11 @@ tests/unit/skills/test_schema_pruner_and_governance_red.py
 
 import pytest
 from unittest.mock import MagicMock
-from app.skills.schema_field_pruner import (
+from app.skills.schema.schema_field_pruner import (
     SchemaFieldPruner,
     schema_field_pruner,
 )
-from app.skills.audit_governance_guide import (
+from app.skills.rules.audit_governance_guide import (
     AuditGovernanceGuide,
     audit_governance_guide,
 )

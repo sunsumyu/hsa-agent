@@ -11,7 +11,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from app.skills.analysis_operator_runner import (
+from app.skills.rules.analysis_operator_runner import (
     execute_rule_operator,
     execute_anomaly_operator,
 )

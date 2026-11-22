@@ -14,7 +14,7 @@ Tests:
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from app.skills.sql_execution_pipeline import execute_audit_sql_pipeline
+from app.skills.sql.sql_execution_pipeline import execute_audit_sql_pipeline
 from app.infra.db_conn import SqlExecError
 
 

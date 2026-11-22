@@ -1,5 +1,5 @@
 import pytest
-from app.skills.sql_validator import SQLLogicValidator
+from app.skills.sql.sql_validator import SQLLogicValidator
 
 def test_linter_allows_cross_join_with_where_condition():
     sql = """

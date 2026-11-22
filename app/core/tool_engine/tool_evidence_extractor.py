@@ -1,5 +1,5 @@
 """
-app/agents/tool_evidence_extractor.py
+app/core/tool_engine/tool_evidence_extractor.py
 =====================================
 [V230.0 / Matt Pocock Deep Module] 工具执行结果与审计证据提取器 (Tool Evidence Extractor)
 
@@ -21,8 +21,8 @@ from loguru import logger
 from langchain_core.messages import ToolMessage
 
 from app.skills.security.probe_guard import is_probe_query
-from app.agents.evidence_truncation_policy import truncate_evidence_data
-from app.agents.core_sql_resolver import resolve_core_audit_sql
+from app.core.tool_engine.evidence_truncation_policy import truncate_evidence_data
+from app.core.tool_engine.core_sql_resolver import resolve_core_audit_sql
 from app.data.raw_data_sanitizer import RawDataSanitizer
 
 

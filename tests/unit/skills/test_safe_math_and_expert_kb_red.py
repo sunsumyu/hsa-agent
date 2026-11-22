@@ -3,11 +3,11 @@ Red unit tests for safe_math_evaluator and expert_knowledge_retriever deep modul
 """
 
 import pytest
-from app.skills.safe_math_evaluator import (
+from app.skills.security.safe_math_evaluator import (
     safe_eval_math_expression,
     is_safe_math_expr,
 )
-from app.skills.expert_knowledge_retriever import (
+from app.skills.federated.expert_knowledge_retriever import (
     search_expert_knowledge_hints,
     resolve_medical_code_mapping,
 )

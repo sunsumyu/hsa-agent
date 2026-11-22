@@ -9,7 +9,7 @@ Tests:
 """
 
 import pytest
-from app.skills.analysis_operator_resolver import (
+from app.skills.rules.analysis_operator_resolver import (
     resolve_audit_rule_id,
     resolve_anomaly_algorithm_id,
     get_operator_tolerance,

@@ -20,7 +20,7 @@ import pytest
 
 from app.core.context.coreference_rewriter import ContextualQueryRewriter
 from app.skills.security import SecurityViolationError
-from app.skills.sql_injection_guard import SQLInjectionGuard
+from app.skills.sql.sql_injection_guard import SQLInjectionGuard
 from app.skills.sql.sql_ast_security_auditor import SQLASTSecurityAuditor
 
 

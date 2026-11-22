@@ -56,7 +56,7 @@ def test_post_execution_gate_no_sql():
 
 
 def test_post_execution_gate_linter_failed(monkeypatch):
-    from app.skills.sql_validator import sql_validator
+    from app.skills.sql.sql_validator import sql_validator
     monkeypatch.setattr(sql_validator, "agentic_linter", lambda sql: (False, "语法缺少 FROM"))
 
     res = check_post_execution_gate(
@@ -70,7 +70,7 @@ def test_post_execution_gate_linter_failed(monkeypatch):
 
 
 def test_post_execution_gate_reflection_eval(monkeypatch):
-    from app.skills.sql_validator import sql_validator
+    from app.skills.sql.sql_validator import sql_validator
     from app.core.booster import booster
     from app.core.reflection.audit_reflection_engine import AuditReflectionEngine, ReflectionResult
 

@@ -10,7 +10,7 @@ Tests:
 import pytest
 from unittest.mock import MagicMock, patch
 
-from app.skills.federated_graph_executor import (
+from app.skills.federated.federated_graph_executor import (
     execute_fraud_ring_cypher,
     execute_federated_sideloader,
 )

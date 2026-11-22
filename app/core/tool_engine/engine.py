@@ -224,7 +224,7 @@ class ToolEngine:
 
         # 步骤 D: 结构化采样与指纹生成 (集成 ToolEvidenceExtractor)
         total_count = len(records)
-        from app.agents.tool_evidence_extractor import ToolEvidenceExtractor
+        from app.core.tool_engine.tool_evidence_extractor import ToolEvidenceExtractor
         extractor = ToolEvidenceExtractor(max_chars=12000)
         safe_serialized = extractor.truncate_data(records)
 

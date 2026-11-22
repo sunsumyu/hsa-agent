@@ -22,7 +22,7 @@ from langchain_core.messages import AIMessage
 
 from app.core.structured_tracer import StructuredTracer
 from app.agents.audit_tool_executor import invoke_tools_safely
-from app.agents.tool_evidence_extractor import tool_evidence_extractor
+from app.core.tool_engine.tool_evidence_extractor import tool_evidence_extractor
 
 
 @dataclass

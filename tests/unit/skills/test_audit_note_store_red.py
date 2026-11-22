@@ -6,7 +6,7 @@ import os
 import datetime
 import threading
 import pytest
-from app.skills.audit_note_store import (
+from app.skills.federated.audit_note_store import (
     write_note,
     append_entry,
     read_recent_notes,
@@ -129,7 +129,7 @@ class TestAuditNoteStore:
 
     def test_contextvar_session_isolation(self, tmp_path):
         from app.core.context import tenant_context, trace_context
-        from app.skills.audit_note_store import AuditNoteStore
+        from app.skills.federated.audit_note_store import AuditNoteStore
 
         store = AuditNoteStore(default_path=str(tmp_path / "audit_notes.md"))
 

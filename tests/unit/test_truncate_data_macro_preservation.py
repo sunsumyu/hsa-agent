@@ -1,6 +1,6 @@
 import json
 import pytest
-from app.agents.tool_evidence_extractor import ToolEvidenceExtractor
+from app.core.tool_engine.tool_evidence_extractor import ToolEvidenceExtractor
 from app.reporting.audit_metric_evaluator import AuditMetricEvaluator
 
 def test_truncate_data_under_limit():

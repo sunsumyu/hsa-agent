@@ -12,7 +12,7 @@ tests/unit/skills/test_metadata_mapping_layer_red.py
 import json
 import pytest
 from app.core.memory.types.semantic import MetadataMappingLayer
-from app.skills.semantic_layer import MetadataMappingLayer as LegacyMetadataMappingLayer
+from app.skills.schema.semantic_layer import MetadataMappingLayer as LegacyMetadataMappingLayer
 
 
 def test_import_compatibility():

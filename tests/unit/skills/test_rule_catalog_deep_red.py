@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
-from app.skills.rule_catalog import rule_catalog, RuleCatalog
-from app.skills.rule_execution import RuleExecutionSkill
+from app.skills.rules.rule_catalog import rule_catalog, RuleCatalog
+from app.skills.rules.rule_execution import RuleExecutionSkill
 
 
 def test_rule_catalog_resolution():

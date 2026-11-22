@@ -6,7 +6,7 @@ tests/unit/skills/test_audit_execution_pipeline_deep_red.py
 
 import pytest
 from unittest.mock import MagicMock
-from app.skills.audit_execution_pipeline import (
+from app.skills.rules.audit_execution_pipeline import (
     AuditExecutionPipeline,
     audit_execution_pipeline,
 )

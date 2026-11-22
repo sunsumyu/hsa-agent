@@ -8,7 +8,7 @@ tests/unit/skills/test_schema_truth_validator_red.py
 import pytest
 import sqlglot
 from app.skills.security import SecurityViolationError
-from app.skills.schema_truth_validator import (
+from app.skills.schema.schema_truth_validator import (
     validate_column_and_function_existence,
     suggest_field_replacement,
 )

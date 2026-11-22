@@ -8,7 +8,7 @@ tests/unit/skills/test_sql_complexity_auditor_red.py
 import pytest
 import sqlglot
 from app.skills.security import SQLComplexityError
-from app.skills.sql_complexity_auditor import audit_expression_complexity
+from app.skills.sql.sql_complexity_auditor import audit_expression_complexity
 
 
 def test_audit_complexity_small_table_pass():

@@ -6,8 +6,8 @@ tests/unit/skills/test_federated_sideload_buffer_deep_red.py
 
 from unittest.mock import MagicMock
 import pytest
-from app.skills.federated_sideload_buffer import FederatedSideloadBuffer
-from app.skills.federated_graph_executor import execute_federated_sideloader
+from app.skills.federated.federated_sideload_buffer import FederatedSideloadBuffer
+from app.skills.federated.federated_graph_executor import execute_federated_sideloader
 
 
 def test_federated_sideload_buffer_legacy_driver_execute():

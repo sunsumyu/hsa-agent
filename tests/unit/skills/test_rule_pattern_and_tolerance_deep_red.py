@@ -5,9 +5,9 @@ tests/unit/skills/test_rule_pattern_and_tolerance_deep_red.py
 """
 
 import pytest
-from app.skills.rule_pattern_resolver import RulePatternResolver
-from app.skills.rule_tolerance_policy import RuleTolerancePolicy
-from app.skills.rule_catalog import RuleCatalog
+from app.skills.rules.rule_pattern_resolver import RulePatternResolver
+from app.skills.rules.rule_tolerance_policy import RuleTolerancePolicy
+from app.skills.rules.rule_catalog import RuleCatalog
 
 
 def test_rule_pattern_resolver_resolution_and_lookup():

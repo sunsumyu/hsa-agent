@@ -9,8 +9,8 @@ Tests deep module extraction:
 """
 
 import pytest
-from app.skills.fast_router import RouteType, ModelTier, DEFAULT_RULE_CONFIG
-from app.skills.fast_route_matcher import (
+from app.skills.federated.fast_router import RouteType, ModelTier, DEFAULT_RULE_CONFIG
+from app.skills.federated.fast_route_matcher import (
     extract_query_filters,
     estimate_query_complexity,
     match_exact,

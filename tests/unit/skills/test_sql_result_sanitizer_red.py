@@ -7,7 +7,7 @@ Tests:
 
 import os
 import pytest
-from app.skills.sql_result_sanitizer import (
+from app.skills.sql.sql_result_sanitizer import (
     sanitize_sql_results,
     inject_tenant_administrative_isolation,
 )

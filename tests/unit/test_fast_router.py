@@ -6,7 +6,7 @@ Uses DEFAULT_RULE_CONFIG directly (no YAML dependency) for deterministic
 """
 
 import pytest
-from app.skills.fast_router import (
+from app.skills.federated.fast_router import (
     FastAuditRouter,
     RouteType,
     ModelTier,

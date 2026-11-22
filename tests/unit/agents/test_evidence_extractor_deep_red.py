@@ -8,9 +8,9 @@ tests/unit/agents/test_evidence_extractor_deep_red.py
 import json
 import pytest
 
-from app.agents.evidence_truncation_policy import truncate_evidence_data
-from app.agents.core_sql_resolver import resolve_core_audit_sql
-from app.agents.tool_evidence_extractor import ToolEvidenceExtractor, tool_evidence_extractor
+from app.core.tool_engine.evidence_truncation_policy import truncate_evidence_data
+from app.core.tool_engine.core_sql_resolver import resolve_core_audit_sql
+from app.core.tool_engine.tool_evidence_extractor import ToolEvidenceExtractor, tool_evidence_extractor
 
 
 def test_truncate_evidence_data_structured_with_totals():

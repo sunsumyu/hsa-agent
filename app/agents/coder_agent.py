@@ -230,7 +230,7 @@ class AuditCoderAgent:
 
     def _process_tool_results(self, results, state):
         """委托给 ToolEvidenceExtractor 深模块进行证据链标准化处理。"""
-        from app.agents.tool_evidence_extractor import tool_evidence_extractor
+        from app.core.tool_engine.tool_evidence_extractor import tool_evidence_extractor
         return tool_evidence_extractor.process(results, state).to_dict()
 
     def _run_quality_gates(self, sql, methodology, raw_data, trace=None):

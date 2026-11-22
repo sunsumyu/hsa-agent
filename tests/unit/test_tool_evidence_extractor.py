@@ -6,7 +6,7 @@ Verifies parsing, evidence extraction, probe isolation, and data truncation.
 """
 
 import pytest
-from app.agents.tool_evidence_extractor import ToolEvidenceExtractor, ProcessedToolResults
+from app.core.tool_engine.tool_evidence_extractor import ToolEvidenceExtractor, ProcessedToolResults
 
 
 class TestToolEvidenceExtractor:

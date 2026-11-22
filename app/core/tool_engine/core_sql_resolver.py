@@ -1,5 +1,5 @@
 """
-app/agents/core_sql_resolver.py
+app/core/tool_engine/core_sql_resolver.py
 =================================
 [Matt Pocock Deep Module] 核心审计 SQL 仲裁解析器深模块
 
