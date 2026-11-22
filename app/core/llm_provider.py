@@ -18,7 +18,7 @@ import time
 from app.infra.model_manager import model_manager
 from app.infra.usage_tracker import usage_tracker
 from app.core.observability import build_obs_config
-from app.memory.semantic_memory import cognitive_memory_manager
+from app.core.memory.manager import memory_hub
 
 class LLMProvider:
     def __init__(self):
@@ -102,8 +102,8 @@ class LLMProvider:
                         "audit_timestamp": time.time()
                     })
                 
-                # 9. 更新认知记忆
-                cognitive_memory_manager.add_message(session_id, response)
+                # 9. 更新统一工作记忆
+                memory_hub.store_working(f"llm:{session_id}", getattr(response, "content", str(response)))
                 
                 return response
                 

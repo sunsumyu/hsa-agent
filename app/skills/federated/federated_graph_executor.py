@@ -16,11 +16,11 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 from loguru import logger
 
-from app.skills.analysis_operator_resolver import (
+from app.skills.rules.analysis_operator_resolver import (
     validate_cypher_spatial_isolation,
     extract_entity_ids,
 )
-from app.skills.federated_sideload_buffer import federated_sideload_buffer
+from app.skills.federated.federated_sideload_buffer import federated_sideload_buffer
 
 
 async def execute_fraud_ring_cypher(

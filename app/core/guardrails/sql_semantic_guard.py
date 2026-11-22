@@ -2,7 +2,7 @@ import re
 from typing import Dict, Any, List, Optional
 from loguru import logger
 from app.core.registry.archetype_registry import archetype_registry, ArchetypeCategory
-from app.agents.sql_evidence_resolver import resolve_user_query
+from app.core.sql_evidence_resolver import resolve_user_query
 from app.core.guardrails.contradiction_detector import ContradictionDetector
 from app.core.guardrails.guardrail_result import GuardrailResult
 from app.core.guardrails.diagnostic_interpreter import DiagnosticInterpreter

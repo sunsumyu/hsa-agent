@@ -271,7 +271,7 @@ class ToolEngine:
         context: Dict[str, Any]
     ) -> ToolResult:
         """调用预定义静态规则引擎"""
-        from app.skills.audit_rules import audit_rule_engine
+        from app.skills.rules.audit_rules import audit_rule_engine
         try:
             res = await audit_rule_engine.execute_rule(params.rule_id, params.extra_filters or {})
             records = res if isinstance(res, list) else (res.get("data") if isinstance(res, dict) else [])

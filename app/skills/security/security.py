@@ -55,8 +55,8 @@ class SQLGuardian:
             tenant_id: 租户 ID（用于行政区划隔离）
             expected_table: 预期的目标表名（由 SceneTableSelector 提供）
         """
-        from app.skills.sql_injection_guard import SQLInjectionGuard
-        from app.skills.sql_ast_security_auditor import SQLASTSecurityAuditor
+        from app.skills.sql.sql_injection_guard import SQLInjectionGuard
+        from app.skills.sql.sql_ast_security_auditor import SQLASTSecurityAuditor
 
         # 1. 语法预检、字面量规整与防注入校验 (NoSQL & 堆叠分号拦截)
         clean_sql = SQLInjectionGuard.clean_and_check_injection(sql)
@@ -107,25 +107,25 @@ class SQLGuardian:
     @staticmethod
     def _extract_tables_from_ast(expression: exp.Expression) -> List[str]:
         """向后兼容委托至 SQLASTSecurityAuditor"""
-        from app.skills.sql_ast_security_auditor import SQLASTSecurityAuditor
+        from app.skills.sql.sql_ast_security_auditor import SQLASTSecurityAuditor
         return SQLASTSecurityAuditor.extract_tables(expression)
 
     @staticmethod
     def _inject_tenant_isolation(expression: exp.Expression, tenant_id: str) -> exp.Expression:
         """向后兼容委托至 SQLASTSecurityAuditor"""
-        from app.skills.sql_ast_security_auditor import SQLASTSecurityAuditor
+        from app.skills.sql.sql_ast_security_auditor import SQLASTSecurityAuditor
         return SQLASTSecurityAuditor.inject_tenant_isolation(expression, tenant_id)
 
     @staticmethod
     def _validate_column_existence(expression: exp.Expression) -> None:
         """[Matt Pocock Deep Module] 委托至专职的字段与函数物理真理对撞深模块"""
-        from app.skills.schema_truth_validator import validate_column_and_function_existence
+        from app.skills.schema.schema_truth_validator import validate_column_and_function_existence
         validate_column_and_function_existence(expression)
 
     @staticmethod
     def _suggest_field(hallucinated: str) -> str:
         """[Matt Pocock Deep Module] 委托至专职的幻觉字段纠错建议深模块"""
-        from app.skills.schema_truth_validator import suggest_field_replacement
+        from app.skills.schema.schema_truth_validator import suggest_field_replacement
         return suggest_field_replacement(hallucinated)
 
     @staticmethod
@@ -137,7 +137,7 @@ class SQLGuardian:
     @staticmethod
     def _audit_expression_complexity(expression: exp.Expression) -> None:
         """[Matt Pocock Deep Module] 委托至专职的算力代价与分区裁剪审计深模块"""
-        from app.skills.sql_complexity_auditor import audit_expression_complexity
+        from app.skills.sql.sql_complexity_auditor import audit_expression_complexity
         audit_expression_complexity(expression)
 
     @staticmethod

@@ -73,10 +73,8 @@ class ActionCacheManager:
         """惰性加载嵌入向量引擎。"""
         if self._engine is None:
             try:
-                from app.memory.semantic_memory import cognitive_memory_manager
-                if not cognitive_memory_manager._local_engine:
-                    cognitive_memory_manager._init_components()
-                self._engine = cognitive_memory_manager._local_engine
+                from app.core.memory.embedding import embedding_engine
+                self._engine = embedding_engine
             except Exception as e:
                 logger.debug(f"[ActionCacheManager] 嵌入引擎引用获取跳过: {e}")
                 self._engine = None

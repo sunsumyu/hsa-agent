@@ -16,7 +16,7 @@ etc.) continue to work without changes.
 """
 
 # SQL execution core
-from app.skills.sql_tools import (
+from app.skills.sql.sql_tools import (
     _sanitize_results,
     _execute_audit_sql_logic,
     _heal_group_by_215,
@@ -24,7 +24,7 @@ from app.skills.sql_tools import (
 )
 
 # Schema, governance, knowledge, calculator
-from app.skills.schema_tools import (
+from app.skills.schema.schema_tools import (
     list_tables,
     get_table_schema,
     calculator,
@@ -35,7 +35,7 @@ from app.skills.schema_tools import (
 )
 
 # Rule engine, anomaly detection, graph analysis
-from app.skills.analysis_tools import (
+from app.skills.rules.analysis_tools import (
     audit_medical_rule,
     run_anomaly_detection,
     ingest_knowledge_document,
@@ -45,10 +45,10 @@ from app.skills.analysis_tools import (
 )
 
 # Law database retrieval (external rag-pdf-project law RAG service)
-from app.skills.law_rag_tools import query_law_database
+from app.skills.federated.law_rag_tools import query_law_database
 
 # Memory, notes, embeddings
-from app.skills.memory_tools import (
+from app.skills.federated.memory_tools import (
     manage_memory,
     write_audit_note,
     write_audit_notes,

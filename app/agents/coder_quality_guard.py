@@ -68,7 +68,7 @@ def run_quality_linter(
         return None
 
     # 1. SQL Linter 语法/方言逻辑审查
-    from app.skills.sql_validator import sql_validator
+    from app.skills.sql.sql_validator import sql_validator
     is_ok, linter_msg = sql_validator.agentic_linter(sql)
     if not is_ok:
         return f"【SQL 逻辑审查拦截】{linter_msg}"

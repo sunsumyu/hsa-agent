@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional
 from loguru import logger
 from langchain_core.tools import tool
 
-from app.skills.analysis_operator_runner import (
+from app.skills.rules.analysis_operator_runner import (
     execute_rule_operator,
     execute_anomaly_operator,
 )
@@ -74,7 +74,7 @@ async def query_fraud_ring(cypher: str) -> Dict[str, Any]:
     绝对不包含 fqz_gz_jzsj_all_ql 等关系型物理数据表！严禁在 Cypher 查询中引用任何 fqz_ 开头的表，也严禁将此查询嵌套在 SQL 中！
     如需结合业务明细查询，请优先使用 federated_graph_sideloader 工具进行跨库侧载。
     """
-    from app.skills.federated_graph_executor import execute_fraud_ring_cypher
+    from app.skills.federated.federated_graph_executor import execute_fraud_ring_cypher
     return await execute_fraud_ring_cypher(cypher)
 
 @tool
@@ -82,7 +82,7 @@ def expand_medical_codes(intent: str) -> str:
     """
     [V125.0] 业务深度增强：从知识库检索医疗编码建议 (ICD-10/ICD-9)。
     """
-    from app.skills.expert_knowledge_retriever import resolve_medical_code_mapping
+    from app.skills.federated.expert_knowledge_retriever import resolve_medical_code_mapping
     return resolve_medical_code_mapping(intent)
 
 @tool
@@ -95,6 +95,6 @@ async def federated_graph_sideloader(cypher: str, return_key: str = "") -> Dict[
     1. 首先调用此工具（传入纯 Cypher 语句，严禁包含 fqz_ 开头的关系表），它会返回一个 ClickHouse 临时表名（例如 fqz_temp_sl_xxxx）。
     2. 在后续步骤中，编写标准 SQL 语句，使用 `INNER JOIN fqz_temp_sl_xxxx ON 主表.关键ID = fqz_temp_sl_xxxx.id` 关联查询结算明细。
     """
-    from app.skills.federated_graph_executor import execute_federated_sideloader
+    from app.skills.federated.federated_graph_executor import execute_federated_sideloader
     return await execute_federated_sideloader(cypher, return_key=return_key)
 

@@ -24,7 +24,7 @@ from app.infra.db_conn import SqlExecError
 from app.skills.security import SQLGuardian, SecurityViolationError
 from app.api.perf_monitor import perf_monitor
 from app.core.registry.skill_protocol import SkillResponse
-from app.skills.sql_result_sanitizer import sanitize_sql_results, inject_tenant_administrative_isolation
+from app.skills.sql.sql_result_sanitizer import sanitize_sql_results, inject_tenant_administrative_isolation
 
 
 @perf_monitor.time_it("AUDIT_ENGINE")

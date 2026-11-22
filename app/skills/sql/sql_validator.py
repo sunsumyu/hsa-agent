@@ -12,8 +12,8 @@ app/skills/sql_validator.py
 from __future__ import annotations
 from typing import Tuple
 
-from app.skills.sql_equivalence_checker import check_sql_semantic_equivalence
-from app.skills.sql_linter_rules import (
+from app.skills.sql.sql_equivalence_checker import check_sql_semantic_equivalence
+from app.skills.sql.sql_linter_rules import (
     run_sql_linter_pipeline,
     load_governance_config,
 )

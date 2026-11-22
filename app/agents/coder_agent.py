@@ -22,13 +22,12 @@ from langchain_core.runnables import RunnableConfig
 from app.core.llm_provider import llm_provider
 from app.core.registry import skill_registry
 from app.core.permission_manager import permission_manager
-from app.memory.semantic_memory import cognitive_memory_manager
-from app.skills.schema_injector import schema_injector
-from app.skills.sql_validator import sql_validator
+from app.skills.schema.schema_injector import schema_injector
+from app.skills.sql.sql_validator import sql_validator
 from app.core.booster import booster
 from app.core.structured_tracer import StructuredTracer
 
-from app.skills.probe_guard import is_probe_query
+from app.skills.security.probe_guard import is_probe_query
 from app.agents.coder_quality_guard import (
     check_pre_execution_gate,
     check_post_execution_gate,

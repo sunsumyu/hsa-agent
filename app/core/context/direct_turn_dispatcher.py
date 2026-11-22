@@ -59,7 +59,7 @@ def build_direct_turn_response(
     return resp
 
 
-from app.skills.audit_note_store import audit_note_store
+from app.skills.federated.audit_note_store import audit_note_store
 
 
 def append_audit_note_to_file(entry: str, filepath: str = "data/audit_notes.md") -> None:

@@ -214,7 +214,7 @@ class ContextBuilder:
             os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true"
         )
         if not is_isolated_mode:
-            from app.skills.audit_note_store import audit_note_store
+            from app.skills.federated.audit_note_store import audit_note_store
             recent_notes = audit_note_store.read_relevant_notes(query=query, limit=3)
             if recent_notes:
                 note_content_cleaned = "\n\n---\n\n".join(recent_notes)

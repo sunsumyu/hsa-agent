@@ -101,7 +101,7 @@ class EvidenceKnowledgeGraphManager:
         核心方法：将 Findings 文本列表转换为 ECharts graph 数据。
         """
         try:
-            from app.skills.conflict_detector import get_filtered_findings
+            from app.skills.security.conflict_detector import get_filtered_findings
             findings = get_filtered_findings(findings)
         except ImportError:
             pass
@@ -266,7 +266,7 @@ class EvidenceKnowledgeGraphManager:
     def detect_session_conflicts(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """检测指定会话（或最新会话）中的逻辑冲突"""
         findings = self.get_session_findings(session_id)
-        from app.skills.conflict_detector import detect_conflicts
+        from app.skills.security.conflict_detector import detect_conflicts
         return detect_conflicts(findings)
 
     def clear(self) -> None:

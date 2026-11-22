@@ -31,7 +31,7 @@ class AuditExecutionPipeline:
         返回: (sql, is_anomaly)
         """
         if rule_engine_inst is None:
-            from app.skills.audit_rules import rule_engine
+            from app.skills.rules.audit_rules import rule_engine
             re = rule_engine
         else:
             re = rule_engine_inst
@@ -41,7 +41,7 @@ class AuditExecutionPipeline:
             return sql, False
 
         if anomaly_detector_inst is None:
-            from app.skills.anomaly_algorithms import anomaly_detector
+            from app.skills.rules.anomaly_algorithms import anomaly_detector
             ad = anomaly_detector
         else:
             ad = anomaly_detector_inst
@@ -85,14 +85,14 @@ class AuditExecutionPipeline:
         """多态分发取证核查报告文本生成"""
         if is_anomaly:
             if anomaly_detector_inst is None:
-                from app.skills.anomaly_algorithms import anomaly_detector
+                from app.skills.rules.anomaly_algorithms import anomaly_detector
                 ad = anomaly_detector
             else:
                 ad = anomaly_detector_inst
             return ad.format_anomaly_report(target_id, raw_data)
         else:
             if rule_engine_inst is None:
-                from app.skills.audit_rules import rule_engine
+                from app.skills.rules.audit_rules import rule_engine
                 re = rule_engine
             else:
                 re = rule_engine_inst

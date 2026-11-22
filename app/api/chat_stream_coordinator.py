@@ -24,7 +24,7 @@ from app.infra.usage_tracker import usage_tracker
 from app.infra.model_manager import model_manager
 from app.infra.redis_client import redis_manager
 from app.core.observability import get_callbacks
-from app.skills.protocol_filter import ProtocolInterceptor, sanitize
+from app.skills.security.protocol_filter import ProtocolInterceptor, sanitize
 from app.api.chat_stream import (
     emit_node_status,
     emit_tool_start_events,

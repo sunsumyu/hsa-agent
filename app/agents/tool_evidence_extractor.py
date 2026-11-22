@@ -20,7 +20,7 @@ from typing import List, Dict, Any, Tuple
 from loguru import logger
 from langchain_core.messages import ToolMessage
 
-from app.skills.probe_guard import is_probe_query
+from app.skills.security.probe_guard import is_probe_query
 from app.agents.evidence_truncation_policy import truncate_evidence_data
 from app.agents.core_sql_resolver import resolve_core_audit_sql
 from app.data.raw_data_sanitizer import RawDataSanitizer

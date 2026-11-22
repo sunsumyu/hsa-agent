@@ -388,7 +388,7 @@ class ContextualQueryRewriter:
 
         # 2. 仅在内存无便签且非会话隔离模式时，检查物理便签文件
         if not notes:
-            from app.skills.audit_note_store import audit_note_store
+            from app.skills.federated.audit_note_store import audit_note_store
             content = audit_note_store.read_raw_text()
             if content:
                 m_paren = re.findall(r"[（(]([^\s，。：()（）]+(?:医院|卫生院|诊所|中心|门诊部|卫生室|药房|药店))[)）]", content)

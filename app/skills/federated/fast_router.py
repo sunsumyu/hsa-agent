@@ -21,7 +21,7 @@ app/fast_router.py
     优先级 3: 默认降级到 LLM 推理（UNKNOWN 类型）
 
 使用方式：
-    from app.skills.fast_router import FastAuditRouter, RouteType
+    from app.skills.federated.fast_router import FastAuditRouter, RouteType
 
     router = FastAuditRouter()
     result = router.classify("核查中心医院是否存在患者与职工共用联系方式？")
@@ -216,12 +216,12 @@ class FastAuditRouter:
         Returns:
             RouteResult，包含路由类型、目标算子 ID 和置信度
         """
-        from app.skills.fast_route_matcher import match_fast_route
+        from app.skills.federated.fast_route_matcher import match_fast_route
         return match_fast_route(user_question, self._config)
 
     def _estimate_complexity(self, text: str) -> ModelTier:
         """[Backward Compatibility] 复杂度评估器委托深模块"""
-        from app.skills.fast_route_matcher import estimate_query_complexity
+        from app.skills.federated.fast_route_matcher import estimate_query_complexity
         return estimate_query_complexity(text)
 
     def get_all_rules(self) -> List[Dict]:
@@ -230,12 +230,12 @@ class FastAuditRouter:
 
     def _match_exact(self, text: str, extra_filters: Dict[str, str]) -> Optional[RouteResult]:
         """[Backward Compatibility] 精确关键词匹配委托深模块"""
-        from app.skills.fast_route_matcher import match_exact
+        from app.skills.federated.fast_route_matcher import match_exact
         return match_exact(text, self._config, extra_filters)
 
     def _match_fuzzy(self, text: str, extra_filters: Dict[str, str]) -> Optional[RouteResult]:
         """[Backward Compatibility] 模糊关键词组合匹配委托深模块"""
-        from app.skills.fast_route_matcher import match_fuzzy
+        from app.skills.federated.fast_route_matcher import match_fuzzy
         return match_fuzzy(text, self._config, extra_filters)
 
 

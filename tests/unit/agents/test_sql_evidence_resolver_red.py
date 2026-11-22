@@ -1,6 +1,6 @@
 import pytest
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from app.agents.sql_evidence_resolver import resolve_core_audit_sql, resolve_user_query
+from app.core.sql_evidence_resolver import resolve_core_audit_sql, resolve_user_query
 
 
 def test_resolve_core_audit_sql_prioritizes_metric_query():

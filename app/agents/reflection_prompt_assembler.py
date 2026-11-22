@@ -7,8 +7,8 @@
 from __future__ import annotations
 from typing import Any, List, Mapping
 from langchain_core.messages import BaseMessage
-from app.agents.sql_evidence_resolver import resolve_user_query
-from app.prompts import CRITIC_PROMPT
+from app.core.sql_evidence_resolver import resolve_user_query
+from app.core.prompts import CRITIC_PROMPT
 
 
 class ReflectionPromptAssembler:

@@ -15,9 +15,9 @@ import os
 from loguru import logger
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
-from app.skills.fast_router import fast_router, RouteType
+from app.skills.federated.fast_router import fast_router, RouteType
 from app.core.structured_tracer import StructuredTracer
-from app.agents.sql_evidence_resolver import resolve_user_query
+from app.core.sql_evidence_resolver import resolve_user_query
 from app.agents.planner_evaluator import evaluate_action_cache, parse_planner_response
 from app.agents.planner_context_assembler import (
     assemble_planner_context,

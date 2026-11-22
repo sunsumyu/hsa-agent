@@ -3,7 +3,7 @@ from loguru import logger
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage
 from app.core.state import AuditState
-from app.agents.sql_evidence_resolver import resolve_user_query
+from app.core.sql_evidence_resolver import resolve_user_query
 from app.core.context.coreference_rewriter import coreference_rewriter
 from app.core.context.direct_turn_handler import handle_direct_turn
 from app.core.context.funnel import semantic_funnel

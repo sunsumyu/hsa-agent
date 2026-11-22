@@ -21,10 +21,10 @@ import os
 import re
 from typing import List, Dict, Optional, Tuple, Set
 from loguru import logger
-from app.skills.schema_manager import schema_manager
+from app.skills.schema.schema_manager import schema_manager
 
 
-from app.skills.schema_domain_router import (
+from app.skills.schema.schema_domain_router import (
     DATA_DOMAINS as _DATA_DOMAINS,
     CROSS_DOMAIN_ONTOLOGY as _CROSS_DOMAIN_ONTOLOGY,
     DEFAULT_TABLES as _DEFAULT_TABLES,
@@ -33,8 +33,8 @@ from app.skills.schema_domain_router import (
     get_ontology_hints,
     resolve_target_tables,
 )
-from app.skills.schema_field_pruner import schema_field_pruner
-from app.skills.audit_governance_guide import audit_governance_guide
+from app.skills.schema.schema_field_pruner import schema_field_pruner
+from app.skills.rules.audit_governance_guide import audit_governance_guide
 
 
 class SchemaInjector:

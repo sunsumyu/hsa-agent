@@ -12,7 +12,7 @@ app/agents/core_sql_resolver.py
 
 from __future__ import annotations
 from typing import Sequence
-from app.skills.probe_guard import is_probe_query
+from app.skills.security.probe_guard import is_probe_query
 
 
 _METRIC_KEYWORDS = ("SUM(", "AVG(", "MEDFEE", "TOTAL", "AMT", "FEE", "ROUND(SUM")

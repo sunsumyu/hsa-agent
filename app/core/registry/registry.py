@@ -33,7 +33,7 @@ class SkillRegistry:
     def register_default_skills(self):
         """自动导入并注册所有定义好的工具"""
         try:
-            import app.skills.tools as tools_mod
+            import app.skills.federated.tools as tools_mod
             import inspect
             from langchain_core.tools import BaseTool
             

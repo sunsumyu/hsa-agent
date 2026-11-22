@@ -52,7 +52,7 @@ async def api_get_conflicts(session_id: Optional[str] = None):
 @router.post("/ins-fqz/palace/conflicts/resolve")
 async def api_resolve_conflict(req: ResolveRequest):
     """[V4.9.6] 用户手动解决证据冲突"""
-    from app.skills.conflict_detector import mark_resolved
+    from app.skills.security.conflict_detector import mark_resolved
 
     mark_resolved(req.finding_a, req.keep_a)
     mark_resolved(req.finding_b, req.keep_b)

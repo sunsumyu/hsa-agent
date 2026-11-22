@@ -159,7 +159,7 @@ class SchemaRegistry:
         if entry := self.get_table(table_name):
             cols.update([c.lower() for c in entry.field_names])
         try:
-            from app.skills.schema_manager import schema_manager
+            from app.skills.schema.schema_manager import schema_manager
             if hasattr(schema_manager, "_schema_cache"):
                 for t, dyn_cols in schema_manager._schema_cache.items():
                     if t.lower() == table_name.lower():

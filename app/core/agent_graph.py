@@ -19,8 +19,8 @@ from app.core.registry.schema_registry import schema_registry
 from app.core.prompts import CODER_PROMPT
 from app.skills.security import SQLGuardian, SecurityViolationError
 from app.reporting.report_renderer import report_renderer as _report_renderer
-from app.skills.fast_router import RouteType
-from app.skills.schema_injector import schema_injector as _schema_injector
+from app.skills.federated.fast_router import RouteType
+from app.skills.schema.schema_injector import schema_injector as _schema_injector
 from app.core.structured_tracer import StructuredTracer
 from app.core.pipeline_tracker import pipeline_tracker  # [V178.10] 管线追踪
 from app.core.context.gates import QualityGate
@@ -51,7 +51,7 @@ def _record_usage_with_budget(role: str, response: Any, model_id: str, prompt: A
 async def planner_node(state: AuditState, config: RunnableConfig):
     """[V168.1] 增加智能路由逻辑的 Planner"""
     from app.agents.planner_agent import planner_agent
-    from app.skills.fast_router import fast_router
+    from app.skills.federated.fast_router import fast_router
 
     pipeline_tracker.on_node_start("PLANNER", state)  # [V178.10]
 

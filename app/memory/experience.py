@@ -28,7 +28,7 @@ def get_embeddings():
         from app.core.memory.embedding import embedding_engine
         return embedding_engine
     except Exception:
-        from app.tools import get_embeddings as _get_embeddings
+        from app.skills.federated.tools import get_embeddings as _get_embeddings
         return _get_embeddings()
 
 

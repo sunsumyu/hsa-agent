@@ -18,7 +18,7 @@ from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 
 from app.core.llm_provider import llm_provider
 from app.core.protocol.tool_normalizer import ToolResponseNormalizer
-from app.agents.sql_evidence_resolver import resolve_core_audit_sql
+from app.core.sql_evidence_resolver import resolve_core_audit_sql
 
 
 @dataclass

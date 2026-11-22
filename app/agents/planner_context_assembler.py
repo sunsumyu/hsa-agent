@@ -19,7 +19,7 @@ from langchain_core.messages import BaseMessage, AIMessage
 
 from app.core.memory import memory_hub
 from app.infra.neo4j_manager import neo4j_manager, expand_medical_intent
-from app.prompts import PLANNER_PROMPT
+from app.core.prompts import PLANNER_PROMPT
 
 
 @dataclass

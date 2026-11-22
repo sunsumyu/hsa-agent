@@ -9,11 +9,11 @@ from typing import Type, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import BaseTool
 from loguru import logger
-from app.skills.audit_rules import rule_engine
-from app.skills.anomaly_algorithms import anomaly_detector
-from app.skills.rule_catalog import rule_catalog
-from app.skills.sql_tools import _execute_audit_sql_logic
-from app.skills.audit_execution_pipeline import audit_execution_pipeline
+from app.skills.rules.audit_rules import rule_engine
+from app.skills.rules.anomaly_algorithms import anomaly_detector
+from app.skills.rules.rule_catalog import rule_catalog
+from app.skills.sql.sql_tools import _execute_audit_sql_logic
+from app.skills.rules.audit_execution_pipeline import audit_execution_pipeline
 
 
 class RuleExecutionInput(BaseModel):

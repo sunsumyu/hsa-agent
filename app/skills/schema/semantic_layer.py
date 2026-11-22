@@ -14,9 +14,9 @@ from loguru import logger
 from app.core.memory.types.semantic import MetadataMappingLayer
 
 # 引入深模块
-from app.skills.semantic_encyclopedia_parser import SemanticEncyclopediaParser
-from app.skills.semantic_hyde_generator import SemanticHydeGenerator
-from app.skills.semantic_prompt_formatter import SemanticPromptFormatter
+from app.skills.schema.semantic_encyclopedia_parser import SemanticEncyclopediaParser
+from app.skills.schema.semantic_hyde_generator import SemanticHydeGenerator
+from app.skills.schema.semantic_prompt_formatter import SemanticPromptFormatter
 
 # [V66.2] 物理常驻：模块级嵌入模型单例，消除重复加载开销
 _GLOBAL_EMBEDDING_MODEL = None

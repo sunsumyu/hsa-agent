@@ -1,6 +1,6 @@
 """
-app/agents/sql_evidence_resolver.py
-===================================
+app/core/sql_evidence_resolver.py
+=================================
 [Deep Module] 审计核心 SQL 推断与用户命题解析深模块。
 
 设计哲学 (Matt Pocock Deep Module Principles):

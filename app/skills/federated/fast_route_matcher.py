@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Tuple, Any
 
-from app.skills.fast_router import RouteType, ModelTier, RouteResult
+from app.skills.federated.fast_router import RouteType, ModelTier, RouteResult
 
 
 def extract_query_filters(text: str) -> Dict[str, str]:

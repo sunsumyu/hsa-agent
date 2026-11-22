@@ -37,7 +37,7 @@ class ReportSynthesizer:
         for n in notes:
             notes_summary.append(f"- {n.strip()}")
         if not notes_summary:
-            from app.skills.audit_note_store import audit_note_store
+            from app.skills.federated.audit_note_store import audit_note_store
             for rl in audit_note_store.read_lines():
                 notes_summary.append(f"- {rl}")
         notes_text = "\n".join(notes_summary) if notes_summary else "- 暂无离线便签记录"

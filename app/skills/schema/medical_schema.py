@@ -1,7 +1,7 @@
 from typing import Type, Optional
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
-from app.skills.schema_injector import schema_injector
+from app.skills.schema.schema_injector import schema_injector
 from app.infra.neo4j_manager import field_kg
 
 class MedicalSchemaInput(BaseModel):

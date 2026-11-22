@@ -16,7 +16,7 @@ import json
 from typing import Any, Callable, Dict, Optional
 from loguru import logger
 
-from app.skills.analysis_operator_resolver import (
+from app.skills.rules.analysis_operator_resolver import (
     resolve_audit_rule_id,
     resolve_anomaly_algorithm_id,
     get_operator_tolerance,
@@ -41,7 +41,7 @@ async def execute_rule_operator(
     target_rule = resolve_audit_rule_id(rule_key)
 
     if rule_eng is None:
-        from app.skills.audit_rules import rule_engine
+        from app.skills.rules.audit_rules import rule_engine
         engine = rule_engine
     else:
         engine = rule_eng
@@ -55,7 +55,7 @@ async def execute_rule_operator(
         }, ensure_ascii=False)
 
     if sql_executor is None:
-        from app.skills.sql_execution_pipeline import execute_audit_sql_pipeline
+        from app.skills.sql.sql_execution_pipeline import execute_audit_sql_pipeline
         executor = execute_audit_sql_pipeline
     else:
         executor = sql_executor
@@ -112,7 +112,7 @@ async def execute_anomaly_operator(
     target_algo = resolve_anomaly_algorithm_id(algo_key)
 
     if detector is None:
-        from app.skills.anomaly_algorithms import anomaly_detector
+        from app.skills.rules.anomaly_algorithms import anomaly_detector
         detector_inst = anomaly_detector
     else:
         detector_inst = detector
@@ -126,7 +126,7 @@ async def execute_anomaly_operator(
         }, ensure_ascii=False)
 
     if sql_executor is None:
-        from app.skills.sql_execution_pipeline import execute_audit_sql_pipeline
+        from app.skills.sql.sql_execution_pipeline import execute_audit_sql_pipeline
         executor = execute_audit_sql_pipeline
     else:
         executor = sql_executor

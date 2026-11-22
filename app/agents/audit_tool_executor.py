@@ -15,7 +15,7 @@ import inspect
 import re
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from loguru import logger
-from app.skills.probe_guard import is_probe_query
+from app.skills.security.probe_guard import is_probe_query
 
 
 _METADATA_PROBE_REGEX = re.compile(

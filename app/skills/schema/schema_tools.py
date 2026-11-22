@@ -59,7 +59,7 @@ def get_table_schema(table_name: str) -> str:
 @tool
 def calculator(expr: str) -> str:
     """高精度数学计算器。仅支持数字和算术运算符 (+ - * / % **)，指数上限 ±64；拒绝名称、属性访问、函数调用等。防止 eval() 的子类逃逸攻击。"""
-    from app.skills.safe_math_evaluator import is_safe_math_expr, safe_eval_math_expression
+    from app.skills.security.safe_math_evaluator import is_safe_math_expr, safe_eval_math_expression
     if not expr or not is_safe_math_expr(expr):
         return f"非法表达式: {expr!r} (仅允许数字和 + - * / % ( ) ** ，其中 ** 指数上限 ±64)"
     try:
@@ -99,7 +99,7 @@ def lookup_medical_schema(keywords: str = "", table_name: str = "") -> str:
     根据业务关键词或表名（如 'fqz_fymx_test'、'重复收费'、'总金额'）查询对应的物理表字段、DDL 结构及审计合规禁区。
     写 SQL 前必须调用此工具以防止字段幻觉和物理拦截。
     """
-    from app.skills.medical_schema import MedicalSchemaSkill
+    from app.skills.schema.medical_schema import MedicalSchemaSkill
     skill = MedicalSchemaSkill()
     return skill._run(keywords=keywords, table_name=table_name)
 
@@ -110,7 +110,7 @@ def lookup_medical_schema(keywords: str = "", table_name: str = "") -> str:
 @tool
 def search_expert_knowledge(query: str) -> str:
     """检索医保审计专家知识库。从 configs/expert_knowledge.yaml 加载由主题索引的专家提示。"""
-    from app.skills.expert_knowledge_retriever import search_expert_knowledge_hints
+    from app.skills.federated.expert_knowledge_retriever import search_expert_knowledge_hints
     return search_expert_knowledge_hints(query)
 
 @tool
@@ -118,7 +118,7 @@ def expand_medical_codes(intent: str) -> str:
     """
     [V125.0] 业务深度增强：从知识库检索医疗编码建议 (ICD-10/ICD-9)。
     """
-    from app.skills.expert_knowledge_retriever import resolve_medical_code_mapping
+    from app.skills.federated.expert_knowledge_retriever import resolve_medical_code_mapping
     return resolve_medical_code_mapping(intent)
 
 

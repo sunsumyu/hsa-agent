@@ -20,7 +20,7 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.core.prompts import CODER_PROMPT
 from app.infra.neo4j_manager import neo4j_manager
-from app.agents.sql_evidence_resolver import resolve_user_query
+from app.core.sql_evidence_resolver import resolve_user_query
 
 if TYPE_CHECKING:
     from app.core.planning.audit_intent_planner import AuditIntent

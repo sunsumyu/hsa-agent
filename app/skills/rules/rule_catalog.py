@@ -12,8 +12,8 @@ app/skills/rule_catalog.py
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
-from app.skills.rule_pattern_resolver import rule_pattern_resolver, RulePatternResolver
-from app.skills.rule_tolerance_policy import rule_tolerance_policy, RuleTolerancePolicy
+from app.skills.rules.rule_pattern_resolver import rule_pattern_resolver, RulePatternResolver
+from app.skills.rules.rule_tolerance_policy import rule_tolerance_policy, RuleTolerancePolicy
 
 
 class RuleCatalog:

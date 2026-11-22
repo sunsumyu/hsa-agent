@@ -76,7 +76,7 @@ def write_audit_note(category: str, content: str, ttl_days: int = 30) -> str:
     - content: 记录的详细文字内容，请尽量客观、结构化、凝练。
     - ttl_days: 便签有效期（天数），默认 30 天。超过有效期的便签会被降权，不再作为强制模板。
     """
-    from app.skills.audit_note_store import write_note
+    from app.skills.federated.audit_note_store import write_note
     ok = write_note(category=category, content=content, ttl_days=ttl_days)
     if ok:
         return f"✅ 成功写入外部便签簿 [{category.upper()}]！有效期 {ttl_days} 天，过期后自动降权。"
@@ -94,7 +94,7 @@ def read_all_audit_notes() -> str:
     【使用场景】：当上下文重置、窗口切换或进入总结渲染阶段时调用，一键拉回之前固化的全部核查线索。
     【时间衰减】：超过 TTL 的便签会被标记为 [已过期·仅供参考]，不会作为当前查询的强制模板。
     """
-    from app.skills.audit_note_store import read_notes_with_decay, format_notes_envelope
+    from app.skills.federated.audit_note_store import read_notes_with_decay, format_notes_envelope
     content = read_notes_with_decay()
     if not content:
         return "📓 外部便签簿目前为空。在取得阶段性结论或构建出核心 SQL 后，请先调用 write_audit_note 进行固化。"
@@ -105,7 +105,7 @@ def clear_audit_notes() -> str:
     """
     清空外部审计便签：当当前任务彻底结束或开启全新会话时，清空外部便签簿。
     """
-    from app.skills.audit_note_store import clear_notes
+    from app.skills.federated.audit_note_store import clear_notes
     ok = clear_notes()
     if ok:
         return "✅ 外部审计便签簿已成功清空重置！"

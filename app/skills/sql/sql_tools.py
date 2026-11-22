@@ -23,12 +23,12 @@ from app.core.utils import smart_parse_tool_params
 from app.core.registry.skill_protocol import SkillResponse
 
 
-from app.skills.sql_execution_pipeline import execute_audit_sql_pipeline
+from app.skills.sql.sql_execution_pipeline import execute_audit_sql_pipeline
 
 # --- Helper: data sanitization ---
 def _sanitize_results(records: List[Dict], tolerance: Optional[int] = None) -> List[Dict]:
     """[Backward Compatibility] 委托 sql_result_sanitizer 深模块"""
-    from app.skills.sql_result_sanitizer import sanitize_sql_results
+    from app.skills.sql.sql_result_sanitizer import sanitize_sql_results
     return sanitize_sql_results(records, tolerance=tolerance)
 
 async def _execute_audit_sql_logic(
