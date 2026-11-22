@@ -15,7 +15,7 @@ import json
 import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
-from app.routes.chat import router as chat_router
+from app.api.routes.chat import router as chat_router
 from app.core.container import ServiceProvider
 from tests.conftest import InMemoryObservabilityFake
 

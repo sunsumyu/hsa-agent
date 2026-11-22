@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI, BackgroundTasks, Request
 from starlette.testclient import TestClient
 from app.api.chat_stream_coordinator import ChatStreamCoordinator, chat_stream_coordinator
-from app.routes.chat import router as chat_router
+from app.api.routes.chat import router as chat_router
 
 
 @pytest.fixture

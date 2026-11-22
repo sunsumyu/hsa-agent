@@ -70,14 +70,14 @@ from app.api.envelope import register_api_exception_handlers
 register_api_exception_handlers(app)
 
 # [重构 V10.0] 路由分组: palace / misc 端点已提取到 app/routes/
-from app.routes.palace import router as palace_router
-from app.routes.misc import router as misc_router
-from app.routes.graph_state import router as graph_state_router
-from app.routes.chat import router as chat_router
-from app.routes.memory import router as memory_router
-from app.routes.usage import router as usage_router
-from app.routes.prompts import router as prompts_router # [V192.0] 提示词版本管理
-from app.routes.legal_chat import router as legal_chat_router # [Legal Agent] 法律辩法多轮流式路由
+from app.api.routes.palace import router as palace_router
+from app.api.routes.misc import router as misc_router
+from app.api.routes.graph_state import router as graph_state_router
+from app.api.routes.chat import router as chat_router
+from app.api.routes.memory import router as memory_router
+from app.api.routes.usage import router as usage_router
+from app.api.routes.prompts import router as prompts_router # [V192.0] 提示词版本管理
+from app.api.routes.legal_chat import router as legal_chat_router # [Legal Agent] 法律辩法多轮流式路由
 app.include_router(palace_router)
 app.include_router(misc_router)
 app.include_router(graph_state_router)

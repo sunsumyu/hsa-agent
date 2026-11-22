@@ -106,7 +106,7 @@ def test_coordinator_detect_cause():
 
 @pytest.mark.asyncio
 async def test_legal_knowledge_endpoints():
-    from app.routes.legal_chat import get_statutes, get_precedents
+    from app.api.routes.legal_chat import get_statutes, get_precedents
     
     # 检索法条
     res_statutes = await get_statutes(query="利息")
@@ -123,7 +123,7 @@ async def test_legal_knowledge_endpoints():
 
 @pytest.mark.asyncio
 async def test_parse_legal_document():
-    from app.routes.legal_chat import parse_legal_document, DocumentParseRequest
+    from app.api.routes.legal_chat import parse_legal_document, DocumentParseRequest
     
     req = DocumentParseRequest(
         filename="张三借条原件_2023.pdf",

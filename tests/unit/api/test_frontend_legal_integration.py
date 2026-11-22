@@ -12,8 +12,8 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from app.routes.misc import router as misc_router
-from app.routes.chat import router as chat_router
+from app.api.routes.misc import router as misc_router
+from app.api.routes.chat import router as chat_router
 from app.api.envelope import register_api_exception_handlers
 
 

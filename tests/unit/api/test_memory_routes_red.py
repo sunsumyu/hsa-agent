@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-import app.routes.memory as memory_route_module
-from app.routes.memory import router as memory_router
+import app.api.routes.memory as memory_route_module
+from app.api.routes.memory import router as memory_router
 
 
 @pytest.fixture

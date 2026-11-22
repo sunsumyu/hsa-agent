@@ -14,8 +14,8 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app.api.envelope import ResponseEnvelope, register_api_exception_handlers
-from app.routes.graph_state import router as graph_state_router
-from app.routes.misc import router as misc_router
+from app.api.routes.graph_state import router as graph_state_router
+from app.api.routes.misc import router as misc_router
 
 
 @pytest.fixture

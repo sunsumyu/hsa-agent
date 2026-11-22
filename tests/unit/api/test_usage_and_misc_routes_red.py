@@ -15,8 +15,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from starlette.testclient import TestClient
 
-from app.routes.usage import router as usage_router
-from app.routes.misc import router as misc_router
+from app.api.routes.usage import router as usage_router
+from app.api.routes.misc import router as misc_router
 from app.api.envelope import ResponseEnvelope, register_api_exception_handlers
 
 

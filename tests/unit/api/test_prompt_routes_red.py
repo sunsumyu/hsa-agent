@@ -17,8 +17,8 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 from app.core.registry.prompt_version_manager import PromptVersionManager
-import app.routes.prompts as prompts_module
-from app.routes.prompts import router
+import app.api.routes.prompts as prompts_module
+from app.api.routes.prompts import router
 
 
 @pytest.fixture

@@ -15,10 +15,10 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-import app.routes.graph_state as graph_state_module
-import app.routes.palace as palace_module
-from app.routes.graph_state import router as graph_state_router
-from app.routes.palace import router as palace_router
+import app.api.routes.graph_state as graph_state_module
+import app.api.routes.palace as palace_module
+from app.api.routes.graph_state import router as graph_state_router
+from app.api.routes.palace import router as palace_router
 
 
 @pytest.fixture
