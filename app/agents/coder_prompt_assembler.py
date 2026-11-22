@@ -14,13 +14,16 @@ app/agents/coder_prompt_assembler.py
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, Tuple
 from loguru import logger
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from app.core.prompts import CODER_PROMPT
 from app.infra.neo4j_manager import neo4j_manager
 from app.agents.sql_evidence_resolver import resolve_user_query
+
+if TYPE_CHECKING:
+    from app.core.planning.audit_intent_planner import AuditIntent
 
 
 @dataclass
@@ -32,6 +35,7 @@ class CoderPromptPayload:
     related_tables: List[str] = field(default_factory=list)
     is_graph_task: bool = False
     scenario_guidelines: str = ""
+    audit_intent: Optional["AuditIntent"] = None
 
     def __iter__(self):
         """支持直接迭代 prompt_messages，无缝兼容现有 LLM 调用接口"""
@@ -105,18 +109,21 @@ def build_schema_hint(user_q: str) -> Tuple[str, str, List[str]]:
 
 
 def build_scenario_guidelines(
-    user_q: str, 
-    scene_enforcement: Optional[str] = None
+    user_q: str,
+    scene_enforcement: Optional[str] = None,
+    audit_intent: Optional["AuditIntent"] = None,
 ) -> str:
     """
     [企业级 v2.0] 场景化 SQL 刚性防漂移指引注入。
     - 审计意图抽象规划 (Plan-and-Solve: 认知解耦)
     - 场景表格选择器刚性提示优先
+    - 支持注入已消解的 AuditIntent，避免同轮重复抽取 (SSOT)
     """
     scenario_guidelines = ""
 
     from app.core.planning.audit_intent_planner import AuditIntentPlanner
-    audit_intent = AuditIntentPlanner.extract_intent(user_q)
+    if audit_intent is None:
+        audit_intent = AuditIntentPlanner.extract_intent(user_q)
     if audit_intent.enforcement_guidance:
         scenario_guidelines += f"\n\n{audit_intent.enforcement_guidance}\n"
 
@@ -155,15 +162,18 @@ def assemble_coder_prompt(
     tasks_list = state.get("tasks", [])
     scene_enforcement = meta.get("scene_enforcement")
 
-    # 1. 意图与当前轮自包含命题消解
+    # 1. 意图与当前轮自包含命题消解 (AuditIntent 单次抽取，作为 Payload 与场景指引的共同来源)
     user_q = resolve_user_query(state, max_chars=300)
+
+    from app.core.planning.audit_intent_planner import AuditIntentPlanner
+    audit_intent = AuditIntentPlanner.extract_intent(user_q)
 
     # 2. Schema 提示组装与主表提取
     schema_hint, primary_tbl, related_tbls = build_schema_hint(user_q)
 
     # 3. 经验与场景防漂移指引注入
     experiences_combined = "【已启用 GSSC 统一上下文引擎：相关的向量专家经验与外部便签线索已挂载于消息流尾部】"
-    scenario_guidelines = build_scenario_guidelines(user_q, scene_enforcement)
+    scenario_guidelines = build_scenario_guidelines(user_q, scene_enforcement, audit_intent=audit_intent)
     if scenario_guidelines:
         experiences_combined = f"{experiences_combined}\n\n{scenario_guidelines}" if experiences_combined else scenario_guidelines
 
@@ -195,5 +205,6 @@ def assemble_coder_prompt(
         primary_table=primary_tbl,
         related_tables=related_tbls,
         is_graph_task=is_graph_task,
-        scenario_guidelines=scenario_guidelines
+        scenario_guidelines=scenario_guidelines,
+        audit_intent=audit_intent,
     )

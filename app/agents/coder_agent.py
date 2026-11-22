@@ -187,7 +187,7 @@ class AuditCoderAgent:
                     sql=processed["sql_query"],
                     methodology=processed["methodology"],
                     raw_data=processed["raw_data"],
-                    intent=audit_intent,
+                    intent=prompt_payload.audit_intent,
                 )
                 if not post_check.passed:
                     refl_feedback = post_check.error_feedback or "执行结果异常，触发自愈"

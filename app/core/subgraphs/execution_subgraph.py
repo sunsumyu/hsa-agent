@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 app/core/subgraphs/execution_subgraph.py
 ========================================
@@ -61,7 +61,7 @@ class ExecutionSubState(TypedDict, total=False):
     sql_query: Optional[str]
     final_sql: Optional[str]
     raw_data: Optional[Any]
-    evidence_row_count: Optional[int]  # [\u8bc1\u636e\u5bf9\u8d26] \u8bc1\u636e\u901a\u9053\u53ef\u89e3\u6790\u884c\u6570\uff08Append-Only \u7d2f\u52a0\uff09
+    evidence_row_count: Optional[int]  # [证据对账] 证据通道可解析行数（Append-Only 累加）
     sql_validated: Optional[bool]
     execution_trace: Optional[List[str]]
     temp_table: Optional[str]
@@ -258,8 +258,10 @@ async def execution_engine_node(
         "evidence_row_count": int(state.get("evidence_row_count") or 0),
     }
 
+
     # 2. 调用已编译子图
     sub_res = await compiled_execution_subgraph.ainvoke(sub_input, config)
+
 
     # 3. 严格输出投影过滤 (Information Hiding)
     # 仅允许暴露给父图的核心交付物字段

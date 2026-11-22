@@ -207,5 +207,13 @@ class LazyProxy:
         else:
             setattr(self._get_instance(), name, value)
 
+    def __delattr__(self, name: str) -> None:
+        # 与 __getattr__/__setattr__ 保持语义对称：非私有属性删除同样穿透至真实实例。
+        # 缺失此协议会让 patch.object(LazyProxy, ...) 在退出时 delattr 代理壳自身而崩溃。
+        if name.startswith("_"):
+            super().__delattr__(name)
+        else:
+            delattr(self._get_instance(), name)
+
     def __call__(self, *args, **kwargs) -> Any:
         return self._get_instance()(*args, **kwargs)
