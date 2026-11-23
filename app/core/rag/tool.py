@@ -75,7 +75,12 @@ class RAGTool:
         通过生成多维度查询扩展，大幅提升复杂审计场景下的召回率。
         """
         from app.core.memory.rag_utils import generate_mqe_queries, generate_hyde_document, preprocess_markdown_for_embedding
-        from app.core.rag.rag_fusion_ranker import deduplicate_and_rank_hits, render_rag_report
+        from app.core.rag.rag_fusion_ranker import (
+            bm25_rank_hits,
+            rrf_fuse_ranked_lists,
+            rerank_hits_with_api_or_fallback,
+            render_rag_report,
+        )
         
         # 1. 构造扩展查询列表
         expansions = [query]
@@ -90,18 +95,37 @@ class RAGTool:
         expansions = list(dict.fromkeys(expansions))
         logger.info(f"🔍 [RAGTool] 执行扩展检索，查询数: {len(expansions)}")
 
-        # 2. 并行检索收集
+        # 2. 多路 Dense 粗排召回
         pool_limit = limit * candidate_pool_multiplier
+        dense_ranked_lists = []
         all_hits = []
         
         for q in expansions:
             clean_q = preprocess_markdown_for_embedding(q)
             hits = await memory_hub.semantic.recall(clean_q, limit=pool_limit)
-            all_hits.extend(hits)
-        
-        # 3. 排序截断与结构化报告渲染 (委托深模块)
-        sorted_hits = deduplicate_and_rank_hits(all_hits, limit=limit)
-        return render_rag_report(sorted_hits, expansion_count=len(expansions))
+            if hits:
+                dense_ranked_lists.append(hits)
+                all_hits.extend(hits)
+
+        if not all_hits:
+            return render_rag_report([], expansion_count=len(expansions))
+
+        # 3. BM25 稀疏打分通道 + RRF (k=60) 倒数秩融合截取精排候选池
+        bm25_ranked = bm25_rank_hits(query, all_hits)
+        rrf_pool_limit = max(limit * 2, 20)
+        rrf_candidates = rrf_fuse_ranked_lists(
+            ranked_lists=[*dense_ranked_lists, bm25_ranked],
+            k=60,
+            limit=rrf_pool_limit,
+        )
+
+        # 4. 精排阶段：线上 Rerank API 优先，未配置或超时自动降级回 RRF 顺序
+        final_hits = await rerank_hits_with_api_or_fallback(
+            query=query,
+            candidates=rrf_candidates,
+            limit=limit,
+        )
+        return render_rag_report(final_hits, expansion_count=len(expansions))
 
     def _extract_content(self, path: str) -> str:
         """[Backward Compatibility] 委托深模块"""
