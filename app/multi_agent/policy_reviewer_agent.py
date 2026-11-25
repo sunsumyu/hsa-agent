@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from loguru import logger
 
 from app.multi_agent.contracts import ReviewVerdictArtifact, SQLAuditArtifact
@@ -11,6 +11,9 @@ from app.reporting.policy_matcher import match_policies
 from app.skills.federated.law_rag_tools import query_law_database
 from app.skills.rules.analysis_tools import expand_medical_codes, query_knowledge_base
 from app.skills.schema.schema_tools import check_audit_governance
+
+_REVIEW_TOOLS = [query_knowledge_base, query_law_database, expand_medical_codes, check_audit_governance]
+_STATIC_FALLBACK_REVIEW = "建议结合参保人临床主副诊断病历进一步做适应症实质性复核，排除特殊病种合理用药后锁定违规。"
 
 _REVIEWER_SYSTEM_PROMPT = """你是独立的医保政策法规与临床合理性复核专员 (PolicyReviewer)。
 你的职责是打破初筛取证的“确认偏见”，站在客观医学与法定证据标准上对初筛结果进行独立质证：
@@ -44,6 +47,29 @@ def _infer_risk_level(text: str, total_amt: float, total_rows: int) -> str:
     return "中"
 
 
+async def _execute_review_tools(
+    tool_calls: Sequence[Any],
+    tools: Optional[Sequence[Any]] = None,
+) -> List[ToolMessage]:
+    tool_map = {getattr(t, "name", ""): t for t in (tools or _REVIEW_TOOLS)}
+    messages: List[ToolMessage] = []
+    for idx, tc in enumerate(tool_calls):
+        is_dict = isinstance(tc, dict)
+        name = tc.get("name", "") if is_dict else getattr(tc, "name", "")
+        args = (tc.get("args") if is_dict else getattr(tc, "args", None)) or {}
+        tc_id = (tc.get("id") if is_dict else getattr(tc, "id", None)) or f"call_{idx}"
+        tool = tool_map.get(name)
+        if tool is None:
+            messages.append(ToolMessage(content=f"Unknown tool: {name}", tool_call_id=str(tc_id)))
+            continue
+        try:
+            res = await tool.ainvoke(args)
+            messages.append(ToolMessage(content=str(res), tool_call_id=str(tc_id)))
+        except Exception as exc:
+            messages.append(ToolMessage(content=f"Tool error ({name}): {exc}", tool_call_id=str(tc_id)))
+    return messages
+
+
 class PolicyReviewerSubagent:
     """剥离前序 SQL 推导过程、独立执行临床豁免降噪与法规对标的复核智能体。"""
 
@@ -68,18 +94,15 @@ class PolicyReviewerSubagent:
         )
         return [SystemMessage(content=_REVIEWER_SYSTEM_PROMPT), HumanMessage(content=user_brief)]
 
-    async def _call_llm(self, messages: List[BaseMessage], config: Any) -> Any:
+    async def _call_llm(self, messages: List[BaseMessage], config: Any, allow_tools: bool = True) -> Any:
         if self._llm_caller is not None:
-            return await self._llm_caller(role="auditor", messages=messages, config=config)
+            return await self._llm_caller(role="auditor", messages=messages, config=config, allow_tools=allow_tools)
         from app.core.llm_provider import llm_provider
 
-        return await llm_provider.chat(
-            role="auditor",
-            messages=messages,
-            config=config,
-            tools=[query_knowledge_base, query_law_database, expand_medical_codes, check_audit_governance],
-            max_tokens=400,
-        )
+        kwargs: Dict[str, Any] = {"role": "auditor", "messages": messages, "config": config, "max_tokens": 400}
+        if allow_tools:
+            kwargs["tools"] = _REVIEW_TOOLS
+        return await llm_provider.chat(**kwargs)
 
     async def review(
         self,
@@ -94,11 +117,17 @@ class PolicyReviewerSubagent:
 
         review_text = ""
         try:
-            resp = await self._call_llm(messages, config)
+            resp = await self._call_llm(messages, config, allow_tools=True)
+            tool_calls = getattr(resp, "tool_calls", None) or []
+            if tool_calls:
+                tool_msgs = await _execute_review_tools(tool_calls)
+                resp = await self._call_llm([*messages, resp, *tool_msgs], config, allow_tools=False)
             review_text = str(getattr(resp, "content", "") or "").strip()
         except Exception as exc:
             logger.warning(f"[PolicyReviewer] LLM 复核降级为静态法规匹配: {exc}")
-            review_text = "建议结合参保人临床主副诊断病历进一步做适应症实质性复核，排除特殊病种合理用药后锁定违规。"
+
+        if not review_text:
+            review_text = _STATIC_FALLBACK_REVIEW
 
         risk = _infer_risk_level(review_text, total_amt, total_rows)
         citation_note = "; ".join(citations) if citations else "请参考 configs/policy_registry.yaml"

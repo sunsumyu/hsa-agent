@@ -110,3 +110,21 @@ async def test_parallel_sql_subtasks_isolate_exceptions_per_subtask():
     assert artifacts[2].subtask_id == "ok-2"
     assert artifacts[2].validated is True
     assert artifacts[2].total_amount == 125.5
+
+
+@pytest.mark.asyncio
+async def test_sql_auditor_handles_none_coder_result_without_raising():
+    async def none_coder_exec(state, config):
+        return None
+
+    subtasks = [
+        SubTaskSpec(subtask_id="none-1", focus_title="空返回核查", query_instruction="核查空返回"),
+    ]
+    auditor = SQLAuditorSubagent(coder_executor=none_coder_exec)
+    artifacts = await auditor.run_parallel(subtasks, session_id="sess-none")
+
+    assert len(artifacts) == 1
+    assert artifacts[0].subtask_id == "none-1"
+    assert artifacts[0].validated is False
+    assert artifacts[0].row_count == 0
+    assert artifacts[0].total_amount == 0.0

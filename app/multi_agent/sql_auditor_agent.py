@@ -75,7 +75,8 @@ class SQLAuditorSubagent:
 
         try:
             res = await self._invoke_coder(isolated_state, config)
-            raw_str = str((res or {}).get("raw_data") or "")
+            res_dict = res or {}
+            raw_str = str(res_dict.get("raw_data") or "")
             parsed_rows = report_renderer.clean_and_parse_raw_data(raw_str)
             hard_count, hard_sum = AuditMetricEvaluator.extract_totals(parsed_rows)
         except Exception as exc:
@@ -90,12 +91,12 @@ class SQLAuditorSubagent:
         return SQLAuditArtifact(
             subtask_id=subtask.subtask_id,
             focus_title=subtask.focus_title,
-            sql_query=str(res.get("sql_query") or ""),
+            sql_query=str(res_dict.get("sql_query") or ""),
             raw_data=raw_str,
             row_count=hard_count,
             total_amount=hard_sum,
-            validated=bool(res.get("sql_validated", False)),
-            error=res.get("error_log"),
+            validated=bool(res_dict.get("sql_validated", False)),
+            error=res_dict.get("error_log"),
         )
 
     async def run_parallel(

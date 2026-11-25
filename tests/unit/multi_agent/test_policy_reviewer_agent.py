@@ -94,3 +94,70 @@ async def test_policy_reviewer_degrades_gracefully_on_llm_error():
     assert verdict.risk_level == "高"
     assert len(verdict.statutory_citations) >= 1
     assert "复核" in verdict.exemption_notes
+
+
+@pytest.mark.asyncio
+async def test_policy_reviewer_executes_tool_calls_and_synthesizes_review(monkeypatch):
+    call_records = []
+    tool_invocations = []
+
+    class FakeTool:
+        name = "query_law_database"
+
+        async def ainvoke(self, args):
+            tool_invocations.append(args)
+            return "《医疗保障基金使用监督管理条例》第十五条"
+
+    monkeypatch.setattr(
+        "app.multi_agent.policy_reviewer_agent._REVIEW_TOOLS",
+        [FakeTool()],
+    )
+
+    async def fake_llm(role, messages, allow_tools=True, **kwargs):
+        call_records.append((allow_tools, len(messages)))
+        if len(call_records) == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[{"id": "tc-1", "name": "query_law_database", "args": {"query": "重复收费"}}],
+            )
+        return AIMessage(content="【临床豁免复核】：已核对法规库，确认存在重复收费违规。\n【风险等级】：高")
+
+    sql_art = SQLAuditArtifact(
+        subtask_id="s4",
+        focus_title="重复收费核查",
+        sql_query="SELECT 1",
+        raw_data='[{"cnt": 12}]',
+        row_count=12,
+        total_amount=3600.0,
+        validated=True,
+    )
+
+    reviewer = PolicyReviewerSubagent(llm_caller=fake_llm)
+    verdict = await reviewer.review(user_query="重复收费核查", sql_artifacts=[sql_art])
+
+    assert tool_invocations == [{"query": "重复收费"}]
+    assert call_records == [(True, 2), (False, 4)]
+    assert "重复收费违规" in verdict.exemption_notes
+    assert verdict.risk_level == "高"
+
+
+@pytest.mark.asyncio
+async def test_policy_reviewer_falls_back_to_static_when_llm_returns_empty_content():
+    async def empty_llm(role, messages, **kwargs):
+        return AIMessage(content="   ")
+
+    sql_art = SQLAuditArtifact(
+        subtask_id="s5",
+        focus_title="空回复兜底",
+        sql_query="SELECT 1",
+        raw_data="[]",
+        row_count=0,
+        total_amount=0.0,
+        validated=True,
+    )
+
+    reviewer = PolicyReviewerSubagent(llm_caller=empty_llm)
+    verdict = await reviewer.review(user_query="常规核查", sql_artifacts=[sql_art])
+
+    assert verdict.exemption_notes != ""
+    assert "复核" in verdict.exemption_notes
