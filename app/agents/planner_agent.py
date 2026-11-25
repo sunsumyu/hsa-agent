@@ -48,11 +48,16 @@ class AuditPlannerAgent:
             cached_plan = evaluate_action_cache(user_input, target_prompt_ver="2.0")
             if cached_plan:
                 span.set_result("命中经验缓存")
-                return {
-                    **cached_plan,
-                    "execution_trace": tracer.to_legacy_list(),
-                }
-            span.set_result("未命中缓存")
+            else:
+                span.set_result("未命中缓存")
+
+        if cached_plan:
+            # [FIX-TRACE] to_legacy_list 必须在 span 提交后调用：
+            # 否则 CACHE_CHECK 事件尚未入列，命中分支的执行轨迹恒为空
+            return {
+                **cached_plan,
+                "execution_trace": tracer.to_legacy_list(),
+            }
 
         # 2. Fast Route 快速路由
         route = fast_router.classify(user_input)
@@ -68,7 +73,6 @@ class AuditPlannerAgent:
                     "extra_filters": route.extra_filters,
                     "user_question": user_input,
                 },
-                "retry_count": 0,
                 "messages": []
             }
 
@@ -98,7 +102,6 @@ class AuditPlannerAgent:
             "tasks": tasks[:3],
             "methodology": methodology,
             "messages": [compact_msg],
-            "retry_count": 0,
             "execution_trace": tracer.to_legacy_list()
         }
 

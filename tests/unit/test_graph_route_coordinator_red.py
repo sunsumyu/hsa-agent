@@ -65,3 +65,32 @@ def test_route_sqlexec_post_error_retry_exceeded():
     }
     # 超过 MAX_RETRIES (1)，降级走向 CONSOLIDATOR
     assert route_sqlexec_post(state) == "CONSOLIDATOR"
+
+
+def test_route_aligner_post_direct_reporter():
+    from app.orchestration.graph_route_coordinator import route_aligner_post
+    assert route_aligner_post({"metadata": {"synthesis_done": True}}) == "REPORTER"
+    assert route_aligner_post({"metadata": {}}) == "PLANNER"
+
+
+def test_route_planner_post_circuit_breaker():
+    from app.orchestration.graph_route_coordinator import route_planner_post
+    state = {"error_log": "Gate 1: Intent check failed", "plan_retry_count": 2}
+    assert route_planner_post(state, max_retries=1) == "CONSOLIDATOR"
+
+
+def test_route_critic_post_circuit_breaker():
+    from app.orchestration.graph_route_coordinator import route_critic_post
+    assert route_critic_post({"error_log": "意图理解不一致", "plan_retry_count": 2}, max_retries=1) == "CONSOLIDATOR"
+    assert route_critic_post({"error_log": "SQL syntax error", "sql_retry_count": 2}, max_retries=1) == "CONSOLIDATOR"
+
+
+def test_route_sqlexec_post_tool_step_limit():
+    from app.orchestration.graph_route_coordinator import route_sqlexec_post
+    ai_msg = AIMessage(content="", tool_calls=[{"id": "call_1", "name": "execute_query", "args": {}}])
+    state = {
+        "messages": [ai_msg],
+        "retry_count": 0,
+        "tool_step_count": 5,
+    }
+    assert route_sqlexec_post(state, max_retries=1, max_tool_steps=5) == "CONSOLIDATOR"

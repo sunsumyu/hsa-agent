@@ -42,21 +42,31 @@ async def chat(request: Request, background_tasks: BackgroundTasks):
     message, model_id, session_id = await parse_chat_request(request)
     logger.info(f"收到请求 [Session: {session_id}][Model: {model_id}]: {message}")
 
+    # [Matt Deep Module] 双轨内容协商 (Content Negotiation): 自动协商标准 SSE 与历史带内暗号
+    accept_hdr = request.headers.get("accept", "")
+    query_fmt = request.query_params.get("format", "")
+    is_sse = ("text/event-stream" in accept_hdr) or (query_fmt == "sse")
+    stream_format = "sse" if is_sse else "legacy"
+
     stream_gen = chat_stream_coordinator.coordinate_stream(
         request=request,
         background_tasks=background_tasks,
         session_id=session_id,
         model_id=model_id,
         message=message,
+        stream_format=stream_format,
     )
+
+    media_type = "text/event-stream" if is_sse else "text/plain"
 
     return StreamingResponse(
         stream_gen,
-        media_type="text/plain",
+        media_type=media_type,
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
             "Expires": "0",
+            "X-Stream-Protocol": "typed-sse-v2" if is_sse else "legacy-inband-v1",
         },
     )
 

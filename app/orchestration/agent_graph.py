@@ -95,8 +95,11 @@ async def planner_node(state: AuditState, config: RunnableConfig):
         logger.warning(f"🚨 [Gate 1 Intent Intercept] {gate_error}")
         result["error_log"] = gate_error
         result["retry_count"] = state.get("retry_count", 0) + 1
+        result["plan_retry_count"] = state.get("plan_retry_count", 0) + 1
     else:
         result["error_log"] = None
+    # 上游规划完成进入 SQLEXEC 前重置单阶段工具调用步数
+    result["tool_step_count"] = 0
 
     pipeline_tracker.on_node_end("PLANNER", state, result)  # [V178.10]
     return result
@@ -136,7 +139,9 @@ async def sqlexec_node(state: AuditState, config: RunnableConfig):
             logger.warning(f"🚨 [Gate 3 Result Intercept] {gate_error}")
             res["error_log"] = gate_error
             res["retry_count"] = state.get("retry_count", 0) + 1
+            res["sql_retry_count"] = state.get("sql_retry_count", 0) + 1
 
+    res["tool_step_count"] = state.get("tool_step_count", 0) + 1
     logger.info(f"🔍 [DEBUG Graph] sqlexec_node returned: sql_query = {repr(res.get('sql_query'))}")
     pipeline_tracker.on_node_end("SQLEXEC", state, res)  # [V178.10]
     return res
@@ -146,6 +151,7 @@ async def critic_node(state: AuditState, config: RunnableConfig):
     from app.agents.reflection_agent import reflection_agent
     pipeline_tracker.on_node_start("CRITIC", state)  # [V178.10]
     result = await reflection_agent.reflect(state, config)
+    result["tool_step_count"] = 0
     pipeline_tracker.on_node_end("CRITIC", state, result)  # [V178.10]
     return result
 
@@ -192,6 +198,7 @@ async def human_approval_node(state: AuditState, config: RunnableConfig):
 # 路由逻辑与工作流构建 (委托至 graph_route_coordinator 深模块)
 # ============================================================
 from app.orchestration.graph_route_coordinator import (
+    route_aligner_post as _route_aligner_post,
     route_planner_post as _route_planner_post,
     route_critic_post as _route_critic_post,
     route_sqlexec_post as _route_sqlexec_post,
@@ -208,7 +215,14 @@ def _build_workflow_skeleton() -> StateGraph:
     wf.add_node("HUMAN_APPROVAL", human_approval_node)
 
     wf.set_entry_point("ALIGNER")
-    wf.add_edge("ALIGNER", "PLANNER")
+    wf.add_conditional_edges(
+        "ALIGNER",
+        _route_aligner_post,
+        {
+            "PLANNER": "PLANNER",
+            "REPORTER": "REPORTER",
+        },
+    )
     # [V2.0 NEW] 使用条件路由连接 PLANNER 与下一跳
     wf.add_conditional_edges(
         "PLANNER",
@@ -236,7 +250,8 @@ def _build_workflow_skeleton() -> StateGraph:
         _route_critic_post,
         {
             "PLANNER": "PLANNER",
-            "SQLEXEC": "SQLEXEC"
+            "SQLEXEC": "SQLEXEC",
+            "CONSOLIDATOR": "CONSOLIDATOR",
         }
     )
     wf.add_edge("CONSOLIDATOR", "REPORTER")

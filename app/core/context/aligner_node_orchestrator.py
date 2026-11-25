@@ -33,6 +33,8 @@ async def orchestrate_aligner_node(state: AuditState, config: Optional[RunnableC
     # 2. [SPEC-227/V228] 执行上下文指代消解与任务意图分类
     # (TurnAnalysis 数据类契约，通过 __iter__ 兼容旧三元组解包，真实返回与测试 mock 返回均可消费)
     resolved_query, turn_type, key_entities = coreference_rewriter.resolve_coreference(raw_input, state)
+    if coreference_rewriter.needs_llm_coreference_fallback(raw_input, resolved_query, turn_type, state):
+        resolved_query = await coreference_rewriter.llm_fallback_rewrite(raw_input, state, config=config)
     user_input = resolved_query
     logger.info(f"🧭 [AlignerNode] 当前轮次意图分类: {turn_type} | 命题消解: 「{user_input[:50]}...」")
 
@@ -87,7 +89,10 @@ async def orchestrate_aligner_node(state: AuditState, config: Optional[RunnableC
             "sql_query": "",
             "sql_validated": False,
             "error_log": None,
-            "retry_count": 0
+            "retry_count": 0,
+            "plan_retry_count": 0,
+            "sql_retry_count": 0,
+            "tool_step_count": 0,
         }
 
     except Exception as e:

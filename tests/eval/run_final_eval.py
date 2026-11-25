@@ -9,7 +9,7 @@ import asyncio
 import os
 import json
 import time
-from typing import List, Dict
+from typing import List, Dict, Optional
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -168,8 +168,9 @@ class ProductionBenchmarkRunner:
                 "latency": time.time() - start_time
             }
 
-    async def run_suite(self, model_id: str = "qwen-max"):
-        logger.info(f"🚀 Production Benchmark Suite (V35.0) — Model: [{model_id}]")
+    async def run_suite(self, model_id: Optional[str] = None):
+        display_model = model_id or "default-pool"
+        logger.info(f"🚀 Production Benchmark Suite (V35.0) — Model: [{display_model}]")
         logger.info(f"📊 Dataset: {len(self.dataset)} cases")
         
         for i, item in enumerate(self.dataset):
@@ -177,7 +178,7 @@ class ProductionBenchmarkRunner:
             self.results.append(res)
             await asyncio.sleep(1)  # 请求频率控制
         
-        self.generate_report(model_id)
+        self.generate_report(display_model)
 
     def generate_report(self, model_id: str):
         report_path = "data/performance_audit_report.md"
@@ -255,5 +256,4 @@ if __name__ == "__main__":
     os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
     
     runner = ProductionBenchmarkRunner()
-    # 使用 qwen-max 进行评估 (工具调用质量最稳定)
-    asyncio.run(runner.run_suite("qwen-max"))
+    asyncio.run(runner.run_suite(os.getenv("EVAL_MODEL_ID") or None))

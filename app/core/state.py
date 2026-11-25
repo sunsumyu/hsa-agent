@@ -64,6 +64,9 @@ class WorkflowState(TypedDict, total=False):
     messages: Annotated[Sequence[BaseMessage], _default_message_reducer]
     session_id: str
     retry_count: int
+    plan_retry_count: int
+    sql_retry_count: int
+    tool_step_count: int
     error_log: Optional[str]
     human_input: Optional[str]
     is_awaiting_human: bool

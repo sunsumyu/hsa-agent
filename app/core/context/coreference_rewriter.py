@@ -490,6 +490,99 @@ class ContextualQueryRewriter:
         # 3. 其余意图（CHITCHAT/PREFERENCE/CONSOLIDATE/SECURITY_BLOCK）：不做取证命题改写
         return TurnAnalysis(query=q, turn_type=turn_type)
 
+    _UNRESOLVED_ANAPHORA_MARKERS: Tuple[str, ...] = (
+        "它", "他", "她", "这家", "那家", "这个", "那个", "那几个", "这几个",
+        "第二名", "第三名", "前几名", "刚才", "上面", "前面", "前一个", "上一个",
+        "其余", "另外", "后者", "前者", "那批", "这批", "再查下", "再看看",
+    )
+
+    @classmethod
+    def needs_llm_coreference_fallback(
+        cls,
+        raw_query: str,
+        resolved_query: str,
+        turn_type: str,
+        state: Dict[str, Any],
+    ) -> bool:
+        """
+        条件兜底门控：仅当正则未改写、属于取证查询、存在前序上下文且句子含未消解指代/过短残缺时，
+        才触发轻量 LLM 上下文指代改写；常规直白查询保持 0ms / 0 Token 零开销。
+        """
+        if turn_type != cls.TASK_QUERY:
+            return False
+        q = (raw_query or "").strip()
+        if not q or resolved_query.strip() != q:
+            return False
+
+        msgs = state.get("messages") or []
+        findings = state.get("accumulated_findings") or []
+        if len(msgs) < 2 and not findings:
+            return False
+
+        has_marker = any(marker in q for marker in cls._UNRESOLVED_ANAPHORA_MARKERS)
+        is_short_fragment = len(q) <= 10
+        return has_marker or is_short_fragment
+
+    @classmethod
+    async def llm_fallback_rewrite(
+        cls,
+        raw_query: str,
+        state: Dict[str, Any],
+        config: Any = None,
+    ) -> str:
+        """
+        [长尾指代兜底] 调用轻量模型结合最近几轮上下文将残缺指代句改写为自包含审计命题。
+        任何异常均安全降级为原句，绝不阻断主流程。
+        """
+        q = (raw_query or "").strip()
+        try:
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.core.llm_provider import llm_provider
+
+            history_lines: List[str] = []
+            for msg in (state.get("messages") or [])[-4:]:
+                role_name = getattr(msg, "type", msg.__class__.__name__)
+                content = str(getattr(msg, "content", "") or "").strip()
+                if content:
+                    history_lines.append(f"[{role_name}]: {content[:240]}")
+
+            findings = state.get("accumulated_findings") or []
+            if findings:
+                last_f = findings[-1]
+                prev_q = last_f.get("resolved_query") or last_f.get("user_query")
+                ents = last_f.get("key_entities") or []
+                if prev_q or ents:
+                    history_lines.append(f"[最近取证上下文]: 命题={prev_q} | 实体={ents}")
+
+            history_block = "\n".join(history_lines) if history_lines else "无"
+            prompt_msgs = [
+                SystemMessage(
+                    content=(
+                        "你是医保审计系统的指代消解助手。请结合对话历史，把用户当前包含代词或省略主语的提问，"
+                        "改写为一句主语完整、独立清晰的中文审计查询命题。\n"
+                        "要求：1) 只输出改写后的单句，不要解释；2) 严禁臆造历史中不存在的机构名、金额或时间条件；"
+                        "3) 若无法确定指代对象，原样返回当前提问。"
+                    )
+                ),
+                HumanMessage(
+                    content=f"对话历史：\n{history_block}\n\n当前用户提问：{q}\n\n改写后的独立命题："
+                ),
+            ]
+
+            resp = await llm_provider.chat(
+                role="planner_light",
+                messages=prompt_msgs,
+                config=config,
+                temperature=0.0,
+            )
+            rewritten = str(getattr(resp, "content", "") or "").strip().strip("「」\"'")
+            if rewritten and len(rewritten) <= 300:
+                logger.info(f"🪄 [CoreferenceFallback] 轻量 LLM 长尾消解: 「{q}」 -> 「{rewritten[:60]}」")
+                return rewritten
+        except Exception as e:
+            logger.warning(f"⚠️ [CoreferenceFallback] 轻量 LLM 消解降级为原句: {e}")
+        return q
+
 
 # ============ 意图->实体绑定注册表（"每种意图从哪取实体"的知识收敛于一处） ============
 
