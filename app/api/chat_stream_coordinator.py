@@ -147,6 +147,7 @@ class _LangGraphEventTranslator:
                 "DATA_EXPERT",
                 "AUDITOR",
                 "FINANCIAL_EXPERT",
+                "MULTI_AGENT_HUB",
                 "REPORTER",
                 "SOLO_EXPERT",
             ):

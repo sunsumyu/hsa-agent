@@ -22,6 +22,7 @@ _NODE_DISPLAY_NAMES: Dict[str, str] = {
     "DATA_EXPERT": "数据外联专家",
     "AUDITOR": "政策合规专家",
     "FINANCIAL_EXPERT": "精算核算专家",
+    "MULTI_AGENT_HUB": "异构多专家协同中枢",
     "REPORTER": "稽核报告终审",
     "SOLO_EXPERT": "全能审计专家",
 }

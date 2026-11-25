@@ -155,6 +155,15 @@ async def critic_node(state: AuditState, config: RunnableConfig):
     pipeline_tracker.on_node_end("CRITIC", state, result)  # [V178.10]
     return result
 
+async def multi_agent_hub_node(state: AuditState, config: RunnableConfig):
+    """[V230.0] L2 上下文物理隔离异构多专家协同中枢节点"""
+    from app.multi_agent.hub_orchestrator import multi_agent_hub
+    pipeline_tracker.on_node_start("MULTI_AGENT_HUB", state)
+    result = await multi_agent_hub.execute_hub(state, config)
+    pipeline_tracker.on_node_end("MULTI_AGENT_HUB", state, result)
+    return result
+
+
 async def reporter_node(state: AuditState, config: RunnableConfig):
     """[V150.0] 委托至 ReporterNodeOrchestrator 执行报告渲染与事实对齐 [Matt Pocock Deep Module]"""
     logger.info(f"🔍 [DEBUG Graph] reporter_node received: sql_query = {repr(state.get('sql_query'))}")
@@ -204,15 +213,20 @@ from app.orchestration.graph_route_coordinator import (
     route_sqlexec_post as _route_sqlexec_post,
 )
 
-def _build_workflow_skeleton() -> StateGraph:
-    wf = StateGraph(AuditState)
+def _register_graph_nodes(wf: StateGraph) -> None:
     wf.add_node("PLANNER", planner_node)
     wf.add_node("ALIGNER", aligner_node)
+    wf.add_node("MULTI_AGENT_HUB", multi_agent_hub_node)
     wf.add_node("SQLEXEC", sqlexec_node)
     wf.add_node("CRITIC", critic_node)
     wf.add_node("REPORTER", reporter_node)
     wf.add_node("CONSOLIDATOR", consolidator_node)
     wf.add_node("HUMAN_APPROVAL", human_approval_node)
+
+
+def _build_workflow_skeleton() -> StateGraph:
+    wf = StateGraph(AuditState)
+    _register_graph_nodes(wf)
 
     wf.set_entry_point("ALIGNER")
     wf.add_conditional_edges(
@@ -220,10 +234,11 @@ def _build_workflow_skeleton() -> StateGraph:
         _route_aligner_post,
         {
             "PLANNER": "PLANNER",
+            "MULTI_AGENT_HUB": "MULTI_AGENT_HUB",
             "REPORTER": "REPORTER",
         },
     )
-    # [V2.0 NEW] 使用条件路由连接 PLANNER 与下一跳
+    wf.add_edge("MULTI_AGENT_HUB", "CONSOLIDATOR")
     wf.add_conditional_edges(
         "PLANNER",
         _route_planner_post,
@@ -234,17 +249,16 @@ def _build_workflow_skeleton() -> StateGraph:
         }
     )
     wf.add_conditional_edges(
-        "SQLEXEC", 
-        _route_sqlexec_post, 
+        "SQLEXEC",
+        _route_sqlexec_post,
         {
-            "SQLEXEC": "SQLEXEC", 
-            "CRITIC": "CRITIC", 
+            "SQLEXEC": "SQLEXEC",
+            "CRITIC": "CRITIC",
             "CONSOLIDATOR": "CONSOLIDATOR",
-            "HUMAN_APPROVAL": "HUMAN_APPROVAL"  # 正常路由到审批节点
+            "HUMAN_APPROVAL": "HUMAN_APPROVAL"
         }
     )
-    wf.add_edge("HUMAN_APPROVAL", END) # 审批节点是自动流程的终点
-    # [V2.0 NEW] 使用条件路由决定 CRITIC 纠偏后的下一跳
+    wf.add_edge("HUMAN_APPROVAL", END)
     wf.add_conditional_edges(
         "CRITIC",
         _route_critic_post,

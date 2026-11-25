@@ -12,11 +12,14 @@ MAX_TOOL_STEPS = 5
 
 
 def route_aligner_post(state: AuditState) -> str:
-    """ALIGNER 后的条件路由：非取证直通响应（synthesis_done）直达 REPORTER，否则进入 PLANNER。"""
+    """ALIGNER 后的条件路由：直通响应直达 REPORTER，L2 复杂跨模态任务进入 MULTI_AGENT_HUB，其余进入 PLANNER。"""
     metadata = state.get("metadata") or {}
     if metadata.get("synthesis_done"):
         logger.info("⚡ [Graph Route] ALIGNER 命中直通分流，跳过 PLANNER/CONSOLIDATOR 直达 REPORTER。")
         return "REPORTER"
+    if metadata.get("execution_tier") == "L2_MULTI_AGENT":
+        logger.info("🕸️ [Graph Route] ALIGNER 识别为 L2 异构多专家任务，路由至 MULTI_AGENT_HUB。")
+        return "MULTI_AGENT_HUB"
     return "PLANNER"
 
 
