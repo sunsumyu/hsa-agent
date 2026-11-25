@@ -66,6 +66,27 @@ class FederatedSideloadBuffer:
             "instruction": f"请立即编写 SQL，使用 INNER JOIN {temp_table} ON 主表的关键ID = {temp_table}.id 来关联查询明细及报销金额。",
         }
 
+    def drop_temp_table(self, temp_table: str, client: Any = None) -> bool:
+        """安全回收 ClickHouse 联邦侧载内存临时表。"""
+        if not temp_table or not temp_table.startswith("fqz_temp_sl_"):
+            return False
+        drop_sql = f"DROP TABLE IF EXISTS {temp_table}"
+        try:
+            if client is None:
+                from app.infra.db_conn import get_clickhouse_client
+                client = get_clickhouse_client()
+            underlying = getattr(client, "client", client)
+            if hasattr(underlying, "execute"):
+                underlying.execute(drop_sql)
+            elif hasattr(underlying, "command"):
+                underlying.command(drop_sql)
+            else:
+                return False
+            return True
+        except Exception as e:
+            logger.debug(f"[FederatedSideloadBuffer] 回收临时表跳过 ({temp_table}): {e}")
+            return False
+
 
 # 单例默认实例
 federated_sideload_buffer = FederatedSideloadBuffer()

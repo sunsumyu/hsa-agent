@@ -24,6 +24,7 @@ class ConsolidationPayload:
     methodology: str
     is_successful: bool
     audit_timestamp: Optional[str] = None
+    execution_tier: Optional[str] = None
 
 def extract_consolidation_payload(state: Dict[str, Any]) -> ConsolidationPayload:
     """[纯函数提取器] 从状态字典中提取出固化所需切片，并判定有效性 (无副作用)"""
@@ -57,6 +58,7 @@ def extract_consolidation_payload(state: Dict[str, Any]) -> ConsolidationPayload
         methodology=methodology,
         is_successful=is_successful,
         audit_timestamp=metadata.get("audit_timestamp"),
+        execution_tier=metadata.get("execution_tier"),
     )
 
 class AuditConsolidatorAgent:
@@ -76,23 +78,25 @@ class AuditConsolidatorAgent:
 
         logger.info(f"✨ [Consolidator] 正在为问题「{payload.user_input[:15]}...」执行经验沉淀...")
 
-        # 1. 语义/缓存层 (旧版兼容，增加版本指纹)
-        try:
-            experience_manager.save_audit_experience(payload.tasks, payload.sql)
-            if payload.user_input:
-                current_fingerprint = {
-                    "prompt_version": "2.0",
-                    "schema_hash": "hsa_v2_core"
-                }
-                action_cache_manager.save(
-                    payload.user_input, 
-                    payload.sql, 
-                    tasks=payload.tasks, 
-                    methodology=payload.methodology, 
-                    fingerprint=current_fingerprint
-                )
-        except Exception as e:
-            logger.warning(f"兼容层保存失败: {e}")
+        # 1. 语义/缓存层 (L2 多维协同或多 SQL 任务跳过单条 ActionCache 缓存，防局部 SQL 覆盖全维度语义)
+        is_multi_sql_l2 = payload.execution_tier == "L2_MULTI_AGENT" or len(payload.sql_history) > 1
+        if not is_multi_sql_l2:
+            try:
+                experience_manager.save_audit_experience(payload.tasks, payload.sql)
+                if payload.user_input:
+                    current_fingerprint = {
+                        "prompt_version": "2.0",
+                        "schema_hash": "hsa_v2_core"
+                    }
+                    action_cache_manager.save(
+                        payload.user_input,
+                        payload.sql,
+                        tasks=payload.tasks,
+                        methodology=payload.methodology,
+                        fingerprint=current_fingerprint
+                    )
+            except Exception as e:
+                logger.warning(f"兼容层保存失败: {e}")
 
         # 2. 企业级分层记忆层 (V3 Episodic Memory)
         try:

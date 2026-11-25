@@ -97,7 +97,11 @@ async def orchestrate_aligner_node(state: AuditState, config: Optional[RunnableC
             return {
                 "current_turn_query": user_input,
                 "turn_type": turn_type,
-                "metadata": {**metadata, "execution_tier": tier_plan.tier.value},
+                "metadata": {
+                    **metadata,
+                    "execution_tier": tier_plan.tier.value,
+                    "execution_plan": tier_plan.model_dump(mode="json"),
+                },
                 "messages": normalized_msgs,
             }
         return await _run_semantic_alignment(user_input, turn_type, metadata, normalized_msgs, config)

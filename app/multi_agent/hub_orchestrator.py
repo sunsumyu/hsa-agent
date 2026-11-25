@@ -51,6 +51,13 @@ def _build_hub_summary_and_methodology(
     return summary_md, methodology
 
 
+def _cleanup_sideload_temp_table(temp_table: Optional[str]) -> None:
+    if not temp_table:
+        return
+    from app.skills.federated.federated_sideload_buffer import federated_sideload_buffer
+    federated_sideload_buffer.drop_temp_table(temp_table)
+
+
 class MultiAgentHubOrchestrator:
     """L2 异构多专家协同中枢：按计划串联图谱侦查、并发数仓核算与独立法规质证。"""
 
@@ -77,12 +84,16 @@ class MultiAgentHubOrchestrator:
             graph_clue = await self._graph.investigate(user_q, config=config)
             trace.append(f"GRAPH_DETECTIVE:succeeded={graph_clue.succeeded},temp={graph_clue.temp_table}")
 
-        sql_artifacts = await self._sql.run_parallel(
-            plan.subtasks,
-            session_id=session_id,
-            config=config,
-            graph_clue=graph_clue,
-        )
+        try:
+            sql_artifacts = await self._sql.run_parallel(
+                plan.subtasks,
+                session_id=session_id,
+                config=config,
+                graph_clue=graph_clue,
+            )
+        finally:
+            if graph_clue and graph_clue.succeeded:
+                _cleanup_sideload_temp_table(graph_clue.temp_table)
         trace.append(f"SQL_AUDITOR_POOL:completed={len(sql_artifacts)}")
 
         verdict = None

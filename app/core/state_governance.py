@@ -89,6 +89,8 @@ def create_turn_reset_patch(state: Optional[Mapping[str, Any]] = None) -> Dict[s
     metadata["fast_route_id"] = None
     metadata["direct_response"] = None
     metadata["semantic_alignment"] = None
+    metadata["execution_tier"] = None
+    metadata["execution_plan"] = None
 
     return {
         "current_turn_query": None,
