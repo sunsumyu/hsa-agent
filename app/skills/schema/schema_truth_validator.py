@@ -77,6 +77,32 @@ def suggest_field_replacement(hallucinated: str) -> str:
     return "无法自动推测正确字段。"
 
 
+SIDELOAD_TEMP_PREFIX = "fqz_temp_sl_"
+
+
+def _collect_allowed_physical_columns(tables: list[str]) -> set[str]:
+    """聚合业务表物理字段，并为联邦侧载内存临时表开放标准 id 列。"""
+    cols: set[str] = set()
+    for t_name in tables:
+        if t_name.startswith(SIDELOAD_TEMP_PREFIX):
+            cols.add("id")
+        else:
+            cols.update(schema_registry.get_table_columns(t_name))
+    return cols
+
+
+def _extract_business_tables(expression: exp.Expression) -> list[str]:
+    """提取当前 SQL 涉及的所有物理业务表 (排除 CTE 临时表以及系统元数据库表)。"""
+    cte_names = {cte.alias.lower() for cte in expression.find_all(exp.CTE) if cte.alias}
+    tables: list[str] = []
+    for t in expression.find_all(exp.Table):
+        t_name = t.name.lower()
+        is_sys = bool(t.db and t.db.lower() in {"system", "information_schema"})
+        if not is_sys and t_name not in cte_names:
+            tables.append(t_name)
+    return tables
+
+
 def validate_column_and_function_existence(expression: exp.Expression) -> None:
     """
     [物理真理对撞] 基于 AST 执行严格的表级字段与函数校验。
@@ -85,56 +111,31 @@ def validate_column_and_function_existence(expression: exp.Expression) -> None:
     from app.skills.security import SecurityViolationError
     from app.infra.neo4j_manager import field_kg
 
-    # 1. 提取当前 SQL 涉及的所有物理业务表 (排除 CTE 临时表以及系统元数据库表)
-    cte_names = set()
-    for cte in expression.find_all(exp.CTE):
-        if cte.alias:
-            cte_names.add(cte.alias.lower())
-
-    tables = []
-    for t in expression.find_all(exp.Table):
-        t_name = t.name.lower()
-        is_sys = bool(t.db and t.db.lower() in {"system", "information_schema"})
-        if not is_sys and t_name not in cte_names:
-            tables.append(t_name)
-
-    # 若纯为系统元数据表探查（如 system.columns 或 information_schema.columns），跳过业务字段对撞
+    tables = _extract_business_tables(expression)
     if not tables:
         return
 
-    # 2. 构建针对当前表的“物理真理库” (通过 SchemaRegistry 统一深接缝)
-    physical_columns = set()
-    for t_name in tables:
-        physical_columns.update(schema_registry.get_table_columns(t_name))
-
-    # 3. 常见聚合函数与本地别名
+    physical_columns = _collect_allowed_physical_columns(tables)
     local_aliases = {alias.alias.lower() for alias in expression.find_all(exp.Alias)}
 
     for node in expression.walk():
-        # 校验字段 (exp.Column)
         if isinstance(node, exp.Column):
             col_name = node.name.lower()
-            # 排除别名和标准计算列
             if col_name in local_aliases or col_name in {"*", "1"}:
                 continue
 
-            # 核心拦截：如果不在当前表的物理列中，且 FieldKG 无法映射
-            if col_name not in physical_columns:
-                resolved = field_kg.resolve(col_name)
-                if not resolved:
-                    suggestion = suggest_field_replacement(col_name)
-                    logger.warning(f"🛡️ [SchemaTruthValidator] 物理字段拦截: {tables} -> `{col_name}`")
-                    raise SecurityViolationError(
-                        f"【物理拦截】字段 `{col_name}` 在当前表 {tables} 中不存在！"
-                        f"{suggestion} "
-                        f"请通过 `lookup_medical_schema` 工具获取正确物理字段。"
-                    )
+            if col_name not in physical_columns and not field_kg.resolve(col_name):
+                suggestion = suggest_field_replacement(col_name)
+                logger.warning(f"🛡️ [SchemaTruthValidator] 物理字段拦截: {tables} -> `{col_name}`")
+                raise SecurityViolationError(
+                    f"【物理拦截】字段 `{col_name}` 在当前表 {tables} 中不存在！"
+                    f"{suggestion} "
+                    f"请通过 `lookup_medical_schema` 工具获取正确物理字段。"
+                )
 
-        # 校验函数 (exp.Func)
         elif isinstance(node, exp.Func):
             func_name = node.key.lower()
             if func_name not in ALLOWED_FUNCTIONS:
-                # 针对 year/month 这种典型幻觉做专门引导
                 if func_name in {"year", "month", "day"}:
                     raise SecurityViolationError(
                         f"【物理拦截】检测到非法函数 `{func_name}()`。ClickHouse 不支持此语法。"
