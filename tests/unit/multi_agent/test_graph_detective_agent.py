@@ -62,3 +62,57 @@ async def test_graph_detective_gracefully_degrades_when_neo4j_offline():
     assert artifact.succeeded is False
     assert artifact.degraded_to_relational is True
     assert artifact.temp_table is None
+
+
+def test_graph_only_tools_schema_has_no_fqz_leak():
+    import json
+    from app.multi_agent.graph_detective_agent import build_graph_only_tools
+
+    for tool in build_graph_only_tools():
+        blob = json.dumps(
+            [tool.name, tool.description, tool.get_input_jsonschema()], ensure_ascii=False
+        )
+        assert "fqz_" not in blob
+
+
+@pytest.mark.asyncio
+async def test_bound_tools_passed_to_llm_are_fqz_free():
+    from app.multi_agent import graph_detective_agent as mod
+
+    agent = GraphDetectiveSubagent(sideload_fn=AsyncMock(return_value={"status": "ERROR", "error_message": "x"}))
+    blob = "\n".join(f"{t.name} {t.description} {t.get_input_jsonschema()}" for t in agent._tools)
+    assert "fqz_" not in blob
+    assert mod.build_graph_only_tools()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("err", [
+    "联邦侧载失败: Neo.ClientError.Statement.SyntaxError: Invalid input",
+    "侧载到 ClickHouse 失败: table write error",
+])
+async def test_non_connectivity_failures_do_not_degrade(err):
+    async def fake_llm(role, messages, **kwargs):
+        return AIMessage(content="", tool_calls=[])
+
+    agent = GraphDetectiveSubagent(
+        llm_caller=fake_llm,
+        sideload_fn=AsyncMock(return_value={"status": "ERROR", "error_message": err}),
+    )
+    artifact = await agent.investigate("q")
+    assert artifact.succeeded is False
+    assert artifact.degraded_to_relational is False
+
+
+@pytest.mark.asyncio
+async def test_sideload_exception_returns_degraded_artifact():
+    async def fake_llm(role, messages, **kwargs):
+        return AIMessage(content="", tool_calls=[])
+
+    agent = GraphDetectiveSubagent(
+        llm_caller=fake_llm, sideload_fn=AsyncMock(side_effect=RuntimeError("boom"))
+    )
+    artifact = await agent.investigate("q")
+    assert artifact.succeeded is False
+    assert artifact.degraded_to_relational is True
+    assert artifact.temp_table is None
+    assert "boom" in artifact.summary
