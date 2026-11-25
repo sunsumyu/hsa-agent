@@ -93,9 +93,11 @@ class GraphDetectiveSubagent:
 
     async def _call_llm(self, messages: List[BaseMessage], config: Any) -> Any:
         if self._llm_caller is not None:
-            return await self._llm_caller(role="planner_heavy", messages=messages, config=config)
-        from app.core.llm_provider import llm_provider
-        return await llm_provider.chat(
+            chat_fn = self._llm_caller
+        else:
+            from app.core.llm_provider import llm_provider
+            chat_fn = llm_provider.chat
+        return await chat_fn(
             role="auditor",
             messages=messages,
             config=config,

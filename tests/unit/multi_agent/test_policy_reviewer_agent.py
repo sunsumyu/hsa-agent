@@ -113,8 +113,8 @@ async def test_policy_reviewer_executes_tool_calls_and_synthesizes_review(monkey
         [FakeTool()],
     )
 
-    async def fake_llm(role, messages, allow_tools=True, **kwargs):
-        call_records.append((allow_tools, len(messages)))
+    async def fake_llm(role, messages, tools=None, **kwargs):
+        call_records.append((tools is not None, len(messages)))
         if len(call_records) == 1:
             return AIMessage(
                 content="",
@@ -161,3 +161,22 @@ async def test_policy_reviewer_falls_back_to_static_when_llm_returns_empty_conte
 
     assert verdict.exemption_notes != ""
     assert "复核" in verdict.exemption_notes
+
+
+@pytest.mark.asyncio
+async def test_policy_reviewer_does_not_misclassify_negated_high_risk_text():
+    async def fake_llm(role, messages, **kwargs):
+        return AIMessage(content="【临床豁免复核】：属于合理适应症，无需高额处罚，风险较低。\n【风险等级】：低")
+
+    sql_art = SQLAuditArtifact(
+        subtask_id="s6",
+        focus_title="豁免核查",
+        sql_query="SELECT 1",
+        raw_data="[]",
+        row_count=0,
+        total_amount=0.0,
+        validated=True,
+    )
+    reviewer = PolicyReviewerSubagent(llm_caller=fake_llm)
+    verdict = await reviewer.review(user_query="临床合理性复核", sql_artifacts=[sql_art])
+    assert verdict.risk_level == "低"

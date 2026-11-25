@@ -1,5 +1,17 @@
-﻿from app.multi_agent.contracts import ExecutionTier
+﻿import pytest
+from pydantic import ValidationError
+from app.multi_agent.contracts import ExecutionTier, ReviewVerdictArtifact
 from app.multi_agent.tier_classifier import classify_execution_plan
+
+
+def test_l0_fast_route_and_synthesis_bypass():
+    assert classify_execution_plan("x", {"fast_route_id": "GENDER_CONFLICT"}).tier == ExecutionTier.L0_FAST
+    assert classify_execution_plan("x", {"synthesis_done": True}).tier == ExecutionTier.L0_FAST
+
+
+def test_review_verdict_artifact_enforces_risk_level_literal():
+    with pytest.raises(ValidationError):
+        ReviewVerdictArtifact(risk_level="超高")
 
 
 def test_routine_single_point_sql_routes_to_l1():

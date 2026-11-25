@@ -40,9 +40,12 @@ def _resolve_statutory_citations(user_query: str) -> List[str]:
 
 
 def _infer_risk_level(text: str, total_amt: float, total_rows: int) -> str:
-    if "高" in text or total_amt >= 3000.0 or total_rows >= 50:
+    explicit = re.search(r"风险等级[：:\s]*【?\s*(高|中|低)", text or "")
+    if explicit:
+        return explicit.group(1)
+    if total_amt >= 3000.0 or total_rows >= 50:
         return "高"
-    if total_rows == 0 or "低" in text:
+    if total_rows == 0:
         return "低"
     return "中"
 
@@ -96,13 +99,15 @@ class PolicyReviewerSubagent:
 
     async def _call_llm(self, messages: List[BaseMessage], config: Any, allow_tools: bool = True) -> Any:
         if self._llm_caller is not None:
-            return await self._llm_caller(role="auditor", messages=messages, config=config, allow_tools=allow_tools)
-        from app.core.llm_provider import llm_provider
+            chat_fn = self._llm_caller
+        else:
+            from app.core.llm_provider import llm_provider
+            chat_fn = llm_provider.chat
 
         kwargs: Dict[str, Any] = {"role": "auditor", "messages": messages, "config": config, "max_tokens": 400}
         if allow_tools:
             kwargs["tools"] = _REVIEW_TOOLS
-        return await llm_provider.chat(**kwargs)
+        return await chat_fn(**kwargs)
 
     async def review(
         self,

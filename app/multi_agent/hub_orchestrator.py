@@ -67,7 +67,9 @@ class MultiAgentHubOrchestrator:
     async def execute_hub(self, state: Dict[str, Any], config: Any = None) -> Dict[str, Any]:
         user_q = resolve_user_query(state)
         session_id = str(state.get("session_id") or "default")
-        plan = classify_execution_plan(user_q, state.get("metadata"))
+        metadata = state.get("metadata") or {}
+        raw_plan = metadata.get("execution_plan")
+        plan = OrchestrationPlan.model_validate(raw_plan) if raw_plan else classify_execution_plan(user_q, metadata)
         trace: List[str] = [f"L2_HUB_INIT:{plan.reason}"]
 
         graph_clue = None

@@ -77,12 +77,24 @@ def test_graph_only_tools_schema_has_no_fqz_leak():
 
 @pytest.mark.asyncio
 async def test_bound_tools_passed_to_llm_are_fqz_free():
-    from app.multi_agent import graph_detective_agent as mod
+    captured_tools = []
+    captured_roles = []
 
-    agent = GraphDetectiveSubagent(sideload_fn=AsyncMock(return_value={"status": "ERROR", "error_message": "x"}))
-    blob = "\n".join(f"{t.name} {t.description} {t.get_input_jsonschema()}" for t in agent._tools)
+    async def fake_llm(role, messages, tools=None, **kwargs):
+        captured_roles.append(role)
+        captured_tools.extend(tools or [])
+        return AIMessage(content="", tool_calls=[])
+
+    agent = GraphDetectiveSubagent(
+        llm_caller=fake_llm,
+        sideload_fn=AsyncMock(return_value={"status": "ERROR", "error_message": "未连接"}),
+    )
+    await agent.investigate("排查共用手机号团伙")
+
+    assert captured_roles == ["auditor"]
+    assert len(captured_tools) == 2
+    blob = "\n".join(f"{t.name} {t.description} {t.get_input_jsonschema()}" for t in captured_tools)
     assert "fqz_" not in blob
-    assert mod.build_graph_only_tools()
 
 
 @pytest.mark.asyncio
