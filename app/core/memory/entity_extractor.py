@@ -48,6 +48,13 @@ RECORD_PATTERNS = [
 ]
 
 
+def _sync_legacy_globals(findings: List[str], session_id: str) -> None:
+    """同步更新向后兼容的模块级最新会话缓存引用。"""
+    global _latest_findings, _latest_session_id
+    _latest_findings = findings
+    _latest_session_id = session_id
+
+
 class EvidenceKnowledgeGraphManager:
     """
     [Matt Pocock Deep Module]
@@ -206,9 +213,7 @@ class EvidenceKnowledgeGraphManager:
             while len(self._session_findings) > self._max_sessions:
                 self._session_findings.popitem(last=False)
 
-            global _latest_findings, _latest_session_id
-            _latest_findings = self._session_findings[sid]
-            _latest_session_id = sid
+            _sync_legacy_globals(self._session_findings[sid], sid)
 
     def get_session_findings(self, session_id: Optional[str] = None) -> List[str]:
         """获取指定会话（或最新会话）的 findings 列表"""
@@ -248,9 +253,7 @@ class EvidenceKnowledgeGraphManager:
         with self._lock:
             self._session_findings.clear()
             self._latest_session_id = ""
-            global _latest_findings, _latest_session_id
-            _latest_findings = []
-            _latest_session_id = ""
+            _sync_legacy_globals([], "")
 
 
 # ── 全局单例与向后兼容接口 ────────────────────────────────────────────────────────

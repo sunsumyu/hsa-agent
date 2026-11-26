@@ -17,197 +17,25 @@ app/core/context/coreference_rewriter.py
 """
 
 import re
-from dataclasses import dataclass
-from typing import Dict, Any, Tuple, List, Optional, FrozenSet
+from typing import Dict, Any, Tuple, List, Optional
 from loguru import logger
 
-
-# ============ 结构化信号常量（改写管道产出，供下游按需消费） ============
-SIGNAL_ANAPHORA_EXPANDED = "anaphora_expanded"   # 句首代词『上述/其中』已展开为上下文从句
-SIGNAL_SUSPECT_BOUND = "suspect_entity_bound"    # 嫌疑机构指代词已绑定到具体实体
-SIGNAL_SCENE_SWITCH = "scene_switch"             # 用户明确要求切换核查场景（下游应阻断历史条件继承）
-SIGNAL_CORRECTION = "correction"                 # 口语纠偏反悔，旧口径已作废
-
-
-# ============ 返回契约 ============
-
-@dataclass(frozen=True)
-class TurnAnalysis:
-    """
-    单轮对话的确定性分析结果（意图分类 + 命题消解 + 实体绑定 + 管道信号）。
-    保持旧三元组解包兼容：`query, turn_type, entities = resolve_coreference(...)`。
-    """
-    query: str                                # 消解后的独立命题
-    turn_type: str                            # 任务意图分类结果
-    entities: Tuple[str, ...] = ()            # 绑定到的关键实体（来源由意图绑定器决定）
-    signals: FrozenSet[str] = frozenset()     # 管道产出的结构化信号
-    matched_rules: Tuple[str, ...] = ()       # QUERY 命题改写链实际生效的规则名（按序）
-
-    def __iter__(self):
-        """向后兼容旧三元组解包协议 (query, turn_type, entities)"""
-        return iter((self.query, self.turn_type, self.entities))
-
-
-# ============ 取证命题改写规则管道 ============
-
-@dataclass(frozen=True)
-class RewriteContext:
-    """改写管道共享上下文（state 派生量预提取一次，规则间不重复读取）"""
-    original_query: str          # 本轮原始提问（纠偏规则显式依赖它推翻旧口径）
-    state: Dict[str, Any]
-    last_finding: Dict[str, Any]
-    prev_resolved: str           # 上一轮已消解命题（上下文继承与纠偏的锚点）
-
-
-@dataclass(frozen=True)
-class RuleOutcome:
-    """单条规则产出：改写后的命题 + 是否生效 + 信号/实体增量"""
-    query: str
-    matched: bool
-    signal: Optional[str] = None
-    entities: Tuple[str, ...] = ()
-
-
-class _RewriteRule:
-    """命题改写规则基类：子类实现 apply，保证「触发->剥除->改写」原子耦合"""
-    name: str = "base"
-
-    def apply(self, query: str, ctx: RewriteContext) -> RuleOutcome:
-        raise NotImplementedError
-
-
-class _AnaphoraExpansionRule(_RewriteRule):
-    """
-    D1: 句首代词『上述/其中』展开为上一轮命题的限定从句。
-    触发与剥除同源对齐（模式最长优先）：仅当句首代词被真实剥除后才前置上下文，
-    句中出现代词（如“排名前十的机构，其中...”）不构成句首指代，命题原样透传。
-    """
-    name = "anaphora_expansion"
-
-    # 句首剥除模式（按长度优先排序，保证『上述违规记录中』先于『上述违规』被整段剥除）
-    _STRIP_PATTERNS: Tuple[str, ...] = (
-        r"^在上述违规记录中[，,]?",
-        r"^上述违规记录中[，,]?",
-        r"^上述违规记录[，,]?",
-        r"^在上述记录中[，,]?",
-        r"^上述记录中[，,]?",
-        r"^上述记录[，,]?",
-        r"^上述违规[，,]?",
-        r"^其中[，,]?",
-    )
-
-    def apply(self, query: str, ctx: RewriteContext) -> RuleOutcome:
-        for pattern in self._STRIP_PATTERNS:
-            stripped = re.sub(pattern, "", query, count=1)
-            if stripped == query:
-                continue  # 句首无该代词形态，未发生剥除则不触发改写
-            context_prefix = ContextualQueryRewriter._build_context_prefix(ctx.prev_resolved)
-            if not context_prefix:
-                return RuleOutcome(query=query, matched=False)
-            resolved = f"{context_prefix}{stripped.strip()}"
-            logger.info(f"🔗 [CoreferenceRewriter] 展开代词『上述/其中』-> 「{resolved[:60]}...」")
-            return RuleOutcome(query=resolved, matched=True, signal=SIGNAL_ANAPHORA_EXPANDED)
-        return RuleOutcome(query=query, matched=False)
-
-
-class _SuspectEntityRule(_RewriteRule):
-    """
-    D2: 嫌疑机构指代词（该医院/排名第一等）绑定到便签或最近发现中的具体实体。
-    """
-    name = "suspect_entity_binding"
-
-    _SUSPECT_KEYWORDS: Tuple[str, ...] = (
-        "刚刚记入便签的重点嫌疑医院",
-        "刚刚记入便签的重点嫌疑机构",
-        "该重点嫌疑机构",
-        "该重点嫌疑医院",
-        "该医院",
-        "这家医院",
-        "排名第一的医疗机构",
-        "排名第一的医院",
-    )
-
-    def apply(self, query: str, ctx: RewriteContext) -> RuleOutcome:
-        if not any(kw in query for kw in self._SUSPECT_KEYWORDS):
-            return RuleOutcome(query=query, matched=False)
-
-        suspect = ContextualQueryRewriter.extract_top_entity_from_notes(ctx.state)
-        if not suspect and ctx.last_finding.get("key_entities"):
-            suspect = ctx.last_finding["key_entities"][0]
-        if not suspect:
-            return RuleOutcome(query=query, matched=False)
-
-        resolved = query
-        for kw in self._SUSPECT_KEYWORDS:
-            if kw in resolved:
-                resolved = resolved.replace(kw, f"重点嫌疑机构『{suspect}』")
-        logger.info(f"🔗 [CoreferenceRewriter] 绑定嫌疑机构实体『{suspect}』-> 「{resolved[:60]}...」")
-        return RuleOutcome(query=resolved, matched=True,
-                           signal=SIGNAL_SUSPECT_BOUND, entities=(suspect,))
-
-
-class _SceneSwitchSignalRule(_RewriteRule):
-    """
-    D3: 场景切换纯信号规则（不改写命题）。
-    阻断跨场景历史条件继承的决策由下游消费 TurnAnalysis.signals 自行实现。
-    """
-    name = "scene_switch_signal"
-
-    def apply(self, query: str, ctx: RewriteContext) -> RuleOutcome:
-        if "切换核查场景" in query or "切换场景" in query:
-            logger.info("🔀 [CoreferenceRewriter] 识别到明确场景切换指令，产出 scene_switch 信号供下游阻断历史继承。")
-            return RuleOutcome(query=query, matched=True, signal=SIGNAL_SCENE_SWITCH)
-        return RuleOutcome(query=query, matched=False)
-
-
-class _CorrectionWrapRule(_RewriteRule):
-    """
-    D4: 口语反悔与参数纠偏 (In-Context Parameter Correction)。
-    显式基于 original_query 包装（纠偏=推翻旧口径，管道中此前所有改写作废），
-    该丢弃行为由规则自身声明，而非依赖调用顺序的隐式约定。
-    """
-    name = "correction_wrap"
-
-    _CORRECTION_MARKERS: Tuple[str, ...] = (
-        "不对", "改一下", "改成", "改用", "重新查", "算了",
-        "太高了", "太少了", "加进来", "并进来", "一起算", "换成",
-    )
-
-    def apply(self, query: str, ctx: RewriteContext) -> RuleOutcome:
-        if not any(kw in query for kw in self._CORRECTION_MARKERS):
-            return RuleOutcome(query=query, matched=False)
-        if not ctx.prev_resolved:
-            return RuleOutcome(query=query, matched=False)
-        clean_prev = re.sub(r"[？?。！!\s]+$", "", ctx.prev_resolved.strip())
-        resolved = f"【用户纠偏指令：针对前序任务『{clean_prev}』，推翻旧条件并按最新口径重新执行】: {ctx.original_query}"
-        logger.info(f"🔄 [CoreferenceRewriter] 识别到口语纠偏反悔 -> 「{resolved[:60]}...」")
-        return RuleOutcome(query=resolved, matched=True, signal=SIGNAL_CORRECTION)
-
-
-# 管道执行顺序与旧实现 D1->D2->D3->D4 严格一致，行为由单测锁定
-_REWRITE_PIPELINE: Tuple[_RewriteRule, ...] = (
-    _AnaphoraExpansionRule(),
-    _SuspectEntityRule(),
-    _SceneSwitchSignalRule(),
-    _CorrectionWrapRule(),
+from app.core.context.coreference_rules import (
+    SIGNAL_ANAPHORA_EXPANDED,
+    SIGNAL_SUSPECT_BOUND,
+    SIGNAL_SCENE_SWITCH,
+    SIGNAL_CORRECTION,
+    TurnAnalysis,
+    RewriteContext,
+    RuleOutcome,
+    _RewriteRule,
+    _AnaphoraExpansionRule,
+    _SuspectEntityRule,
+    _SceneSwitchSignalRule,
+    _CorrectionWrapRule,
+    _REWRITE_PIPELINE,
+    _run_rewrite_pipeline,
 )
-
-
-def _run_rewrite_pipeline(query: str, ctx: RewriteContext) -> Tuple[str, List[str], set, List[str]]:
-    """按序执行改写规则，聚合 (最终命题, 生效规则名, 信号集, 实体增量)"""
-    resolved = query
-    matched_rules: List[str] = []
-    signals: set = set()
-    entities: List[str] = []
-    for rule in _REWRITE_PIPELINE:
-        outcome = rule.apply(resolved, ctx)
-        if outcome.matched:
-            matched_rules.append(rule.name)
-            if outcome.signal:
-                signals.add(outcome.signal)
-            entities.extend(outcome.entities)
-        resolved = outcome.query
-    return resolved, matched_rules, signals, entities
 
 
 class ContextualQueryRewriter:
@@ -449,6 +277,8 @@ class ContextualQueryRewriter:
                 state=state,
                 last_finding=last_finding,
                 prev_resolved=last_finding.get("resolved_query") or last_finding.get("user_query") or "",
+                prefix_builder=cls._build_context_prefix,
+                entity_extractor=cls.extract_top_entity_from_notes,
             )
             resolved, matched_rules, signals, entities = _run_rewrite_pipeline(q, ctx)
             return TurnAnalysis(
