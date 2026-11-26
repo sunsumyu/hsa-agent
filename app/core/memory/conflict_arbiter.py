@@ -146,6 +146,79 @@ class MemoryConflictArbiter:
         survived_indices = {a.original_index for a in resolved.active_assertions if not a.is_superseded}
         return [item for idx, item in enumerate(items) if idx in survived_indices]
 
+    def _arbitrate_slot_group(
+        self,
+        key: Tuple[str, str],
+        group: List[MemoryAssertion],
+    ) -> Tuple[List[MemoryAssertion], List[MemoryAssertion], int]:
+        active: List[MemoryAssertion] = []
+        superseded: List[MemoryAssertion] = []
+        conflicts = 0
+        unexpired_group: List[MemoryAssertion] = []
+
+        for item in group:
+            if item.polarity == "EXPIRED":
+                item.is_superseded = True
+                item.superseded_by = "历史适用时效已届满自然失效"
+                superseded.append(item)
+                conflicts += 1
+            else:
+                unexpired_group.append(item)
+
+        if not unexpired_group:
+            return active, superseded, conflicts
+        if len(unexpired_group) == 1:
+            return [unexpired_group[0]], superseded, conflicts
+
+        unexpired_group.sort(key=lambda x: x.timestamp)
+        polarities = {item.polarity for item in unexpired_group}
+        has_conflict = (
+            ("POSITIVE" in polarities and "NEGATIVE" in polarities)
+            or key[1].upper() in ("THRESHOLD_AMOUNT", "REPORT_FORMAT_TABLE")
+        )
+        if not has_conflict:
+            return unexpired_group, superseded, conflicts
+
+        conflicts += 1
+        latest = unexpired_group[-1]
+        logger.info(
+            f"⚔️ [MemoryConflictArbiter] 发现语义事实冲突: 实体『{key[0]}』维度『{key[1]}』 "
+            f"最新事实 ({latest.timestamp.strftime('%Y-%m-%d %H:%M:%S')}) 自动覆写 {len(unexpired_group)-1} 条旧记录！"
+        )
+        latest.is_superseded = False
+        latest.superseded_by = f"覆盖了历史 {len(unexpired_group)-1} 条矛盾声明"
+        active.append(latest)
+        for older in unexpired_group[:-1]:
+            older.is_superseded = True
+            older.superseded_by = f"已被最新事实 ({latest.timestamp.strftime('%Y-%m-%d')}) 覆盖作废"
+            superseded.append(older)
+        return active, superseded, conflicts
+
+    def _apply_specificity_overrides(
+        self,
+        active: List[MemoryAssertion],
+        superseded: List[MemoryAssertion],
+    ) -> int:
+        specific_exceptions = [
+            a for a in active
+            if a.attribute == "AUDIT_EXEMPTION" and a.entity not in ("基层医疗机构", "通则", "GLOBAL") and not a.is_superseded
+        ]
+        if not specific_exceptions:
+            return 0
+        general_exemptions = [
+            a for a in active
+            if a.attribute == "AUDIT_EXEMPTION" and a.entity in ("基层医疗机构", "通则", "GLOBAL")
+        ]
+        overrides = 0
+        for gen in general_exemptions:
+            gen.is_superseded = True
+            gen.superseded_by = "已被涉案重点机构特例穿透规则覆盖"
+            if gen in active:
+                active.remove(gen)
+            superseded.append(gen)
+            overrides += 1
+        return overrides
+
     def _arbitrate_assertions(self, assertions: List[MemoryAssertion]) -> ConflictResolutionResult:
         """核心仲裁算法：按 (Entity, Attribute) 聚合，时序冲突与层级覆盖裁决"""
         groups: Dict[Tuple[str, str], List[MemoryAssertion]] = {}
@@ -153,89 +226,22 @@ class MemoryConflictArbiter:
             key = (a.entity.strip().lower(), a.attribute.strip().lower())
             groups.setdefault(key, []).append(a)
 
-        active = []
-        superseded = []
+        active: List[MemoryAssertion] = []
+        superseded: List[MemoryAssertion] = []
         conflict_count = 0
-
         for key, group in groups.items():
-            # 1. 优先处理自然过期命题 (Case 5: Time-Bounded Scope Expiration)
-            unexpired_group = []
-            for item in group:
-                if item.polarity == "EXPIRED":
-                    item.is_superseded = True
-                    item.superseded_by = "历史适用时效已届满自然失效"
-                    superseded.append(item)
-                    conflict_count += 1
-                else:
-                    unexpired_group.append(item)
+            grp_active, grp_sup, grp_conflicts = self._arbitrate_slot_group(key, group)
+            active.extend(grp_active)
+            superseded.extend(grp_sup)
+            conflict_count += grp_conflicts
 
-            if not unexpired_group:
-                continue
-
-            if len(unexpired_group) == 1:
-                active.append(unexpired_group[0])
-                continue
-
-            # 按时间戳从早到晚排序
-            unexpired_group.sort(key=lambda x: x.timestamp)
-            polarities = {item.polarity for item in unexpired_group}
-
-            # 判定冲突标准：
-            # A. 存在互斥极性 (POSITIVE vs NEGATIVE)
-            # B. 数值/口径阈值突变 (THRESHOLD_AMOUNT)
-            # C. 报告排版偏好突变 (REPORT_FORMAT_TABLE)
-            has_conflict = (
-                (len(polarities) > 1 and ("POSITIVE" in polarities and "NEGATIVE" in polarities))
-                or key[1].upper() in ("THRESHOLD_AMOUNT", "REPORT_FORMAT_TABLE")
-            )
-
-            if has_conflict:
-                conflict_count += 1
-                latest = unexpired_group[-1]
-                logger.info(
-                    f"⚔️ [MemoryConflictArbiter] 发现语义事实冲突: 实体『{key[0]}』维度『{key[1]}』 "
-                    f"最新事实 ({latest.timestamp.strftime('%Y-%m-%d %H:%M:%S')}) 自动覆写 {len(unexpired_group)-1} 条旧记录！"
-                )
-                
-                # 最新的获胜 (Last-Write-Wins, 支持链式反转 A -> B -> A)
-                latest.is_superseded = False
-                latest.superseded_by = f"覆盖了历史 {len(unexpired_group)-1} 条矛盾声明"
-                active.append(latest)
-
-                for older in unexpired_group[:-1]:
-                    older.is_superseded = True
-                    older.superseded_by = f"已被最新事实 ({latest.timestamp.strftime('%Y-%m-%d')}) 覆盖作废"
-                    superseded.append(older)
-            else:
-                active.extend(unexpired_group)
-
-        # 2. Case 4: 特例下级覆盖通则上级冲突 (Specificity Hierarchy)
-        # 若存在具体重点实体的 AUDIT_EXEMPTION (如某卫生室取消免检/强制穿透)，且存在通用通则 (如基层医疗机构小额免检)
-        specific_exceptions = [
-            a for a in active 
-            if a.attribute == "AUDIT_EXEMPTION" and a.entity not in ("基层医疗机构", "通则", "GLOBAL") and not a.is_superseded
-        ]
-        if specific_exceptions:
-            general_exemptions = [
-                a for a in active 
-                if a.attribute == "AUDIT_EXEMPTION" and a.entity in ("基层医疗机构", "通则", "GLOBAL")
-            ]
-            for gen in general_exemptions:
-                gen.is_superseded = True
-                gen.superseded_by = "已被涉案重点机构特例穿透规则覆盖"
-                if gen in active:
-                    active.remove(gen)
-                superseded.append(gen)
-                conflict_count += 1
-
-        # 恢复原始相对顺序
+        conflict_count += self._apply_specificity_overrides(active, superseded)
         active.sort(key=lambda x: x.original_index)
         superseded.sort(key=lambda x: x.original_index)
-
         return ConflictResolutionResult(
             active_assertions=active,
             superseded_assertions=superseded,
-            conflicts_detected=conflict_count
+            conflicts_detected=conflict_count,
         )
 
     def _extract_semantic_slot(self, text: str, now: Optional[datetime.datetime] = None) -> Tuple[str, str, str]:

@@ -224,135 +224,107 @@ class ContextualQueryRewriter:
     TASK_CONSOLIDATE = "CONSOLIDATE"
     TASK_SECURITY_BLOCK = "SECURITY_BLOCK"
 
+    _DOMAIN_KEYWORDS = (
+        "医保", "医疗", "报销", "结算", "住院", "门诊", "费用", "药店", "医院", "卫生室", "卫生院",
+        "诊所", "处方", "药品", "耗材", "基金", "违规", "欺诈", "套现", "虚假", "排查", "核查",
+        "审计", "底稿", "便签", "统计", "查询", "名单", "排名", "清单", "金额", "单据", "明细",
+        "患者", "参保", "机构", "大额", "超量", "频次", "阈值", "穿透", "下钻", "表", "sql", "数据",
+    )
+
     @classmethod
-    def classify_turn_type(cls, query: str) -> str:
-        """识别当前轮次的基础意图类型"""
-        q = query.strip()
-        q_lower = q.lower()
-
-        # 0. [Matt Pocock Shift-Left Seam] 恶意注入与越权越狱指令左移拦截 (0ms 熔断)
-        # 注意：本层是高精度省算力的快速通道（降低 LLM 调用）。攻击者写法无法穷举，
-        # 漏网样本会落入正常取证流水线，由执行层 SQLGuardian 的 AST 白名单
-        # (ALLOWED_KEYS/FORBIDDEN_NODES, 解析失败即拒绝) 兜底，最终由 ClickHouse 连接 readonly=1 物理兜底
-        # (见 app/skills/security/security.py 与 app/infra/db_conn.py)。
-
-        # 归一化：剥除内联注释以瓦解 /*...*/ 关键字混淆，统一全角分号为半角分号
+    def _is_security_violation(cls, q: str, q_lower: str) -> bool:
         q_norm = re.sub(r"/\*.*?\*/", " ", q_lower).replace("；", ";")
-
         has_destructive_sql = bool(re.search(
             r"\b(drop|truncate|alter|rename)\s+(table|database|dictionary|view|column)\b"
             r"|\bcreate\s+(table|database|dictionary|view)\b"
             r"|\b(delete\s+from|insert\s+into)\b"
             r"|\bupdate\s+[a-zA-Z0-9_.]+\s+set\b"
-            r"|\bgrant\s+.*\s+to\b"
-            r"|\brevoke\s+.*\s+from\b"
-            r"|\bkill\s+query\b"
-            r"|\bsystem\s+(reload|drop|shutdown|flush|sync)\b"
-            r"|\bset\s+readonly\s*=\s*0\b"
+            r"|\bgrant\s+.*\s+to\b|\brevoke\s+.*\s+from\b|\bkill\s+query\b"
+            r"|\bsystem\s+(reload|drop|shutdown|flush|sync)\b|\bset\s+readonly\s*=\s*0\b"
             r"|;\s*(drop|delete|insert|update|create|alter|truncate|grant|revoke|kill|system|rename|set\s+readonly)\b"
             r"|;\s*(--|#)",
             q_norm,
         ))
-
-        # 越狱与提示词覆盖模式 (直接命中强越狱特征，或者弱越狱+离题干扰)
         has_direct_jailbreak = bool(re.search(
             r"\bignore\s+(all\s+rules|previous\s+instructions|all\s+previous)\b"
             r"|\b(system\s+prompt\s+override|system\s+instruction)\b"
-            r"|\bdisregard\s+all\s+(previous|safety)\b"
-            r"|\b(dan\s+mode|developer\s+mode)\b"
+            r"|\bdisregard\s+all\s+(previous|safety)\b|\b(dan\s+mode|developer\s+mode)\b"
             r"|忽略(?:之前的?|全部)?(?:所有|全部)(?:规则|设定|指令|限制)"
             r"|无视所有(安全|合规|系统)?(限制|规则|要求|审查)"
-            r"|从现在[起开始].*(开发者模式|没有任何限制|扮演.*黑客)"
-            r"|\[system\s+message:.*\]"
-            r"|<system>.*</system>",
+            r"|从现在[起开始].*(开发者模式|没有任何限制|扮演.*黑客)|\[system\s+message:.*\]|<system>.*</system>",
             q_norm,
         ))
-        has_jailbreak_kw = any(kw in q_lower for kw in ["ignore all rules", "忽略之前所有", "忽略所有规则", "system prompt override"])
-        has_off_topic_noise = any(kw in q for kw in ["七言绝句", "写一首诗", "写首诗", "赞美西湖", "write a poem", "write me a poem"])
+        has_jb_kw = any(kw in q_lower for kw in ("ignore all rules", "忽略之前所有", "忽略所有规则", "system prompt override"))
+        has_noise = any(kw in q for kw in ("七言绝句", "写一首诗", "写首诗", "赞美西湖", "write a poem", "write me a poem"))
+        return has_destructive_sql or has_direct_jailbreak or (has_jb_kw and has_noise)
 
-        if has_destructive_sql or has_direct_jailbreak or (has_jailbreak_kw and has_off_topic_noise):
+    @classmethod
+    def _unwrap_json_query(cls, q: str) -> str:
+        if not (q.startswith("{") and ("'message'" in q or '"message"' in q or "'input'" in q or '"input"' in q)):
+            return q
+        try:
+            import ast
+            parsed_dict = ast.literal_eval(q)
+            if isinstance(parsed_dict, dict):
+                for k in ("message", "input", "query", "content", "prompt", "text"):
+                    if k in parsed_dict and parsed_dict[k]:
+                        return str(parsed_dict[k]).strip()
+        except (ValueError, SyntaxError, TypeError) as exc:
+            logger.debug(f"[CoreferenceRewriter] JSON payload unwrap skipped: {exc}")
+        return q
+
+    @classmethod
+    def _is_chitchat_turn(cls, q_lower: str, has_domain_context: bool) -> bool:
+        if has_domain_context:
+            return False
+        chitchat_patterns = (
+            r"(你好|您好|早[上安好]?|下午好|晚上好|hi|hello|hey)\b",
+            r"(你是谁|你叫什么|你能做什么|自我介绍|介绍一下你自己|功能介绍|你的功能)",
+            r"(我?喜欢吃|我想吃|吃点什么|好吃吗|喝点什么|吃鸡肉|吃牛肉|吃猪肉|吃鱼|喝咖啡|喝奶茶)",
+            r"(今天天气|明天天气|好冷|好热|好累|好无聊|讲个笑话|说个笑话|开心|难过)",
+        )
+        return any(re.search(p, q_lower) for p in chitchat_patterns)
+
+    @classmethod
+    def _classify_workflow_intent(cls, q: str, q_lower: str) -> str:
+        pref_patterns = (
+            r"(喜欢用表格|必须使用表格|用markdown表格|改用表格|恢复表格|重新启用表格|取消表格|改用纯文字|改用无序列表|列表排版|输出格式改成)",
+            r"(以后大额排查按|默认阈值改成|习惯使用.*阈值)",
+        )
+        if any(re.search(p, q_lower) for p in pref_patterns) and not any(w in q for w in ("查询", "调取", "查一下", "拉一下")):
+            return cls.TASK_PREFERENCE
+        if any(kw in q for kw in ("出具", "审计工作底稿", "阶段性审计工作底稿", "综合报告", "综合前面", "汇总前面", "完整底稿")) and any(
+            w in q for w in ("底稿", "报告", "汇总", "综合")
+        ):
+            return cls.TASK_SYNTHESIS
+        if any(kw in q for kw in ("搞错了", "撤回便签", "撤销便签", "别查它了", "取消重点嫌疑", "移出便签", "误判了", "不是嫌疑", "从便签中撤销")):
+            return cls.TASK_REVOKE_NOTE
+        if any(kw in q for kw in ("便签中", "回顾前序", "便签记了什么", "重点标记的嫌疑", "名称叫什么", "第 3 轮便签", "第3轮便签")) and not any(
+            w in q for w in ("查询其结算", "调取该", "明细")
+        ):
+            return cls.TASK_RECALL
+        if any(kw in q for kw in ("记录到本次审计的便签", "记录到便签", "写入便签", "作为重点涉案嫌疑对象，记录")) and not any(
+            w in q for w in ("查询", "调取", "统计", "排查")
+        ):
+            return cls.TASK_NOTE
+        if any(kw in q for kw in ("沉淀至长期经验库", "沉淀至经验库", "总结为标准审计经验规则")):
+            return cls.TASK_CONSOLIDATE
+        return cls.TASK_QUERY
+
+    @classmethod
+    def classify_turn_type(cls, query: str) -> str:
+        """识别当前轮次的基础意图类型"""
+        q = query.strip()
+        q_lower = q.lower()
+        if cls._is_security_violation(q, q_lower):
             return cls.TASK_SECURITY_BLOCK
 
-        # 0.1 [L1 Out-of-Domain / Chitchat Fast-Path] 日常生活闲聊与非业务意图快速通道
-        # 医保审计强相关领域词库 (只要含有任一明确业务词，则不应误判为生活闲聊)
-        domain_keywords = [
-            "医保", "医疗", "报销", "结算", "住院", "门诊", "费用", "药店", "医院", "卫生室", "卫生院",
-            "诊所", "处方", "药品", "耗材", "基金", "违规", "欺诈", "套现", "虚假", "排查", "核查",
-            "审计", "底稿", "便签", "统计", "查询", "名单", "排名", "清单", "金额", "单据", "明细",
-            "患者", "参保", "机构", "大额", "超量", "频次", "阈值", "穿透", "下钻", "表", "sql", "数据"
-        ]
-        has_domain_context = any(w in q_lower for w in domain_keywords)
-
-        # 防御性解包：如果传入了 JSON 格式的字符串 (如 `{'message': '...'}`)，提取真实用户文本
-        if q.startswith("{") and ("'message'" in q or '"message"' in q or "'input'" in q or '"input"' in q):
-            try:
-                import ast
-                parsed_dict = ast.literal_eval(q)
-                if isinstance(parsed_dict, dict):
-                    for k in ["message", "input", "query", "content", "prompt", "text"]:
-                        if k in parsed_dict and parsed_dict[k]:
-                            q = str(parsed_dict[k]).strip()
-                            q_lower = q.lower()
-                            break
-            except Exception:
-                pass
-
-        # 问候/元认知识别
-        greeting_patterns = [
-            r"(你好|您好|早[上安好]?|下午好|晚上好|hi|hello|hey)\b",
-            r"(你是谁|你叫什么|你能做什么|自我介绍|介绍一下你自己|功能介绍|你的功能)"
-        ]
-        is_greeting = any(re.search(p, q_lower) for p in greeting_patterns)
-
-        # 纯生活/饮食/娱乐/闲扯识别
-        lifestyle_patterns = [
-            r"(我?喜欢吃|我想吃|吃点什么|好吃吗|喝点什么|吃鸡肉|吃牛肉|吃猪肉|吃鱼|喝咖啡|喝奶茶)",
-            r"(今天天气|明天天气|好冷|好热|好累|好无聊|讲个笑话|说个笑话|开心|难过)"
-        ]
-        is_lifestyle = any(re.search(p, q_lower) for p in lifestyle_patterns)
-
-        if (is_greeting or is_lifestyle) and not has_domain_context:
+        has_domain_context = any(w in q_lower for w in cls._DOMAIN_KEYWORDS)
+        q = cls._unwrap_json_query(q)
+        q_lower = q.lower()
+        if cls._is_chitchat_turn(q_lower, has_domain_context):
             return cls.TASK_CHITCHAT
-
-        # 0.2 [L2 User Preference] 用户排版与偏好配置 (非数据取证指令)
-        preference_patterns = [
-            r"(喜欢用表格|必须使用表格|用markdown表格|改用表格|恢复表格|重新启用表格|取消表格|改用纯文字|改用无序列表|列表排版|输出格式改成)",
-            r"(以后大额排查按|默认阈值改成|习惯使用.*阈值)"
-        ]
-        is_preference = any(re.search(p, q_lower) for p in preference_patterns)
-        # 排除明确包含“查询”、“调取”、“排查”且含实体的实际取证指令
-        if is_preference and not any(w in q for w in ["查询", "调取", "查一下", "拉一下"]):
-            return cls.TASK_PREFERENCE
-
-        # 1. 出具审计底稿/阶段总结
-        synthesis_keywords = ["出具", "审计工作底稿", "阶段性审计工作底稿", "综合报告", "综合前面", "汇总前面", "完整底稿"]
-        if any(kw in q for kw in synthesis_keywords) and any(w in q for w in ["底稿", "报告", "汇总", "综合"]):
-            return cls.TASK_SYNTHESIS
-
-        # 2. 撤销便签 / 误判解除 (真实口语撤回)
-        # [V228.1 修复] 判定前移至 RECALL 之前：撤销语句（如词表中的「从便签中撤销」）含
-        # recall 词表中的『便签中』字样，旧顺序下会被抢先判为 RECALL，该词条曾是不可达死分支，
-        # 导致破坏性撤销指令被只读回溯吞掉。撤销是强动作意图，必须优先识别。
-        revoke_keywords = ["搞错了", "撤回便签", "撤销便签", "别查它了", "取消重点嫌疑", "移出便签", "误判了", "不是嫌疑", "从便签中撤销"]
-        if any(kw in q for kw in revoke_keywords):
-            return cls.TASK_REVOKE_NOTE
-
-        # 3. 回溯便签/工作记忆
-        recall_keywords = ["便签中", "回顾前序", "便签记了什么", "重点标记的嫌疑", "名称叫什么", "第 3 轮便签", "第3轮便签"]
-        if any(kw in q for kw in recall_keywords) and not any(kw in q for kw in ["查询其结算", "调取该", "明细"]):
-            return cls.TASK_RECALL
-
-        # 4. 记录便签 (必须是明确的记录指令，且排除查询/调取等下钻动词)
-        note_keywords = ["记录到本次审计的便签", "记录到便签", "写入便签", "作为重点涉案嫌疑对象，记录"]
-        if any(kw in q for kw in note_keywords) and not any(w in q for w in ["查询", "调取", "统计", "排查"]):
-            return cls.TASK_NOTE
-
-        # 5. 经验库沉淀
-        consolidate_keywords = ["沉淀至长期经验库", "沉淀至经验库", "总结为标准审计经验规则"]
-        if any(kw in q for kw in consolidate_keywords):
-            return cls.TASK_CONSOLIDATE
-
-        return cls.TASK_QUERY
+        return cls._classify_workflow_intent(q, q_lower)
 
     @classmethod
     def extract_top_entity_from_notes(cls, state: Dict[str, Any]) -> Optional[str]:

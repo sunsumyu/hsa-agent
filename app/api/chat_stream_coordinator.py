@@ -221,6 +221,44 @@ class _LangGraphEventTranslator:
             yield from self._handle_chain_end(event, lg_node, state)
 
 
+def _resolve_stream_is_sse(request: Optional[Request], stream_format: str) -> bool:
+    if stream_format == "sse":
+        return True
+    if stream_format == "legacy":
+        return False
+    accept_hdr = getattr(request, "headers", {}).get("accept", "") if request else ""
+    q_fmt = getattr(request, "query_params", {}).get("format", "") if request else ""
+    return ("text/event-stream" in str(accept_hdr)) or (str(q_fmt) == "sse")
+
+
+def _build_in_flight_rejection_packets(is_sse: bool) -> List[str]:
+    if is_sse:
+        return [
+            SSEEvent(
+                event=SSEEventType.STATUS,
+                data={"message": "正在处理上一轮审计推演，请勿重复提交...", "in_flight": True},
+            ).to_sse_packet(),
+            SSEEvent(
+                event=SSEEventType.MESSAGE,
+                data="⚠️ 当前会话已有审计推演正在进行中，请等待上一轮完成后再发起新问题。",
+            ).to_sse_packet(),
+            SSEEvent(event=SSEEventType.DONE, data="[DONE]").to_sse_packet(),
+        ]
+    return [
+        "[[[STATUS: 正在处理上一轮审计推演，请勿重复提交...]]]\n\n",
+        "⚠️ 当前会话已有审计推演正在进行中，请等待上一轮完成后再发起新问题。",
+    ]
+
+
+def _build_engine_header_packets(resolved_id: str, is_sse: bool) -> List[str]:
+    if is_sse:
+        return [
+            SSEEvent(event=SSEEventType.ENGINE, data=resolved_id).to_sse_packet(),
+            SSEEvent(event=SSEEventType.VERSION, data=resolved_id).to_sse_packet(),
+        ]
+    return [f"[[[ENGINE:{resolved_id}]]]", f"[[[VERSION:{resolved_id}]]]"]
+
+
 class ChatStreamCoordinator:
     """流式推演核心协调器 (外部缝: coordinate_stream 窄接口; 内部缝: 事件翻译状态机 + 渲染状态契约)"""
 
@@ -234,92 +272,44 @@ class ChatStreamCoordinator:
         message: str,
         stream_format: str = "auto",
     ) -> AsyncGenerator[str, None]:
-        # 确定流式协议格式 (W3C SSE vs Legacy in-band text)
-        is_sse = False
-        if stream_format == "sse":
-            is_sse = True
-        elif stream_format == "legacy":
-            is_sse = False
-        else:
-            accept_hdr = getattr(request, "headers", {}).get("accept", "") if request else ""
-            q_fmt = getattr(request, "query_params", {}).get("format", "") if request else ""
-            is_sse = ("text/event-stream" in str(accept_hdr)) or (str(q_fmt) == "sse")
-
-        # 0. 路由分流：法律辩法智能体深度解耦对接
+        is_sse = _resolve_stream_is_sse(request, stream_format)
         if _is_legal_request(model_id, message):
             from app.api.legal_stream_coordinator import legal_stream_coordinator
+
             async for chunk in legal_stream_coordinator.coordinate_legal_stream(
-                session_id=session_id,
-                message=message,
+                session_id=session_id, message=message
             ):
                 yield chunk
             return
 
-        # 1. 会话级飞行锁拦截：防止同一 session_id 并发推演导致状态错乱与检查点锁死
-        session_lock_key = f"session:in_flight:{session_id}"
-        with redis_manager.dist_lock(session_lock_key, timeout=120) as acquired:
+        with redis_manager.dist_lock(f"session:in_flight:{session_id}", timeout=120) as acquired:
             if acquired is False:
                 logger.warning(f"⚠️ [会话并发拦截] 会话 {session_id} 正在执行上一轮推演，拒绝并发请求。")
-                if is_sse:
-                    yield SSEEvent(
-                        event=SSEEventType.STATUS,
-                        data={"message": "正在处理上一轮审计推演，请勿重复提交...", "in_flight": True}
-                    ).to_sse_packet()
-                    yield SSEEvent(
-                        event=SSEEventType.MESSAGE,
-                        data="⚠️ 当前会话已有审计推演正在进行中，请等待上一轮完成后再发起新问题。"
-                    ).to_sse_packet()
-                    yield SSEEvent(
-                        event=SSEEventType.DONE,
-                        data="[DONE]"
-                    ).to_sse_packet()
-                else:
-                    yield "[[[STATUS: 正在处理上一轮审计推演，请勿重复提交...]]]\n\n"
-                    yield "⚠️ 当前会话已有审计推演正在进行中，请等待上一轮完成后再发起新问题。"
+                for pkt in _build_in_flight_rejection_packets(is_sse):
+                    yield pkt
                 return
 
             executor, resolved_id = get_graph_executor(
                 checkpointer=_resolve_checkpointer(request), model_id=model_id
             )
             logger.info(f">>> [算力调配] 正在激活物理模型节点: {resolved_id}")
-
-            # 加载持久化历史记录 (禁用自动恢复，确保推演上下文纯净)
             history_manager.get_history(session_id, auto_recover=False)
+            for pkt in _build_engine_header_packets(resolved_id, is_sse):
+                yield pkt
 
-            # 2. 物理协议首帧：下发引擎元数据标记（[[[ENGINE:id]]]）与 VERSION
-            if is_sse:
-                yield SSEEvent(event=SSEEventType.ENGINE, data=resolved_id).to_sse_packet()
-                yield SSEEvent(event=SSEEventType.VERSION, data=resolved_id).to_sse_packet()
-            else:
-                yield f"[[[ENGINE:{resolved_id}]]]"
-                yield f"[[[VERSION:{resolved_id}]]]"
-
-            # [Matt Deep Module] 渲染状态捆成单一数据契约 (SSOT), 事件翻译收敛到内部缝
             state = _StreamRenderState()
             translator = _LangGraphEventTranslator(session_id, is_sse=is_sse)
-
             try:
-                config, inputs, budget_warning = await self._prepare_run(
-                    executor, session_id, message, resolved_id
-                )
+                config, inputs, budget_warning = await self._prepare_run(executor, session_id, message, resolved_id)
                 if budget_warning:
-                    if is_sse:
-                        yield SSEEvent(event=SSEEventType.STATUS, data={"warning": budget_warning}).to_sse_packet()
-                    else:
-                        yield budget_warning
-
-                # 协议体系升级：使用 version="v2" 提升嵌套事件穿透力
+                    yield SSEEvent(event=SSEEventType.STATUS, data={"warning": budget_warning}).to_sse_packet() if is_sse else budget_warning
                 async for event in executor.astream_events(inputs, config, version="v2"):
                     for packet in translator.translate(event, state):
                         yield packet
-
-                # 收尾固化：挂起探测、拦截器残余 flush、历史落盘 (stdout 调试残留已移除)
                 async for packet in self._finalize_run(executor, config, session_id, message, state, is_sse=is_sse):
                     yield packet
-
                 if is_sse:
                     yield SSEEvent(event=SSEEventType.DONE, data="[DONE]").to_sse_packet()
-
             except Exception as e:
                 async for pkt in self._handle_stream_failure(
                     str(e), resolved_id, session_id, message, background_tasks, state, is_sse=is_sse

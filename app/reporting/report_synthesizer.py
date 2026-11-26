@@ -3,46 +3,28 @@
 app/reporting/report_synthesizer.py
 ===================================
 [SPEC-227] 阶段性审计工作底稿与综合成果汇编器 (Report Synthesizer)
-- 遵循 Matt Pocock 深模块原则，为宏观出底稿任务提供零幻觉、纯事实装配的确定性接缝
-- 一键汇聚全轮次审计发现 (accumulated_findings)、便签线索与合规扫描记录
-- 输出符合国家医疗保障基金飞行检查与稽核规范的正式审计工作底稿
 """
 
-import os
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 
 class ReportSynthesizer:
     """国家标准医保智能审计工作底稿综合装配器"""
 
     @classmethod
-    def synthesize_workpaper(cls, state: Dict[str, Any]) -> str:
-        findings: List[Dict[str, Any]] = state.get("accumulated_findings") or []
-        session_id = state.get("session_id", "SESSION-AUDIT")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # 统计客观度量指标
-        total_turns = len(findings)
-        total_records = sum(f.get("affected_count", 0) for f in findings)
-        total_amount = sum(f.get("involved_amount", 0.0) for f in findings)
-        all_entities = set()
-        for f in findings:
-            for e in f.get("key_entities", []):
-                all_entities.add(e)
-
-        # 读取便签内容
-        notes_summary = []
-        notes = state.get("audit_notes") or []
-        for n in notes:
-            notes_summary.append(f"- {n.strip()}")
+    def _collect_workpaper_notes(cls, state: Dict[str, Any]) -> str:
+        notes_summary = [f"- {n.strip()}" for n in (state.get("audit_notes") or [])]
         if not notes_summary:
             from app.skills.federated.audit_note_store import audit_note_store
-            for rl in audit_note_store.read_lines():
-                notes_summary.append(f"- {rl}")
-        notes_text = "\n".join(notes_summary) if notes_summary else "- 暂无离线便签记录"
 
-        # 生成分轮次核查事实表格
+            notes_summary = [f"- {rl}" for rl in audit_note_store.read_lines()]
+        return "\n".join(notes_summary) if notes_summary else "- 暂无离线便签记录"
+
+    @classmethod
+    def _format_workpaper_table(cls, findings: List[Dict[str, Any]]) -> str:
+        if not findings:
+            return "| - | 暂无分轮数据 | - | - | 0 | ¥0.00 | - |"
         table_rows = []
         for f in findings:
             turn_no = f.get("turn", 1)
@@ -55,10 +37,22 @@ class ReportSynthesizer:
             table_rows.append(
                 f"| 第 {turn_no} 轮 | {q_brief} | `{tbls}` | {entities_str} | {cnt} 条 | ¥{amt:,.2f} | {conclusion} |"
             )
+        return "\n".join(table_rows)
 
-        table_body = "\n".join(table_rows) if table_rows else "| - | 暂无分轮数据 | - | - | 0 | ¥0.00 | - |"
+    @classmethod
+    def synthesize_workpaper(cls, state: Dict[str, Any]) -> str:
+        findings: List[Dict[str, Any]] = state.get("accumulated_findings") or []
+        session_id = state.get("session_id", "SESSION-AUDIT")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 组装国家规范标准底稿
+        total_turns = len(findings)
+        total_records = sum(f.get("affected_count", 0) for f in findings)
+        total_amount = sum(f.get("involved_amount", 0.0) for f in findings)
+        all_entities = {e for f in findings for e in f.get("key_entities", [])}
+
+        notes_text = cls._collect_workpaper_notes(state)
+        table_body = cls._format_workpaper_table(findings)
+
         workpaper = f"""# 医疗保障基金智能监督检查阶段性审计工作底稿
 
 > **工作底稿编号**：`HSA-WP-{datetime.now().strftime('%Y%m%d')}-{session_id[-6:]}`  

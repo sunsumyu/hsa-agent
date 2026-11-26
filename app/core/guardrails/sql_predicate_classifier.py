@@ -68,6 +68,40 @@ def parse_comparable_value(val_obj: Any) -> Optional[float]:
     return None
 
 
+_BINARY_PREDICATE_TYPES = (
+    (exp.EQ, "EQ"),
+    (exp.NEQ, "NEQ"),
+    (exp.GT, "GT"),
+    (exp.GTE, "GTE"),
+    (exp.LT, "LT"),
+    (exp.LTE, "LTE"),
+)
+
+
+def _classify_not_predicate(
+    inner: exp.Expression,
+    raw_repr: str,
+) -> Tuple[Optional[str], Optional[str], Any, str]:
+    if isinstance(inner, (exp.Like, exp.ILike)):
+        col, val = extract_col_name(inner.this), extract_literal(inner.expression)
+        if col and val is not None:
+            return (col, "NOT_LIKE", val, raw_repr)
+    elif isinstance(inner, exp.EQ):
+        col, val = extract_col_name(inner.left), extract_literal(inner.right)
+        if col and val is not None:
+            return (col, "NEQ", val, raw_repr)
+    elif isinstance(inner, exp.In):
+        col = extract_col_name(inner.this)
+        if col:
+            vals = {extract_literal(e) for e in inner.expressions if extract_literal(e) is not None}
+            return (col, "NOT_IN", vals, raw_repr)
+    elif isinstance(inner, exp.Is):
+        col = extract_col_name(inner.this)
+        if col:
+            return (col, "IS_NOT_NULL", None, raw_repr)
+    return (None, None, None, raw_repr)
+
+
 def classify_predicate(node: exp.Expression) -> Tuple[Optional[str], Optional[str], Any, str]:
     """
     分析单个谓词表达式。
@@ -75,95 +109,28 @@ def classify_predicate(node: exp.Expression) -> Tuple[Optional[str], Optional[st
     pred_type ∈ {"EQ", "NEQ", "NOT_LIKE", "LIKE", "GT", "GTE", "LT", "LTE", "IN", "NOT_IN", "IS_NULL", "IS_NOT_NULL"}
     """
     raw_repr = node.sql()
+    for expr_cls, pred_type in _BINARY_PREDICATE_TYPES:
+        if isinstance(node, expr_cls):
+            col, val = extract_col_name(node.left), extract_literal(node.right)
+            if col and val is not None:
+                return (col, pred_type, val, raw_repr)
+            return (None, None, None, raw_repr)
 
-    # 处理 exp.EQ (col = 'val')
-    if isinstance(node, exp.EQ):
-        col = extract_col_name(node.left)
-        val = extract_literal(node.right)
-        if col and val is not None:
-            return (col, "EQ", val, raw_repr)
-
-    # 处理 exp.NEQ (col != 'val' 或 col <> 'val')
-    if isinstance(node, exp.NEQ):
-        col = extract_col_name(node.left)
-        val = extract_literal(node.right)
-        if col and val is not None:
-            return (col, "NEQ", val, raw_repr)
-
-    # 处理 exp.GT, exp.GTE, exp.LT, exp.LTE
-    if isinstance(node, exp.GT):
-        col = extract_col_name(node.left)
-        val = extract_literal(node.right)
-        if col and val is not None:
-            return (col, "GT", val, raw_repr)
-
-    if isinstance(node, exp.GTE):
-        col = extract_col_name(node.left)
-        val = extract_literal(node.right)
-        if col and val is not None:
-            return (col, "GTE", val, raw_repr)
-
-    if isinstance(node, exp.LT):
-        col = extract_col_name(node.left)
-        val = extract_literal(node.right)
-        if col and val is not None:
-            return (col, "LT", val, raw_repr)
-
-    if isinstance(node, exp.LTE):
-        col = extract_col_name(node.left)
-        val = extract_literal(node.right)
-        if col and val is not None:
-            return (col, "LTE", val, raw_repr)
-
-    # 处理 exp.In
     if isinstance(node, exp.In):
         col = extract_col_name(node.this)
-        vals = {extract_literal(e) for e in node.expressions if extract_literal(e) is not None}
         if col:
-            if "NOT" in raw_repr.upper() or node.args.get("is_not"):
-                return (col, "NOT_IN", vals, raw_repr)
-            return (col, "IN", vals, raw_repr)
-
-    # 处理 exp.Is (IS NULL / IS NOT NULL)
-    if isinstance(node, exp.Is):
+            vals = {extract_literal(e) for e in node.expressions if extract_literal(e) is not None}
+            is_not = "NOT" in raw_repr.upper() or node.args.get("is_not")
+            return (col, "NOT_IN" if is_not else "IN", vals, raw_repr)
+    elif isinstance(node, exp.Is):
         col = extract_col_name(node.this)
         if col:
-            if "NOT" in raw_repr.upper():
-                return (col, "IS_NOT_NULL", None, raw_repr)
-            return (col, "IS_NULL", None, raw_repr)
-
-    # 处理 NOT (...)
-    if isinstance(node, exp.Not):
-        inner = node.this
-        if isinstance(inner, (exp.Like, exp.ILike)):
-            col = extract_col_name(inner.this)
-            val = extract_literal(inner.expression)
-            if col and val is not None:
-                return (col, "NOT_LIKE", val, raw_repr)
-        elif isinstance(inner, exp.EQ):
-            col = extract_col_name(inner.left)
-            val = extract_literal(inner.right)
-            if col and val is not None:
-                return (col, "NEQ", val, raw_repr)
-        elif isinstance(inner, exp.In):
-            col = extract_col_name(inner.this)
-            vals = {extract_literal(e) for e in inner.expressions if extract_literal(e) is not None}
-            if col:
-                return (col, "NOT_IN", vals, raw_repr)
-        elif isinstance(inner, exp.Is):
-            col = extract_col_name(inner.this)
-            if col:
-                return (col, "IS_NOT_NULL", None, raw_repr)
-
-    # 处理直接的 NOT LIKE (在某些 AST 中表示为 exp.Like 且带有否定属性)
-    if isinstance(node, (exp.Like, exp.ILike)):
-        col = extract_col_name(node.this)
-        val = extract_literal(node.expression)
-        if "NOT" in raw_repr.upper():
-            if col and val is not None:
-                return (col, "NOT_LIKE", val, raw_repr)
-        else:
-            if col and val is not None:
-                return (col, "LIKE", val, raw_repr)
+            return (col, "IS_NOT_NULL" if "NOT" in raw_repr.upper() else "IS_NULL", None, raw_repr)
+    elif isinstance(node, exp.Not):
+        return _classify_not_predicate(node.this, raw_repr)
+    elif isinstance(node, (exp.Like, exp.ILike)):
+        col, val = extract_col_name(node.this), extract_literal(node.expression)
+        if col and val is not None:
+            return (col, "NOT_LIKE" if "NOT" in raw_repr.upper() else "LIKE", val, raw_repr)
 
     return (None, None, None, raw_repr)
