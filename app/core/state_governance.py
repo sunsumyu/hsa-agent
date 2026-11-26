@@ -72,6 +72,7 @@ def build_initial_audit_state(
         "accumulated_findings": [],
         "turn_type": None,
         "audit_notes": [],
+        "retrieved_citations": [],
         "metadata": merged_metadata
     }
 
@@ -104,6 +105,7 @@ def create_turn_reset_patch(state: Optional[Mapping[str, Any]] = None) -> Dict[s
         "error_log": None,
         "execution_trace": [],
         "sql_validated": False,
+        "retrieved_citations": [],
         "metadata": metadata
     }
 

@@ -57,6 +57,12 @@ def _overwrite_list(left: List, right: List) -> List:
     return left or []
 
 
+def _merge_citations(left: List, right: List) -> List:
+    """合并并按 citation_id 去重当前轮次检索到的溯源账本。"""
+    from app.core.rag.citation_ledger import merge_citation_ledgers
+    return merge_citation_ledgers(left, right)
+
+
 # ── Layer 1: 框架通用状态 ──────────────────────────────────────
 
 class WorkflowState(TypedDict, total=False):
@@ -87,6 +93,7 @@ class TaskArtifacts(TypedDict, total=False):
     execution_trace: List[str]
     schema_hint: Optional[str]
     metadata: Annotated[Dict[str, Any], _merge_dict]
+    retrieved_citations: Annotated[List[Dict[str, Any]], _merge_citations]
 
 
 # ── Layer 3: 领域专属上下文 ────────────────────────────────────
