@@ -233,8 +233,10 @@ async def test_multiturn_10_turns_context_and_memory():
     if os.path.exists("data/test_multiturn_action_cache.json"):
         os.remove("data/test_multiturn_action_cache.json")
     if os.path.exists("data/audit_notes.md"):
-        try: os.remove("data/audit_notes.md")
-        except Exception: pass
+        try:
+            os.remove("data/audit_notes.md")
+        except OSError as exc:
+            print(f"[WARN] cleanup data/audit_notes.md skipped: {exc}")
 
     print("-" * 88)
     print("[10 轮多轮对话评测总结报告]")

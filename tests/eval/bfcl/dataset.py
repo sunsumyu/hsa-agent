@@ -8,6 +8,7 @@ BFCL v4 数据集加载器。
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -76,8 +77,8 @@ def resolve_bfcl_data_dir(explicit_dir: Optional[str] = None) -> Path:
         import bfcl_eval  # type: ignore
 
         candidates.append(Path(bfcl_eval.__file__).resolve().parent / "data")
-    except ImportError:
-        pass
+    except ImportError as exc:
+        logging.getLogger(__name__).debug("bfcl_eval package not installed: %s", exc)
 
     for c in candidates:
         if c.exists() and c.is_dir():

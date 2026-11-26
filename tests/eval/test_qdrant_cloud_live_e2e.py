@@ -1,4 +1,5 @@
 import os
+import logging
 import pytest
 from dotenv import load_dotenv
 load_dotenv()
@@ -35,8 +36,8 @@ def test_qdrant_cloud_live_roundtrip():
     # 清理遗留
     try:
         client.delete_collection(col_name)
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).debug("pre-cleanup qdrant collection skipped: %s", exc)
 
     embeddings = MockDeterministicEmbeddings()
 
@@ -73,5 +74,5 @@ def test_qdrant_cloud_live_roundtrip():
         # 3. 清理云端测试集合
         try:
             client.delete_collection(col_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).debug("post-cleanup qdrant collection skipped: %s", exc)

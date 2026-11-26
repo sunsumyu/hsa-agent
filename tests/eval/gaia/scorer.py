@@ -58,7 +58,7 @@ def _try_parse_number(text: str) -> Tuple[bool, float]:
         if math.isfinite(val):
             return True, val
     except ValueError:
-        pass
+        return False, 0.0
     return False, 0.0
 
 

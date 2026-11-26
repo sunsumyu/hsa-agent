@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from pydantic import ValidationError
 from app.multi_agent.contracts import ExecutionTier, ReviewVerdictArtifact
 from app.multi_agent.tier_classifier import classify_execution_plan

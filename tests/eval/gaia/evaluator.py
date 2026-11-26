@@ -77,12 +77,13 @@ class GAIAEvaluator:
             ok, reason = quasi_exact_match(res.predicted_answer, sample.final_answer)
 
         steps_raw = sample.annotator_metadata.get("Number of steps")
-        num_steps: Optional[int] = None
-        if steps_raw is not None:
+        if steps_raw is None:
+            num_steps: Optional[int] = None
+        else:
             try:
                 num_steps = int(steps_raw)
             except (TypeError, ValueError):
-                pass
+                num_steps = None
 
         return GAIASampleRecord(
             task_id=sample.task_id,

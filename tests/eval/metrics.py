@@ -178,8 +178,8 @@ JSON示例：[123.45, 678.90]"""
             match = re.search(r'\[(.*?)\]', res_str.replace('\n', ''))
             if match:
                 return [float(x.strip()) for x in match.group(1).split(',') if x.strip()]
-        except:
-            pass
+        except Exception as exc:
+            logger.debug(f"[L2 验证] Judge 键值对提取跳过: {exc}")
         return []
 
     def measure(self, test_case: LLMTestCase) -> float:

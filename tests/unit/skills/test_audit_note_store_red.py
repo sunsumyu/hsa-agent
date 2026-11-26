@@ -3,6 +3,7 @@ Red unit tests for audit_note_store deep module.
 """
 
 import os
+import logging
 import datetime
 import threading
 import pytest
@@ -26,8 +27,8 @@ def temp_note_file(tmp_path):
     if os.path.exists(note_file):
         try:
             os.remove(note_file)
-        except Exception:
-            pass
+        except OSError as exc:
+            logging.getLogger(__name__).debug("cleanup temp note skipped: %s", exc)
 
 
 class TestAuditNoteStore:
