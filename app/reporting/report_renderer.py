@@ -73,6 +73,46 @@ DEFAULT_MAX_EVIDENCE_ROWS = 10
 SENSITIVE_FIELDS = {"psn_name", "certno", "phone", "addr", "org_name", "fixmedins_name", "id_card", "tel"}
 
 
+def _format_dynamic_policy_tag(rec: Dict[str, Any]) -> str:
+    title = str(rec.get("law_title") or "").strip()
+    art = str(rec.get("article_num") or "").strip()
+    cid = str(rec.get("citation_id") or "").strip()
+    label = f"《{title}》{art}" if title else str(rec.get("source_doc") or "法规条款").strip()
+    return f"[向量库实查] {label}（ID: {cid}）"
+
+
+def _apply_citation_guardrail(
+    policy_basis: Optional[str],
+    llm_conclusion: str,
+    audit_metadata: Optional[Dict[str, Any]],
+) -> tuple[str, str, Dict[str, Any]]:
+    """执行 System 2 法条引文核验门禁并标注第一章政策依据来源。"""
+    from app.core.guardrails.citation_guardrail import enforce_citation_grounding
+    from app.core.rag.citation_ledger import (
+        build_policy_registry_citations,
+        merge_citation_ledgers,
+    )
+
+    retrieved = [r for r in ((audit_metadata or {}).get("retrieved_citations") or []) if isinstance(r, dict)]
+    static_records = [r.model_dump(mode="json") for r in build_policy_registry_citations(policy_basis or "")]
+    full_ledger = merge_citation_ledgers(retrieved, static_records or None)
+    guard_res = enforce_citation_grounding(llm_conclusion, full_ledger, strict=True)
+
+    dynamic_hits = [r for r in full_ledger if r.get("source_type") in {"law_rag", "vector_rag"}]
+    parts = [_format_dynamic_policy_tag(r) for r in dynamic_hits]
+    if policy_basis:
+        parts.append(f"[静态规则兜底] {policy_basis}")
+    tagged_policy = "；".join(parts)
+
+    updated_meta = {
+        **dict(audit_metadata or {}),
+        "verified_citation_count": len(guard_res.verified_ids),
+        "blocked_citation_count": len(guard_res.blocked_citations),
+        "retrieved_citations": full_ledger,
+    }
+    return tagged_policy, guard_res.sanitized_text, updated_meta
+
+
 @dataclass
 class RenderedReport:
     """渲染结果容器"""
@@ -191,6 +231,10 @@ class AuditReportRenderer:
             total_amount = total_amount if total_amount > 0 else actual_total
             finding_count = finding_count if finding_count > 0 else actual_count
 
+        policy_basis, llm_conclusion, updated_meta = _apply_citation_guardrail(
+            policy_basis, llm_conclusion, audit_metadata
+        )
+
         # [Phase 3] Zero-finding boundary proof + topic-matched visualization + actionable steps
         # — all extracted to policy_matcher.py for testability and separation of concerns
         if finding_count == 0:
@@ -219,11 +263,11 @@ class AuditReportRenderer:
             self._chapter3_findings(raw_data, total_amount, finding_count, is_restricted=is_restricted, format_preference=format_preference),
             self._chapter4_conclusion(llm_conclusion),
             self._chapter5_risk(risk_level, total_amount, finding_count),
-            self._chapter6_traceability(audit_metadata or {}), # [V156.0]
+            self._chapter6_traceability(updated_meta), # [V156.0]
         ]
 
         # [V162.2] 获取行政主体名称
-        admin_name = self._get_admin_name(audit_metadata.get("tenant_id") if audit_metadata else None)
+        admin_name = self._get_admin_name(updated_meta.get("tenant_id"))
         
         full_markdown = (
             f"# 📋 医保专项稽核报告\n\n"
@@ -244,7 +288,7 @@ class AuditReportRenderer:
             risk_level=risk_level,
             total_amount=total_amount,
             finding_count=finding_count,
-            audit_metadata=audit_metadata or {}
+            audit_metadata=updated_meta
         )
 
     # ──────────────────────────────────────────────────────

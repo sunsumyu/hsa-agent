@@ -108,10 +108,12 @@ async def orchestrate_standard_report(
     metadata = state.get("metadata") or {}
     user_question = metadata.get("user_question") or "医保专项审计"
 
-    # 2. 提取最后一条 AI 消息元数据作为溯源证据
     messages = state.get("messages", [])
     last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-    audit_meta = getattr(last_ai, "additional_kwargs", {}) if last_ai else {}
+    audit_meta = {
+        **dict(getattr(last_ai, "additional_kwargs", {}) or {}),
+        "retrieved_citations": list(state.get("retrieved_citations") or []),
+    }
 
     methodology = state.get("methodology", "基础核查逻辑")
     execution_trace = state.get("execution_trace") or []

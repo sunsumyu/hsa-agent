@@ -13,7 +13,7 @@ app/reporting/traceability_section_builder.py
 
 from datetime import datetime
 import hashlib
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # 默认风险评级阈值配置
 DEFAULT_RISK_THRESHOLDS: Dict[str, Dict[str, Any]] = {
@@ -105,6 +105,26 @@ def build_risk_section(
     ])
 
 
+def build_citation_provenance_table(citations: List[Dict[str, Any]]) -> str:
+    """渲染法规与知识引文溯源核验台账表。"""
+    rows = [c for c in (citations or []) if isinstance(c, dict) and c.get("citation_id")]
+    if not rows:
+        return ""
+    labels = {"law_rag": "法规向量库 (law_rag)", "vector_rag": "知识向量库 (vector_rag)", "policy_registry": "静态规则库 (policy_registry)"}
+    lines = ["### 法条与知识引文溯源台账", "", "| Citation ID | 来源类型 | 文档 / 页码 / 章节 | 内容哈希 |", "| :--- | :--- | :--- | :--- |"]
+    for rec in rows:
+        origin = labels.get(str(rec.get("source_type") or ""), str(rec.get("source_type") or "-"))
+        parts = [str(rec.get("source_doc") or "-")]
+        if rec.get("page_num"):
+            parts.append(f"第{rec['page_num']}页")
+        if rec.get("section_path"):
+            parts.append(str(rec["section_path"]).strip())
+        locator = " / ".join(p.replace("|", "\\|") for p in parts if p)
+        chash = str(rec.get("content_hash") or "-")
+        lines.append(f"| `{rec.get('citation_id', '')}` | {origin} | {locator} | `{chash}` |")
+    return "\n".join(lines)
+
+
 def build_traceability_section(metadata: Optional[Dict[str, Any]]) -> str:
     """
     渲染第六章：审计可追溯性凭证
@@ -137,6 +157,10 @@ def build_traceability_section(metadata: Optional[Dict[str, Any]]) -> str:
 
     fingerprint = generate_evidence_fingerprint(trace_id, model_id, timestamp)
     lines.append(f"| 数字存证指纹 | `{fingerprint}` |")
+
+    provenance_table = build_citation_provenance_table(metadata.get("retrieved_citations") or [])
+    if provenance_table:
+        lines.extend(["", provenance_table])
 
     lines.append("")
     lines.append("> ⚠️ **审计申明**：本报告由 Argus 自动生成，所有执行指令均已通过逻辑合规性校验并记录于证据库。")
