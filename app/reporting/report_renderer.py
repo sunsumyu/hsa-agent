@@ -189,68 +189,41 @@ class AuditReportRenderer:
         return RawDataSanitizer.extract_scan_boundary(raw_data_str)
 
 
-    def render(
+    def _resolve_finding_totals(
         self,
-        user_question: str,
+        raw_data: List[Dict[str, Any]],
         llm_conclusion: str,
-        raw_data: Optional[List[Dict[str, Any]]] = None,
-        sql_query: Optional[str] = None,
-        sql_history: Optional[List[str]] = None, # [V178.9] 全量证据链
-        table_info: Optional[str] = None,
-        total_amount: float = 0.0,
-        finding_count: int = 0,
-        policy_basis: Optional[str] = None,
-        execution_trace: Optional[List[str]] = None,
-        methodology: Optional[str] = None,
-        audit_metadata: Optional[Dict[str, Any]] = None, # [V156.0]
-        semantic_alignment: Optional[Dict[str, Any]] = None, # [NEW]
-        raw_data_str: Optional[str] = None, # [NEW]
-        is_restricted: bool = False, # [V2.1]
-        format_preference: Optional[str] = None, # [Hermes User Preference Support]
-    ) -> RenderedReport:
-        """
-        生成完整的五章节审计报告。
-        """
-        raw_data = raw_data or []
-        execution_trace = execution_trace or []
-
-        # 动态提取真实 ClickHouse 扫描边界数据 [V215.0]
-        total_records, min_time, max_time = self._extract_boundary_from_raw_data(raw_data_str)
-
-        # [V170.0] 隐私保护：对进入报告的所有原始数据执行物理脱敏 [Matt Pocock SSOT]
-        from app.core.security.data_masker import mask_audit_data
-        raw_data = mask_audit_data(raw_data)
-
-        # ──【企业级 v1.3】合规政策库靶向动态侧载 ──
-        detected_policy = match_policies(user_question)
-        policy_basis = f"{policy_basis}；{detected_policy}" if policy_basis else detected_policy
-        policy_basis += match_oral_policy(user_question)
-
-        # [V88.0] 逻辑修正：即便 raw_data 为空（可能是解析失败），也要优先保留调用方传入的硬性统计值
+        total_amount: float,
+        finding_count: int,
+    ) -> tuple[float, int, str]:
         if not raw_data:
-            total_amount = total_amount if total_amount > 0 else 0.0
-            finding_count = finding_count if finding_count > 0 else 0
-            if total_amount == 0 and (not llm_conclusion or len(llm_conclusion.strip()) < 10):
+            resolved_amt = total_amount if total_amount > 0 else 0.0
+            resolved_cnt = finding_count if finding_count > 0 else 0
+            if resolved_amt == 0 and (not llm_conclusion or len(llm_conclusion.strip()) < 10):
                 llm_conclusion = "经物理穿透核查，在当前过滤条件下未发现符合特征的异常记录。"
-        else:
-            actual_total = self._calc_total_amount(raw_data)
-            actual_count = len(raw_data)
-            total_amount = total_amount if total_amount > 0 else actual_total
-            finding_count = finding_count if finding_count > 0 else actual_count
+            return resolved_amt, resolved_cnt, llm_conclusion
+        resolved_amt = total_amount if total_amount > 0 else self._calc_total_amount(raw_data)
+        resolved_cnt = finding_count if finding_count > 0 else len(raw_data)
+        return resolved_amt, resolved_cnt, llm_conclusion
 
-        policy_basis, llm_conclusion, updated_meta = _apply_citation_guardrail(
-            policy_basis, llm_conclusion, audit_metadata
-        )
-        sanitized_conclusion = llm_conclusion
-
-        # [Phase 3] Zero-finding boundary proof + topic-matched visualization + actionable steps
-        # — all extracted to policy_matcher.py for testability and separation of concerns
+    def _append_conclusion_enhancements(
+        self,
+        llm_conclusion: str,
+        user_question: str,
+        sql_query: Optional[str],
+        methodology: Optional[str],
+        finding_count: int,
+        total_records: Optional[int],
+        min_time: Optional[str],
+        max_time: Optional[str],
+        table_info: Optional[str],
+        is_restricted: bool,
+    ) -> str:
         if finding_count == 0:
             llm_conclusion += build_zero_finding_boundary(
                 user_question, total_records, min_time, max_time, table_info, is_restricted=is_restricted
             )
         else:
-            # [Phase 3.1] Positive-finding threshold transparency + 3-tier sensitivity
             llm_conclusion += build_positive_finding_boundary(
                 user_question=user_question,
                 threshold_value=self._extract_threshold_value(sql_query, methodology),
@@ -259,10 +232,50 @@ class AuditReportRenderer:
                 finding_count_plus20=self._estimate_relaxed_count(finding_count, 0.20),
                 finding_count_plus50=self._estimate_relaxed_count(finding_count, 0.50),
             )
-
         llm_conclusion += match_visualization(user_question, finding_count)
-        llm_conclusion += build_actionable_steps()
+        return llm_conclusion + build_actionable_steps()
 
+    def render(
+        self,
+        user_question: str,
+        llm_conclusion: str,
+        raw_data: Optional[List[Dict[str, Any]]] = None,
+        sql_query: Optional[str] = None,
+        sql_history: Optional[List[str]] = None,
+        table_info: Optional[str] = None,
+        total_amount: float = 0.0,
+        finding_count: int = 0,
+        policy_basis: Optional[str] = None,
+        execution_trace: Optional[List[str]] = None,
+        methodology: Optional[str] = None,
+        audit_metadata: Optional[Dict[str, Any]] = None,
+        semantic_alignment: Optional[Dict[str, Any]] = None,
+        raw_data_str: Optional[str] = None,
+        is_restricted: bool = False,
+        format_preference: Optional[str] = None,
+    ) -> RenderedReport:
+        """生成完整的六章节审计报告。"""
+        from app.core.security.data_masker import mask_audit_data
+
+        raw_data = mask_audit_data(raw_data or [])
+        execution_trace = execution_trace or []
+        total_records, min_time, max_time = self._extract_boundary_from_raw_data(raw_data_str)
+
+        detected_policy = match_policies(user_question)
+        policy_basis = f"{policy_basis}；{detected_policy}" if policy_basis else detected_policy
+        policy_basis += match_oral_policy(user_question)
+
+        total_amount, finding_count, llm_conclusion = self._resolve_finding_totals(
+            raw_data, llm_conclusion, total_amount, finding_count
+        )
+        policy_basis, llm_conclusion, updated_meta = _apply_citation_guardrail(
+            policy_basis, llm_conclusion, audit_metadata
+        )
+        sanitized_conclusion = llm_conclusion
+        llm_conclusion = self._append_conclusion_enhancements(
+            llm_conclusion, user_question, sql_query, methodology,
+            finding_count, total_records, min_time, max_time, table_info, is_restricted,
+        )
         risk_level = self._calc_risk_level(total_amount, finding_count)
 
         sections = [
@@ -271,12 +284,9 @@ class AuditReportRenderer:
             self._chapter3_findings(raw_data, total_amount, finding_count, is_restricted=is_restricted, format_preference=format_preference),
             self._chapter4_conclusion(llm_conclusion),
             self._chapter5_risk(risk_level, total_amount, finding_count),
-            self._chapter6_traceability(updated_meta), # [V156.0]
+            self._chapter6_traceability(updated_meta),
         ]
-
-        # [V162.2] 获取行政主体名称
         admin_name = self._get_admin_name(updated_meta.get("tenant_id"))
-        
         full_markdown = (
             f"# 📋 医保专项稽核报告\n\n"
             f"> **执行主体**：{admin_name}  "
@@ -284,11 +294,7 @@ class AuditReportRenderer:
             f"| **数据范围**：{table_info or '结算明细库'}\n\n"
             + "\n\n".join(sections)
         )
-
-        # 摘要：取结论的前 200 字
-        summary = llm_conclusion.strip()[:200]
-        if len(llm_conclusion.strip()) > 200:
-            summary += "..."
+        summary = llm_conclusion.strip()[:200] + ("..." if len(llm_conclusion.strip()) > 200 else "")
 
         return RenderedReport(
             markdown=full_markdown,

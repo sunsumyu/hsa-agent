@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 import re
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 from loguru import logger
 from langchain_core.messages import BaseMessage, SystemMessage, AIMessage
 
@@ -92,28 +92,12 @@ def compact_past_turns(chat_msgs: Sequence[BaseMessage]) -> List[BaseMessage]:
     return compacted_past + active_msgs
 
 
-def compress_messages_by_budget(
+def _partition_messages(
     messages: Sequence[BaseMessage],
-    max_tokens: int,
-    keep_recent_count: int = 10,
-    estimate_fn: Callable[[Any], int] = estimate_tokens,
-) -> List[BaseMessage]:
-    """
-    [Model-Driven Compaction / 确定性事实摘要提炼]
-    对整个消息流执行结构化兜底截断压缩，并在 Token 预算超限时生成 0ms 纯确定性事实摘要。
-    """
-    total_tokens = sum(estimate_fn(m.content) for m in messages)
-    if total_tokens <= max_tokens:
-        return list(messages)
-
-    logger.warning(
-        f"⚠️ [TurnHistoryCompactor] 整合后消息流超限 ({total_tokens} > {max_tokens})，触发确定性摘要重置！"
-    )
-
+) -> Tuple[List[BaseMessage], Optional[BaseMessage], List[BaseMessage]]:
     system_msgs: List[BaseMessage] = []
     gssc_msg: Optional[BaseMessage] = None
     chat_msgs: List[BaseMessage] = []
-
     for m in messages:
         if isinstance(m, SystemMessage) and "【当前审计黄金上下文载荷" in str(getattr(m, "content", "")):
             gssc_msg = m
@@ -121,57 +105,10 @@ def compress_messages_by_budget(
             system_msgs.append(m)
         else:
             chat_msgs.append(m)
+    return system_msgs, gssc_msg, chat_msgs
 
-    recent_chat_msgs = (
-        chat_msgs[-keep_recent_count:] if len(chat_msgs) > keep_recent_count else chat_msgs
-    )
-    older_chat_msgs = (
-        chat_msgs[:-keep_recent_count] if len(chat_msgs) > keep_recent_count else []
-    )
 
-    retained_base = system_msgs + recent_chat_msgs
-    base_tokens = sum(estimate_fn(m.content) for m in retained_base)
-
-    budget_for_others = max_tokens - base_tokens - 400
-    gssc_tokens = estimate_fn(gssc_msg.content) if gssc_msg else 0
-
-    retained_others: List[BaseMessage] = []
-    truncated: List[BaseMessage] = []
-
-    if gssc_msg:
-        if gssc_tokens <= budget_for_others:
-            retained_others.append(gssc_msg)
-            budget_for_others -= gssc_tokens
-        else:
-            truncated_gssc = SystemMessage(
-                content=str(gssc_msg.content)[:4000] + "\n\n[⚠️ GSSC 载荷过长，部分内容已被物理截断]"
-            )
-            retained_others.append(truncated_gssc)
-            budget_for_others = 0
-
-    for m in older_chat_msgs:
-        m_t = estimate_fn(m.content)
-        if m_t <= budget_for_others:
-            retained_others.append(m)
-            budget_for_others -= m_t
-        else:
-            truncated.append(m)
-
-    if not truncated:
-        final_msgs = system_msgs.copy()
-        gssc_added = None
-        for m in retained_others:
-            if m == gssc_msg or "[⚠️ GSSC" in str(getattr(m, "content", "")):
-                final_msgs.append(m)
-                gssc_added = m
-                break
-        for m in retained_others:
-            if m != gssc_added:
-                final_msgs.append(m)
-        final_msgs.extend(recent_chat_msgs)
-        return final_msgs
-
-    # [Matt Pocock 确定性接缝] 纯事实确定性提炼，0ms 完成，绝不额外调用 LLM 蒸馏增加 15s 延迟
+def _build_deterministic_summary(truncated: Sequence[BaseMessage]) -> str:
     extracted_facts: List[str] = []
     for m in truncated:
         c = str(getattr(m, "content", ""))
@@ -183,15 +120,18 @@ def compress_messages_by_budget(
                 if any(kw in line for kw in ["涉案", "违规", "总金额", "医疗机构"]) and len(line) < 80:
                     extracted_facts.append(f"- 历史结论: {line.strip()}")
                     break
-
-    facts_block = (
-        "\n".join(extracted_facts[:5])
-        if extracted_facts
-        else "[历史中间会话数据已安全归档至底稿]"
-    )
-    summary_content = f"📋 [历史事实高保真确定性摘要 (0ms)]：\n{facts_block}"
+    facts_block = "\n".join(extracted_facts[:5]) if extracted_facts else "[历史中间会话数据已安全归档至底稿]"
     logger.info("⚡ [TurnHistoryCompactor] 成功完成确定性高保真历史摘要装配，节省 10~15s LLM 延迟！")
+    return f"📋 [历史事实高保真确定性摘要 (0ms)]：\n{facts_block}"
 
+
+def _assemble_compacted_messages(
+    system_msgs: List[BaseMessage],
+    gssc_msg: Optional[BaseMessage],
+    retained_others: List[BaseMessage],
+    recent_chat_msgs: List[BaseMessage],
+    summary_content: Optional[str] = None,
+) -> List[BaseMessage]:
     final_msgs = system_msgs.copy()
     gssc_added = None
     for m in retained_others:
@@ -199,12 +139,52 @@ def compress_messages_by_budget(
             final_msgs.append(m)
             gssc_added = m
             break
-
-    final_msgs.append(SystemMessage(content=summary_content))
-
+    if summary_content:
+        final_msgs.append(SystemMessage(content=summary_content))
     for m in retained_others:
         if m != gssc_added:
             final_msgs.append(m)
-
     final_msgs.extend(recent_chat_msgs)
     return final_msgs
+
+
+def compress_messages_by_budget(
+    messages: Sequence[BaseMessage],
+    max_tokens: int,
+    keep_recent_count: int = 10,
+    estimate_fn: Callable[[Any], int] = estimate_tokens,
+) -> List[BaseMessage]:
+    """[Model-Driven Compaction / 确定性事实摘要提炼]"""
+    total_tokens = sum(estimate_fn(m.content) for m in messages)
+    if total_tokens <= max_tokens:
+        return list(messages)
+
+    logger.warning(f"⚠️ [TurnHistoryCompactor] 整合后消息流超限 ({total_tokens} > {max_tokens})，触发确定性摘要重置！")
+    system_msgs, gssc_msg, chat_msgs = _partition_messages(messages)
+    recent_chat_msgs = chat_msgs[-keep_recent_count:] if len(chat_msgs) > keep_recent_count else chat_msgs
+    older_chat_msgs = chat_msgs[:-keep_recent_count] if len(chat_msgs) > keep_recent_count else []
+
+    base_tokens = sum(estimate_fn(m.content) for m in (system_msgs + recent_chat_msgs))
+    budget_for_others = max_tokens - base_tokens - 400
+    retained_others: List[BaseMessage] = []
+    truncated: List[BaseMessage] = []
+
+    if gssc_msg:
+        gssc_tokens = estimate_fn(gssc_msg.content)
+        if gssc_tokens <= budget_for_others:
+            retained_others.append(gssc_msg)
+            budget_for_others -= gssc_tokens
+        else:
+            retained_others.append(SystemMessage(content=str(gssc_msg.content)[:4000] + "\n\n[⚠️ GSSC 载荷过长，部分内容已被物理截断]"))
+            budget_for_others = 0
+
+    for m in older_chat_msgs:
+        m_t = estimate_fn(m.content)
+        if m_t <= budget_for_others:
+            retained_others.append(m)
+            budget_for_others -= m_t
+        else:
+            truncated.append(m)
+
+    summary_content = _build_deterministic_summary(truncated) if truncated else None
+    return _assemble_compacted_messages(system_msgs, gssc_msg, retained_others, recent_chat_msgs, summary_content)

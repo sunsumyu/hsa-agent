@@ -96,15 +96,67 @@ class EvidenceKnowledgeGraphManager:
                     results.append(clean)
         return list(dict.fromkeys(results))  # unique-preserve-order
 
+    def _extract_hospitals_and_patients(
+        self, text: str, fid: str, add_node: Any, add_edge: Any
+    ) -> List[str]:
+        hospitals = self._extract_by_patterns(text, HOSPITAL_PATTERNS)
+        nlp = self.get_nlp()
+        if nlp:
+            try:
+                for ent in nlp(text).ents:
+                    if ent.label_ in ("FAC", "ORG") and ent.text not in hospitals and len(ent.text) >= 4:
+                        hospitals.append(ent.text)
+                    elif ent.label_ == "PERSON":
+                        masked = ent.text[0] + "**" if len(ent.text) > 1 else ent.text + "*"
+                        pid = self._stable_id(ent.text, "P")
+                        add_node(pid, masked, "patient", value=2.0)
+                        add_edge(pid, fid, "关联")
+            except Exception as e:
+                logger.debug(f"[EvidenceGraph] spaCy NER 提取跳过: {e}")
+
+        for hosp in hospitals:
+            hid = self._stable_id(hosp, "H")
+            add_node(hid, hosp, "hospital", value=3.0)
+            add_edge(hid, fid, "涉及")
+        for pat in self._extract_by_patterns(text, PATIENT_PATTERNS):
+            pid = self._stable_id(pat, "P")
+            add_node(pid, f"患者 {pat[:10]}", "patient", value=2.0)
+            add_edge(pid, fid, "关联")
+            for hosp in hospitals:
+                add_edge(pid, self._stable_id(hosp, "H"), "就诊于")
+        return hospitals
+
+    def _extract_policies_amounts_records(
+        self, text: str, idx: int, fid: str, hospitals: List[str], add_node: Any, add_edge: Any
+    ) -> None:
+        for pol in self._extract_by_patterns(text, POLICY_PATTERNS):
+            pol_id = self._stable_id(pol, "PL")
+            add_node(pol_id, pol[:20], "policy", value=2.5)
+            add_edge(fid, pol_id, "违反")
+        for amt_str in self._extract_by_patterns(text, AMOUNT_PATTERNS)[:2]:
+            try:
+                amt_val = float(re.sub(r"[，,]", "", amt_str))
+                if amt_val < 0.01:
+                    continue
+                aid = self._stable_id(amt_str + str(idx), "A")
+                add_node(aid, f"¥ {amt_val:,.0f}", "amount", value=max(1.5, amt_val / 10000))
+                add_edge(fid, aid, "金额")
+            except (ValueError, AttributeError) as exc:
+                logger.debug(f"[EvidenceGraph] 金额解析跳过 ({amt_str!r}): {exc}")
+        for rec in self._extract_by_patterns(text, RECORD_PATTERNS):
+            rid = self._stable_id(rec, "R")
+            add_node(rid, f"记录 {rec}", "record", value=1.5)
+            add_edge(fid, rid, "依据")
+            for hosp in hospitals:
+                add_edge(rid, self._stable_id(hosp, "H"), "属于")
+
     def extract_graph(self, findings: List[str]) -> Dict[str, Any]:
-        """
-        核心方法：将 Findings 文本列表转换为 ECharts graph 数据。
-        """
+        """核心方法：将 Findings 文本列表转换为 ECharts graph 数据。"""
         try:
             from app.skills.security.conflict_detector import get_filtered_findings
             findings = get_filtered_findings(findings)
-        except ImportError:
-            pass
+        except ImportError as exc:
+            logger.debug(f"[EvidenceGraph] conflict_detector filter skipped: {exc}")
 
         nodes: Dict[str, Dict[str, Any]] = {}
         edges: List[Dict[str, str]] = []
@@ -122,103 +174,25 @@ class EvidenceKnowledgeGraphManager:
                 }
             return node_id
 
-        def add_edge(src: str, dst: str, label: str):
+        def add_edge(src: str, dst: str, label: str) -> None:
             edges.append({"source": src, "target": dst, "label": label})
 
         for idx, finding in enumerate(findings):
             if not finding or len(finding.strip()) < 5:
                 continue
-
             text = finding.strip()
             fid = self._stable_id(text, "F")
             add_node(fid, f"发现 #{idx+1}", "finding", value=1.0, tooltip=text[:120])
             finding_ids.append(fid)
+            hospitals = self._extract_hospitals_and_patients(text, fid, add_node, add_edge)
+            self._extract_policies_amounts_records(text, idx, fid, hospitals, add_node, add_edge)
 
-            # 1. 医疗机构
-            hospitals = self._extract_by_patterns(text, HOSPITAL_PATTERNS)
-            nlp = self.get_nlp()
-            if nlp:
-                try:
-                    doc = nlp(text)
-                    for ent in doc.ents:
-                        if ent.label_ in ("FAC", "ORG"):
-                            if ent.text not in hospitals and len(ent.text) >= 4:
-                                hospitals.append(ent.text)
-                except Exception as e:
-                    logger.debug(f"[EvidenceGraph] spaCy 机构提取跳过: {e}")
-
-            for hosp in hospitals:
-                hid = self._stable_id(hosp, "H")
-                add_node(hid, hosp, "hospital", value=3.0)
-                add_edge(hid, fid, "涉及")
-
-            # 2. 患者识别与脱敏
-            patients = self._extract_by_patterns(text, PATIENT_PATTERNS)
-            if nlp:
-                try:
-                    doc = nlp(text)
-                    for ent in doc.ents:
-                        if ent.label_ == "PERSON":
-                            p_name = ent.text
-                            masked_name = p_name[0] + "**" if len(p_name) > 1 else p_name + "*"
-                            pid = self._stable_id(p_name, "P")
-                            add_node(pid, masked_name, "patient", value=2.0)
-                            add_edge(pid, fid, "关联")
-                except Exception as e:
-                    logger.debug(f"[EvidenceGraph] spaCy 人名提取跳过: {e}")
-
-            for pat in patients:
-                pid = self._stable_id(pat, "P")
-                add_node(pid, f"患者 {pat[:10]}", "patient", value=2.0)
-                add_edge(pid, fid, "关联")
-                for hosp in hospitals:
-                    hid = self._stable_id(hosp, "H")
-                    add_edge(pid, hid, "就诊于")
-
-            # 3. 政策违规
-            policies = self._extract_by_patterns(text, POLICY_PATTERNS)
-            for pol in policies:
-                pol_id = self._stable_id(pol, "PL")
-                add_node(pol_id, pol[:20], "policy", value=2.5)
-                add_edge(fid, pol_id, "违反")
-
-            # 4. 金额
-            amounts = self._extract_by_patterns(text, AMOUNT_PATTERNS)
-            for amt_str in amounts[:2]:
-                try:
-                    clean_amt = re.sub(r"[，,]", "", amt_str)
-                    amt_val = float(clean_amt)
-                    if amt_val < 0.01:
-                        continue
-                    aid = self._stable_id(amt_str + str(idx), "A")
-                    add_node(aid, f"¥ {amt_val:,.0f}", "amount", value=max(1.5, amt_val / 10000))
-                    add_edge(fid, aid, "金额")
-                except (ValueError, AttributeError):
-                    pass
-
-            # 5. 记录单号
-            records = self._extract_by_patterns(text, RECORD_PATTERNS)
-            for rec in records:
-                rid = self._stable_id(rec, "R")
-                add_node(rid, f"记录 {rec}", "record", value=1.5)
-                add_edge(fid, rid, "依据")
-                for hosp in hospitals:
-                    hid = self._stable_id(hosp, "H")
-                    add_edge(rid, hid, "属于")
-
-        # 降级占位：若无明确业务实体，挂载稽核中心
         if len(nodes) <= len(finding_ids) and finding_ids:
-            summary_id = "CENTER"
-            add_node(summary_id, "稽核中心", "policy", value=5.0)
+            add_node("CENTER", "稽核中心", "policy", value=5.0)
             for fid in finding_ids:
-                add_edge(summary_id, fid, "包含")
+                add_edge("CENTER", fid, "包含")
 
-        return {
-            "nodes": list(nodes.values()),
-            "edges": edges,
-            "categories": CATEGORIES,
-            "total": len(nodes),
-        }
+        return {"nodes": list(nodes.values()), "edges": edges, "categories": CATEGORIES, "total": len(nodes)}
 
     def record_session_findings(self, session_id: str, findings: List[str]) -> None:
         """记录会话线索（线程安全，支持容量淘汰）"""
