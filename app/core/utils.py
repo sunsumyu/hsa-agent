@@ -33,8 +33,8 @@ def smart_parse_tool_params(raw_input: Any) -> Dict[str, Any]:
             if match: json_str = match.group(1)
             
         return json.loads(json_str)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"[RobustParser] JSON params parse fallback: {exc}")
     
     # 2. 尝试 Key-Value 格式解析
     # 格式: sql=SELECT... , db_type=clickhouse
@@ -49,8 +49,8 @@ def smart_parse_tool_params(raw_input: Any) -> Dict[str, Any]:
             if pairs:
                 logger.warning(f"🔧 [RobustParser] 检测到 KV 格式参数，正在执行降级解析")
                 return pairs
-        except:
-            pass
+        except Exception as exc:
+            logger.debug(f"[RobustParser] KV params parse skipped: {exc}")
         
     # 3. 兜底逻辑：针对 SQL 执行器的特殊处理
     if "SELECT" in text.upper() and "FROM" in text.upper():

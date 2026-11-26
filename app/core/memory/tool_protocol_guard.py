@@ -7,6 +7,7 @@ behind clean, functional interfaces.
 from typing import List, Any
 import json
 import re
+from loguru import logger
 
 
 def compress_tool_content(messages: List[Any], max_len: int = 2000) -> List[Any]:
@@ -37,8 +38,8 @@ def compress_tool_content(messages: List[Any], max_len: int = 2000) -> List[Any]
                         if isinstance(records, list) and records:
                             key_sample = ", ".join(list(records[0].keys())[:5])
                             summary_parts.append(f"核心字段: {key_sample}")
-                except (ValueError, TypeError, AttributeError):
-                    pass
+                except (ValueError, TypeError, AttributeError) as exc:
+                    logger.debug(f"[ToolProtocolGuard] JSON digest parse skipped: {exc}")
 
                 # fallback：正则提取关键数字
                 if not summary_parts:
@@ -61,8 +62,8 @@ def compress_tool_content(messages: List[Any], max_len: int = 2000) -> List[Any]
                     )
                     compressed.append(new_msg)
                     continue
-                except ImportError:
-                    pass
+                except ImportError as exc:
+                    logger.debug(f"[ToolProtocolGuard] ToolMessage import fallback: {exc}")
         compressed.append(m)
     return compressed
 

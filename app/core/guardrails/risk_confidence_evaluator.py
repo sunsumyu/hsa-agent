@@ -73,8 +73,8 @@ def evaluate_execution_risk(state: Dict[str, Any]) -> float:
                 rows = content_dict.get("affected_rows", 0)
                 if rows > 10000:
                     risk += 0.5
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[RiskEvaluator] affected_rows parse skipped: {exc}")
             break
             
     return min(1.0, risk)

@@ -24,101 +24,85 @@ class LLMProvider:
     def __init__(self):
         self.default_model = "doubao-pro-32k"
 
+    def _bind_llm_options(
+        self,
+        llm: Any,
+        tools: Optional[List[Any]],
+        max_tokens_val: Any,
+    ) -> Any:
+        if tools:
+            llm = llm.bind_tools(tools)
+        if max_tokens_val:
+            llm = llm.bind(max_tokens=int(max_tokens_val))
+        return llm
+
+    def _finalize_llm_response(
+        self,
+        role: str,
+        response: Any,
+        actual_model_id: str,
+        messages: List[BaseMessage],
+        session_id: str,
+        latency_ms: float,
+    ) -> Any:
+        self._record_usage(role, response, actual_model_id, messages, latency_ms=latency_ms)
+        if hasattr(response, "additional_kwargs"):
+            response.additional_kwargs.update({
+                "audit_latency_ms": latency_ms,
+                "audit_model_id": actual_model_id,
+                "audit_role": role,
+                "audit_timestamp": time.time(),
+            })
+        memory_hub.store_working(f"llm:{session_id}", getattr(response, "content", str(response)))
+        return response
+
     async def chat(
-        self, 
-        role: str, 
-        messages: List[BaseMessage], 
+        self,
+        role: str,
+        messages: List[BaseMessage],
         config: Optional[RunnableConfig] = None,
         state: Optional[Dict[str, Any]] = None,
         tools: Optional[List[Any]] = None,
         temperature: float = 0.0,
-        **kwargs
+        **kwargs,
     ) -> Any:
-        """
-        [V168.0] 增强型 Chat 接口：
-        1. 优先使用 config 里的 model_id (手动覆盖)
-        2. 其次使用 kwargs 里的 model_id
-        3. 如果是逻辑 Tier (HEAVY/LIGHT)，自动映射物理 ID
-        """
+        """[V168.0] 增强型 Chat 接口：支持 config/kwargs 覆盖、Tier 映射与协议自愈重试。"""
+        from app.core.protocol.dialogue_sanitizer import sanitize_dialogue_protocol
+
         conf = (config or {}).get("configurable", {})
-        # 优先级：Config手动指定 > 参数传入 > 默认
         model_id = conf.get("model_id") or kwargs.get("model_id") or self.default_model
-        
-        # 处理逻辑 Tier 映射
-        if model_id in ["HEAVY", "LIGHT"]:
+        if model_id in ("HEAVY", "LIGHT"):
             model_id = self._resolve_tier_id(model_id)
-            
         logger.info(f"🤖 [LLMProvider] 正在调用模型: {model_id} (Role: {role})")
 
         retry_count = state.get("retry_count", 0) if state else 0
         session_id = state.get("session_id", "default") if state else "default"
-
-        # 1. 获取 LLM 实例与实际模型 ID (初始寻址使用 retry_count=0 保证首选端点绑定有效)
-        llm, actual_model_id = await model_manager.get_llm_by_role(
-            role, 
-            retry_count=0, 
-            config=config
-        )
-
-        # 2. 运行工业级 GSSC 上下文治理流水线 (Context Engineering)
+        llm, actual_model_id = await model_manager.get_llm_by_role(role, retry_count=0, config=config)
         messages = await self._enrich_context_if_needed(role, messages, state)
-
-        # 3. 动态参数与工具绑定 (锁定输出预算，严防长篇累牍与 Token 膨胀)
-        if tools:
-            llm = llm.bind_tools(tools)
-        max_tokens_val = kwargs.get("max_tokens")
-        if max_tokens_val:
-            llm = llm.bind(max_tokens=int(max_tokens_val))
-
-        # 4. 构建可观测性配置
+        llm = self._bind_llm_options(llm, tools, kwargs.get("max_tokens"))
         obs_config = build_obs_config(config, role, state or {})
-        
-        # 5. [Protocol Guard] 协议防御与归一化 (深模块收口工具配对、多 System 归一、角色交替折叠、用户消息兜底)
-        from app.core.protocol.dialogue_sanitizer import sanitize_dialogue_protocol
         messages = sanitize_dialogue_protocol(messages)
 
-        # 6. 执行调用与重试
         start_time = time.time()
         max_attempts = 3
-        
         for attempt in range(max_attempts):
             try:
-                # 打印消息链结构，抓取 pairing 漏洞
-                logger.info(f"🐛 [LLM Debug] 消息链结构: " + ", ".join(f"{getattr(m, 'type', m.__class__.__name__)}(has_tc={bool(getattr(m, 'tool_calls', None))})" for m in messages))
-                
+                chain_desc = ", ".join(
+                    f"{getattr(m, 'type', m.__class__.__name__)}(has_tc={bool(getattr(m, 'tool_calls', None))})"
+                    for m in messages
+                )
+                logger.info(f"🐛 [LLM Debug] 消息链结构: {chain_desc}")
                 response = await self._execute_model_call(llm, messages, obs_config)
-                
                 latency_ms = (time.time() - start_time) * 1000
-                
-                # 7. 计费与用量追踪
-                self._record_usage(role, response, actual_model_id, messages, latency_ms=latency_ms)
-                
-                # 8. 注入审计元数据 (Audit Metadata Injection)
-                if hasattr(response, "additional_kwargs"):
-                    response.additional_kwargs.update({
-                        "audit_latency_ms": latency_ms,
-                        "audit_model_id": actual_model_id,
-                        "audit_role": role,
-                        "audit_timestamp": time.time()
-                    })
-                
-                # 9. 更新统一工作记忆
-                memory_hub.store_working(f"llm:{session_id}", getattr(response, "content", str(response)))
-                
-                return response
-                
-            except Exception as e:
-                logger.error(f"❌ [LLMProvider] 调用失败 ({role} | {actual_model_id}): {e}")
-                if attempt < max_attempts - 1:
-                    logger.warning(f"🔄 [LLMProvider] 正在尝试重新寻址并重试 (Attempt {attempt + 1}/{max_attempts})...")
-                    # 因为坏节点已经在底层被 record_failure 熔断，这里再拿一次必将返回备用节点（例如百炼）
-                    llm, actual_model_id = await model_manager.get_llm_by_role(role, retry_count=retry_count, config=config)
-                    if tools:
-                        llm = llm.bind_tools(tools)
-                    continue
-                else:
+                return self._finalize_llm_response(role, response, actual_model_id, messages, session_id, latency_ms)
+            except Exception as exc:
+                logger.error(f"❌ [LLMProvider] 调用失败 ({role} | {actual_model_id}): {exc}")
+                if attempt >= max_attempts - 1:
                     logger.error("💥 [LLMProvider] 算力池彻底枯竭或网络瘫痪，放弃重试。")
-                    raise e
+                    raise exc
+                logger.warning(f"🔄 [LLMProvider] 正在尝试重新寻址并重试 (Attempt {attempt + 1}/{max_attempts})...")
+                llm, actual_model_id = await model_manager.get_llm_by_role(role, retry_count=retry_count, config=config)
+                llm = self._bind_llm_options(llm, tools, None)
 
     async def _enrich_context_if_needed(
         self, 
@@ -180,8 +164,8 @@ class LLMProvider:
                 for chunk in chunks[1:]:
                     try:
                         response = response + chunk
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(f"[LLMProvider] stream chunk merge fallback: {exc}")
                 # 严防普通 Message 相加被 LangChain 重载退化为 ChatPromptTemplate
                 if not isinstance(response, BaseMessage):
                     combined_content = "".join(str(getattr(c, "content", "") or "") for c in chunks)

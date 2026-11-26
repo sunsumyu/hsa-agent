@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional
+from loguru import logger
 
 
 _NODE_DISPLAY_NAMES: Dict[str, str] = {
@@ -94,8 +95,8 @@ class StreamProtocolRenderer:
                             out.append(f"[[[BOOKSHELF:{world_key}:{','.join(cols)}]]]")
                         else:
                             out.append(f"[[[BOOKSHELF:{world_key}:*]]]")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"[StreamProtocolRenderer] SQL column extraction skipped: {exc}")
 
         elif name == "search_expert_knowledge":
             out.append("[[[MOVE:argus_policy_kb]]]")

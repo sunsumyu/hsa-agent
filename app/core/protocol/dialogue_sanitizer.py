@@ -12,33 +12,22 @@ app/core/protocol/dialogue_sanitizer.py
 """
 
 from __future__ import annotations
-from typing import List, Any, Sequence
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, AIMessage
+from typing import Any, List, Sequence, Tuple
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from app.core.memory.message_sanitizer import ensure_tool_pairing
 
 
-def sanitize_dialogue_protocol(messages: Sequence[Any]) -> List[BaseMessage]:
-    """
-    对传入 LLM 的消息历史进行严格的协议防御与标准化。
-    
-    保障：
-    1. 工具调用配对 100% 完整（消除孤儿 ToolMessage 导致的 400 Bad Request）。
-    2. 合并所有分散的 SystemMessage 为单一头部系统消息，防止多 System 导致的静默空响应。
-    3. 超过 1024 字符或原本具备 cache 标记的 SystemMessage 自动注入 ephemeral 缓存控制。
-    4. 严格满足 user / assistant 角色交替（折叠连续同角色纯文本消息）。
-    5. 当全为系统指令或缺失用户消息时，自动保底追加 HumanMessage，防止模型接口拒绝。
-    """
-    if not messages:
-        return [HumanMessage(content="请根据系统提示与当前上下文执行审计分析并给出输出。")]
+def _msg_role(msg: Any) -> str:
+    m_type = getattr(msg, "type", msg.__class__.__name__).lower()
+    if m_type in ("human", "user") or (isinstance(msg, tuple) and msg[0] in ("human", "user")):
+        return "user"
+    return "assistant" if m_type in ("ai", "assistant") else "other"
 
-    # 1. 确保工具调用配对完整
-    paired_messages = ensure_tool_pairing(list(messages))
 
-    # 2. 分离并提取 SystemMessage 与 非系统消息
+def _split_system_and_dialogue(paired_messages: Sequence[Any]) -> Tuple[List[str], List[Any], bool]:
     system_contents: List[str] = []
     non_system_messages: List[Any] = []
     has_cache_flag = False
-
     for m in paired_messages:
         is_sys = isinstance(m, SystemMessage) or getattr(m, "type", "") == "system" or (isinstance(m, tuple) and m[0] == "system")
         if is_sys:
@@ -49,67 +38,54 @@ def sanitize_dialogue_protocol(messages: Sequence[Any]) -> List[BaseMessage]:
                 has_cache_flag = True
         else:
             non_system_messages.append(m)
+    return system_contents, non_system_messages, has_cache_flag
 
-    # 3. 合并连续同角色对话消息，确保满足 user / assistant 交替
+
+def _merge_consecutive_roles(non_system_messages: Sequence[Any]) -> List[Any]:
     merged_dialogue: List[Any] = []
     for m in non_system_messages:
-        m_type = getattr(m, "type", m.__class__.__name__).lower()
-        m_role = "user" if m_type in ("human", "user") or (isinstance(m, tuple) and m[0] in ("human", "user")) else (
-            "assistant" if m_type in ("ai", "assistant") else "other"
-        )
-        
+        m_role = _msg_role(m)
         if merged_dialogue and m_role in ("user", "assistant"):
             prev_m = merged_dialogue[-1]
-            prev_type = getattr(prev_m, "type", prev_m.__class__.__name__).lower()
-            prev_role = "user" if prev_type in ("human", "user") or (isinstance(prev_m, tuple) and prev_m[0] in ("human", "user")) else (
-                "assistant" if prev_type in ("ai", "assistant") else "other"
-            )
-            
-            # 若前后角色相同且均不含 tool_calls，则合并其纯文本
-            if m_role == prev_role and not getattr(prev_m, "tool_calls", None) and not getattr(m, "tool_calls", None):
+            if m_role == _msg_role(prev_m) and not getattr(prev_m, "tool_calls", None) and not getattr(m, "tool_calls", None):
                 prev_c = str(prev_m[1] if isinstance(prev_m, tuple) else getattr(prev_m, "content", "") or "")
                 curr_c = str(m[1] if isinstance(m, tuple) else getattr(m, "content", "") or "")
-                new_c = f"{prev_c}\n\n{curr_c}".strip()
-                if m_role == "user":
-                    merged_dialogue[-1] = HumanMessage(content=new_c)
-                else:
-                    merged_dialogue[-1] = AIMessage(content=new_c)
+                merged_c = f"{prev_c}\n\n{curr_c}".strip()
+                merged_dialogue[-1] = HumanMessage(content=merged_c) if m_role == "user" else AIMessage(content=merged_c)
                 continue
         merged_dialogue.append(m)
+    return merged_dialogue
 
-    non_system_messages = merged_dialogue
 
-    # 4. 重组头部单一 SystemMessage
-    final_messages: List[BaseMessage] = []
-    if system_contents:
-        merged_sys_content = "\n\n---\n\n".join(system_contents)
-        if len(merged_sys_content) >= 1024:
-            has_cache_flag = True
-        
-        add_kwargs = {"cache_control": {"type": "ephemeral"}} if has_cache_flag else {}
-        final_messages.append(SystemMessage(content=merged_sys_content, additional_kwargs=add_kwargs))
-    
-    # 将可能为 tuple 的消息归一化为 BaseMessage
+def _normalize_to_base_messages(non_system_messages: Sequence[Any]) -> List[BaseMessage]:
+    result: List[BaseMessage] = []
     for m in non_system_messages:
         if isinstance(m, tuple) and len(m) >= 2:
-            role_str = str(m[0]).lower()
-            if role_str in ("user", "human"):
-                final_messages.append(HumanMessage(content=str(m[1])))
-            elif role_str in ("ai", "assistant"):
-                final_messages.append(AIMessage(content=str(m[1])))
-            else:
-                final_messages.append(HumanMessage(content=str(m[1])))
+            msg_cls = AIMessage if str(m[0]).lower() in ("ai", "assistant") else HumanMessage
+            result.append(msg_cls(content=str(m[1])))
         elif isinstance(m, BaseMessage):
-            final_messages.append(m)
+            result.append(m)
+    return result
 
-    # 5. 保底检查：若无用户消息，自动追加一条 HumanMessage 防止模型接口报错
-    has_user_msg = any(
-        isinstance(m, HumanMessage) or getattr(m, "type", "") in ("human", "user")
-        for m in final_messages
-    )
-    if not has_user_msg:
+
+def sanitize_dialogue_protocol(messages: Sequence[Any]) -> List[BaseMessage]:
+    """对传入 LLM 的消息历史进行严格的协议防御与标准化。"""
+    if not messages:
+        return [HumanMessage(content="请根据系统提示与当前上下文执行审计分析并给出输出。")]
+
+    paired = ensure_tool_pairing(list(messages))
+    system_contents, non_system_messages, has_cache_flag = _split_system_and_dialogue(paired)
+    merged_dialogue = _merge_consecutive_roles(non_system_messages)
+
+    final_messages: List[BaseMessage] = []
+    if system_contents:
+        merged_sys = "\n\n---\n\n".join(system_contents)
+        add_kwargs = {"cache_control": {"type": "ephemeral"}} if (has_cache_flag or len(merged_sys) >= 1024) else {}
+        final_messages.append(SystemMessage(content=merged_sys, additional_kwargs=add_kwargs))
+
+    final_messages.extend(_normalize_to_base_messages(merged_dialogue))
+    if not any(isinstance(m, HumanMessage) or getattr(m, "type", "") in ("human", "user") for m in final_messages):
         final_messages.append(HumanMessage(content="请根据系统提示与当前上下文执行审计分析并给出输出。"))
-
     return final_messages
 
 

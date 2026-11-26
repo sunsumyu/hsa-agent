@@ -28,16 +28,16 @@ def extract_json_payload(text: str) -> Optional[Dict[str, Any]]:
     if code_block:
         try:
             return json.loads(code_block.group(1).strip())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[FunnelIntentRewriter] code block JSON parse skipped: {exc}")
 
     # 3. 尝试提取完整大括号块
     brace_match = re.search(r'\{.*\}', clean_text, re.DOTALL)
     if brace_match:
         try:
             return json.loads(brace_match.group(0).strip())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[FunnelIntentRewriter] brace JSON parse skipped: {exc}")
 
     # 4. 尝试直接解析
     try:

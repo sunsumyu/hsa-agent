@@ -38,8 +38,8 @@ def truncate_evidence_data(data: Any, max_chars: int = 12000) -> str:
                             try:
                                 total_amt += float(v or 0)
                                 break
-                            except (ValueError, TypeError):
-                                pass
+                            except (ValueError, TypeError) as exc:
+                                logger.debug(f"[EvidenceTruncation] numeric amount skipped: {exc}")
             meta_row = {
                 "total_records": total_items,
                 "total_amount": round(total_amt, 2) if total_amt > 0 else None,

@@ -124,8 +124,8 @@ class ServiceProvider:
                                 loop = asyncio.get_event_loop()
                                 if loop.is_running():
                                     asyncio.create_task(res)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug(f"[DI] async disposal schedule skipped: {exc}")
                     except Exception as e:
                         logger.warning(f"[DI] Error while disposing service '{name}': {e}")
                     break

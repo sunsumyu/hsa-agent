@@ -51,6 +51,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any, Generator
 from datetime import datetime
+from loguru import logger
 
 
 @dataclass
@@ -145,8 +146,8 @@ class _SpanContext:
             try:
                 # 支持异步或同步回调
                 self._tracer.on_event_cb(event)
-            except Exception:
-                pass # 追踪失败不应阻塞业务主流程
+            except Exception as exc:
+                logger.debug(f"[StructuredTracer] trace callback skipped: {exc}")
 
 
 class StructuredTracer:
