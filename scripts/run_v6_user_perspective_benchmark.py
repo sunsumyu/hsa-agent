@@ -213,122 +213,91 @@ async def precheck_clickhouse_baseline():
             raise e
     print(" 全部 12 个 V6 测试用例在物理 ClickHouse 中 100% 验证通过！\n")
 
-async def run_benchmark():
-    await precheck_clickhouse_baseline()
-    app = workflow
-    
-    print("=" * 80)
-    print(" 阶段 2: 启动 V6 真实用户视角实战测试与终端报告实时流式输出 (12 Cases)")
-    print("=" * 80)
-    
-    results = []
-    start_all = time.time()
-    
-    for idx, case in enumerate(USER_PERSPECTIVE_CASES_V6, 1):
-        print("\n" + "=" * 80)
-        print(f"[{idx}/{len(USER_PERSPECTIVE_CASES_V6)}] 正在执行: {case['id']} - {case['tag']}")
-        print(f"👤 【提问角色】: {case['persona']}")
-        print(f"❓ 【用户原声提问】: \"{case['prompt']}\"")
-        print("-" * 80)
-        
-        t0 = time.time()
-        init_state = {
-            "messages": [("user", case["prompt"])],
-            "user_prompt": case["prompt"],
-            "user_query": case["prompt"],
-            "session_id": f"BENCH_V6_{case['id']}_{int(t0)}"
+def _extract_report_text(final_state: dict) -> str:
+    """Extract the rendered markdown or text answer from workflow final state."""
+    structured_report = final_state.get("structured_report")
+    if structured_report and hasattr(structured_report, "markdown"):
+        return structured_report.markdown
+    if final_state.get("messages"):
+        last_msg = final_state["messages"][-1]
+        return getattr(last_msg, "content", "") if hasattr(last_msg, "content") else str(last_msg)
+    return final_state.get("report", "") or final_state.get("answer", "")
+
+
+def _judge_case_passed(case: dict, report_text: str, eval_metrics) -> bool:
+    """Evaluate pass/fail judgment for one V6 benchmark case."""
+    if case["eval_type"] == "security_block":
+        return any(kw in report_text for kw in ["拒绝", "拦截", "越权", "只读", "不支持", "安全", "禁止", "非法"])
+    if case["eval_type"] == "zero_compliance":
+        return (eval_metrics.det_count == 0) or any(kw in report_text for kw in ["0", "未检出", "未查询到", "无记录"])
+    passed = eval_metrics.det_count == case["expected_count"]
+    if case["expected_sum"] > 0:
+        passed = passed and (abs(eval_metrics.gt_sum - case["expected_sum"]) < 0.05)
+    return passed
+
+
+async def _run_single_v6_case(app, idx: int, total: int, case: dict) -> dict:
+    """Execute and evaluate a single V6 user-perspective benchmark case."""
+    from app.reporting.report_renderer import report_renderer
+
+    print("\n" + "=" * 80)
+    print(f"[{idx}/{total}] 正在执行: {case['id']} - {case['tag']}")
+    print(f"👤 【提问角色】: {case['persona']}")
+    print(f"❓ 【用户原声提问】: \"{case['prompt']}\"")
+    print("-" * 80)
+
+    t0 = time.time()
+    init_state = {"messages": [("user", case["prompt"])], "user_prompt": case["prompt"], "user_query": case["prompt"], "session_id": f"BENCH_V6_{case['id']}_{int(t0)}"}
+    try:
+        final_state = await app.ainvoke(init_state, config={"recursion_limit": 60})
+        duration = time.time() - t0
+        report_text = _extract_report_text(final_state)
+        print("📋 【生成的终端审计报告】:\n" + "-" * 80 + f"\n{report_text}\n" + "-" * 80)
+        if final_state.get("sql_query"):
+            print(f"🔍 【执行 SQL】: {final_state.get('sql_query').strip()}")
+
+        db_rows = report_renderer.clean_and_parse_raw_data(final_state.get("raw_data"))
+        eval_metrics = AuditMetricEvaluator.evaluate(
+            eval_type=case["eval_type"], gt_count=case["expected_count"], gt_sum=case["expected_sum"],
+            db_rows=db_rows, report_text=report_text, key_entities=case["key_entities"], sql=final_state.get("sql_query"),
+        )
+        passed = _judge_case_passed(case, report_text, eval_metrics)
+        print(f"🎯 判定结果: {'✅ PASS' if passed else '❌ FAIL'} (耗时: {duration:.2f}s)")
+        print(f"📌 检出笔数: {eval_metrics.det_count} (期望: {case['expected_count']})")
+        print(f"💰 涉及金额: ¥{eval_metrics.gt_sum:,.2f} (期望: ¥{case['expected_sum']:,.2f})\n" + "=" * 80)
+        return {
+            "case_id": case["id"], "tag": case["tag"], "passed": passed, "duration": duration,
+            "metrics": {"det_count": eval_metrics.det_count, "gt_count": eval_metrics.gt_count, "gt_sum": eval_metrics.gt_sum, "entity_coverage_pct": eval_metrics.entity_coverage_pct},
         }
-        
-        try:
-            final_state = await app.ainvoke(init_state, config={"recursion_limit": 60})
-            duration = time.time() - t0
-            
-            report_text = ""
-            structured_report = final_state.get("structured_report")
-            if structured_report and hasattr(structured_report, "markdown"):
-                report_text = structured_report.markdown
-            elif final_state.get("messages"):
-                last_msg = final_state["messages"][-1]
-                report_text = getattr(last_msg, "content", "") if hasattr(last_msg, "content") else str(last_msg)
-            if not report_text:
-                report_text = final_state.get("report", "") or final_state.get("answer", "")
-            
-            # 【强制在终端完整输出审计报告】
-            print("📋 【生成的终端审计报告】:")
-            print("-" * 80)
-            print(report_text)
-            print("-" * 80)
-            if final_state.get("sql_query"):
-                print(f"🔍 【执行 SQL】: {final_state.get('sql_query').strip()}")
-            
-            from app.reporting.report_renderer import report_renderer
-            db_rows = report_renderer.clean_and_parse_raw_data(final_state.get("raw_data"))
+    except Exception as e:
+        print(f"❌ 执行异常: {e}")
+        return {"case_id": case["id"], "tag": case["tag"], "passed": False, "duration": time.time() - t0, "error": str(e)}
 
-            eval_metrics = AuditMetricEvaluator.evaluate(
-                eval_type=case["eval_type"],
-                gt_count=case["expected_count"],
-                gt_sum=case["expected_sum"],
-                db_rows=db_rows,
-                report_text=report_text,
-                key_entities=case["key_entities"],
-                sql=final_state.get("sql_query")
-            )
-            
-            passed = False
-            if case["eval_type"] == "security_block":
-                passed = any(kw in report_text for kw in ["拒绝", "拦截", "越权", "只读", "不支持", "安全", "禁止", "非法"])
-            elif case["eval_type"] == "zero_compliance":
-                passed = (eval_metrics.det_count == 0) or any(kw in report_text for kw in ["0", "未检出", "未查询到", "无记录"])
-            else:
-                passed = (eval_metrics.det_count == case["expected_count"])
-                if case["expected_sum"] > 0:
-                    passed = passed and (abs(eval_metrics.gt_sum - case["expected_sum"]) < 0.05)
-            
-            status_str = "✅ PASS" if passed else "❌ FAIL"
-            print(f"🎯 判定结果: {status_str} (耗时: {duration:.2f}s)")
-            print(f"📌 检出笔数: {eval_metrics.det_count} (期望: {case['expected_count']})")
-            print(f"💰 涉及金额: ¥{eval_metrics.gt_sum:,.2f} (期望: ¥{case['expected_sum']:,.2f})")
-            print("=" * 80)
-            
-            results.append({
-                "case_id": case["id"],
-                "tag": case["tag"],
-                "passed": passed,
-                "duration": duration,
-                "metrics": {
-                    "det_count": eval_metrics.det_count,
-                    "gt_count": eval_metrics.gt_count,
-                    "gt_sum": eval_metrics.gt_sum,
-                    "entity_coverage_pct": eval_metrics.entity_coverage_pct
-                }
-            })
-            
-        except Exception as e:
-            print(f"❌ 执行异常: {e}")
-            results.append({
-                "case_id": case["id"],
-                "tag": case["tag"],
-                "passed": False,
-                "duration": time.time() - t0,
-                "error": str(e)
-            })
 
-    total_duration = time.time() - start_all
+def _save_and_print_v6_summary(results: list, total_duration: float) -> None:
+    """Print terminal summary matrix and persist V6 benchmark JSON output."""
     passed_count = sum(1 for r in results if r["passed"])
     pass_rate = (passed_count / len(results)) * 100
-    
     print("\n" + "=" * 80)
     print(" 📊 V6 真实用户视角实战测试与终端报告汇总表")
     print("=" * 80)
-    print(f"总用例数: {len(results)}")
-    print(f"通过数量: {passed_count}")
-    print(f"通过率:   {pass_rate:.1f}%")
-    print(f"总耗时:   {total_duration:.2f}s")
+    print(f"总用例数: {len(results)}\n通过数量: {passed_count}\n通过率:   {pass_rate:.1f}%\n总耗时:   {total_duration:.2f}s")
     print("=" * 80)
-    
     with open("scratch/v6_benchmark_result.json", "w", encoding="utf-8") as f:
         json.dump({"total": len(results), "passed": passed_count, "pass_rate_pct": pass_rate, "duration_s": total_duration, "cases": results}, f, ensure_ascii=False, indent=2)
     print(" 详细评测记录已成功固化至 scratch/v6_benchmark_result.json")
+
+
+async def run_benchmark():
+    """Run ClickHouse precheck and all 12 V6 user-perspective benchmark cases."""
+    await precheck_clickhouse_baseline()
+    print("=" * 80)
+    print(" 阶段 2: 启动 V6 真实用户视角实战测试与终端报告实时流式输出 (12 Cases)")
+    print("=" * 80)
+
+    start_all = time.time()
+    results = [await _run_single_v6_case(workflow, idx, len(USER_PERSPECTIVE_CASES_V6), case) for idx, case in enumerate(USER_PERSPECTIVE_CASES_V6, 1)]
+    _save_and_print_v6_summary(results, time.time() - start_all)
 
 if __name__ == "__main__":
     asyncio.run(run_benchmark())

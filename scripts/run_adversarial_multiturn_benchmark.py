@@ -89,7 +89,70 @@ ADVERSARIAL_5TURN_SCENARIOS = [
     }
 ]
 
+async def _run_single_adversarial_turn(item: dict, current_state: dict) -> tuple[dict, dict]:
+    """Execute one adversarial benchmark turn and return updated state and scorecard entry."""
+    turn = item["turn"]
+    phase = item["phase"]
+    prompt = item["prompt"]
+    print(f"\n{'='*42} [第 {turn:02d} 轮 / 共 5 轮] {'='*42}")
+    print(f"🎯 【阶段】: {phase}")
+    print(f"⚠️ 【边界特征】: {item['boundary_type']}")
+    print(f"❓ 【用户输入】: {prompt}")
+    print(f"🛡️ 【预期防御】: {item['expected_defense']}")
+
+    messages = list(current_state.get("messages", []))
+    messages.append(HumanMessage(content=prompt))
+    step_input = {
+        **current_state,
+        "messages": messages,
+        "metadata": {
+            **current_state.get("metadata", {}),
+            "user_question": prompt,
+            "target_tables": item.get("target_tables", []),
+            "turn": turn,
+        },
+    }
+
+    t0 = time.perf_counter()
+    try:
+        result_state = await workflow.ainvoke(step_input, config={"recursion_limit": 25})
+    except Exception as e:
+        print(f"❌ 运行异常: {e}")
+        result_state = current_state
+    elapsed = time.perf_counter() - t0
+
+    core_sql = result_state.get("sql_query", "") or ""
+    msgs = result_state.get("messages", [])
+    last_ai = next((str(m.content).strip() for m in reversed(msgs) if isinstance(m, AIMessage) and str(m.content).strip()), "")
+    total_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in msgs)
+
+    print(f"⏱️ 耗时: {elapsed:.2f}s | Token 估计: ~{total_tokens} tokens | 消息总数: {len(msgs)}")
+    if core_sql:
+        print(f"💻 核心 SQL: {core_sql.replace(chr(10), ' ').strip()[:120]}...")
+    if last_ai:
+        print(f"📋 审计回答: {last_ai.replace(chr(10), ' ')[:160]}...")
+
+    entry = {"turn": turn, "phase": phase, "tokens": total_tokens, "elapsed_s": round(elapsed, 2), "has_sql": bool(core_sql), "response_snippet": last_ai[:80]}
+    return result_state, entry
+
+
+def _print_adversarial_scorecard(round_scorecard: list) -> None:
+    """Print summary scorecard for all adversarial benchmark turns."""
+    print("\n" + "=" * 96)
+    print("🏆 [5 轮极端边界与对抗交互评测最终计分卡]")
+    print("=" * 96)
+    print(f"{'轮次':<5} | {'场景阶段':<22} | {'Token 负载':<12} | {'耗时':<8} | {'核心 SQL':<8} | {'结论状态'}")
+    print("-" * 96)
+    for r in round_scorecard:
+        sql_flag = "✅ 生成" if r["has_sql"] else "ℹ️ 防御拦截/直通"
+        print(f"{r['turn']:<5} | {r['phase']:<20} | ~{r['tokens']:<11} | {r['elapsed_s']:<6}s | {sql_flag:<8} | 响应已落地")
+    print("-" * 96)
+    print("✅ 5 轮极端边界对抗交互评测全部完成！")
+    print("=" * 96)
+
+
 async def run_adversarial_benchmark():
+    """Run the 5-turn adversarial benchmark suite."""
     register_services()
     init_observability()
 
@@ -105,95 +168,16 @@ async def run_adversarial_benchmark():
         "session_id": session_id,
         "sql_history": [],
         "execution_trace": [],
-        "metadata": {
-            "session_id": session_id,
-            "target_tables": []
-        }
+        "metadata": {"session_id": session_id, "target_tables": []},
     }
-
     round_scorecard = []
 
     for item in ADVERSARIAL_5TURN_SCENARIOS:
-        turn = item["turn"]
-        phase = item["phase"]
-        b_type = item["boundary_type"]
-        prompt = item["prompt"]
-        target_tables = item.get("target_tables", [])
-        expected = item["expected_defense"]
-
-        print(f"\n{'='*42} [第 {turn:02d} 轮 / 共 5 轮] {'='*42}")
-        print(f"🎯 【阶段】: {phase}")
-        print(f"⚠️ 【边界特征】: {b_type}")
-        print(f"❓ 【用户输入】: {prompt}")
-        print(f"🛡️ 【预期防御】: {expected}")
-
-        messages = list(current_state.get("messages", []))
-        messages.append(HumanMessage(content=prompt))
-
-        step_input = {
-            **current_state,
-            "messages": messages,
-            "metadata": {
-                **current_state.get("metadata", {}),
-                "user_question": prompt,
-                "target_tables": target_tables,
-                "turn": turn
-            }
-        }
-
-        t0 = time.perf_counter()
-        try:
-            result_state = await workflow.ainvoke(
-                step_input,
-                config={"recursion_limit": 25}
-            )
-            elapsed = time.perf_counter() - t0
-        except Exception as e:
-            elapsed = time.perf_counter() - t0
-            print(f"❌ 运行异常: {e}")
-            result_state = current_state
-
-        core_sql = result_state.get("sql_query", "") or ""
-        msgs = result_state.get("messages", [])
-        last_ai_content = ""
-        for m in reversed(msgs):
-            if isinstance(m, AIMessage) and str(m.content).strip():
-                last_ai_content = str(m.content).strip()
-                break
-
-        total_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in msgs)
-        
-        print(f"⏱️ 耗时: {elapsed:.2f}s | Token 估计: ~{total_tokens} tokens | 消息总数: {len(msgs)}")
-        if core_sql:
-            sql_summary = core_sql.replace("\n", " ").strip()
-            print(f"💻 核心 SQL: {sql_summary[:120]}...")
-        if last_ai_content:
-            snippet = last_ai_content.replace("\n", " ")
-            print(f"📋 审计回答: {snippet[:160]}...")
-
-        round_scorecard.append({
-            "turn": turn,
-            "phase": phase,
-            "tokens": total_tokens,
-            "elapsed_s": round(elapsed, 2),
-            "has_sql": bool(core_sql),
-            "response_snippet": last_ai_content[:80]
-        })
-
-        current_state = result_state
+        current_state, entry = await _run_single_adversarial_turn(item, current_state)
+        round_scorecard.append(entry)
         await asyncio.sleep(0.5)
 
-    print("\n" + "=" * 96)
-    print("🏆 [5 轮极端边界与对抗交互评测最终计分卡]")
-    print("=" * 96)
-    print(f"{'轮次':<5} | {'场景阶段':<22} | {'Token 负载':<12} | {'耗时':<8} | {'核心 SQL':<8} | {'结论状态'}")
-    print("-" * 96)
-    for r in round_scorecard:
-        sql_flag = "✅ 生成" if r["has_sql"] else "ℹ️ 防御拦截/直通"
-        print(f"{r['turn']:<5} | {r['phase']:<20} | ~{r['tokens']:<11} | {r['elapsed_s']:<6}s | {sql_flag:<8} | 响应已落地")
-    print("-" * 96)
-    print("✅ 5 轮极端边界对抗交互评测全部完成！")
-    print("=" * 96)
+    _print_adversarial_scorecard(round_scorecard)
 
 if __name__ == "__main__":
     asyncio.run(run_adversarial_benchmark())

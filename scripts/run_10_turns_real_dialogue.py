@@ -76,105 +76,88 @@ TEN_TURNS_SCRIPT = [
     )
 ]
 
+async def _execute_turn(turn_idx, action_title, user_question, history, llm, obs, session_id, mid):
+    """Execute one governed dialogue turn and append messages to history."""
+    print(f"\n" + "-" * 75)
+    print(f"▶ [Turn {turn_idx}/10] 动作: {action_title}")
+    print(f"   提问: {user_question}")
+
+    sanitized_q = PIISanitizer.sanitize(user_question)
+    if sanitized_q != user_question:
+        print("   🛡️ [PII 脱敏门禁] 检测到敏感信息输入，已自动掩码处理:")
+        print(f"      脱敏后内容: {sanitized_q}")
+
+    governed_history = SessionContextManager.compact_history_if_needed(history, max_retained_turns=4)
+    if len(governed_history) < len(history):
+        print("   🧹 [上下文防膨胀] 触发历史滑动窗口治理，已自动压缩早期对话为事实摘要")
+
+    governed_history.append(HumanMessage(content=user_question))
+    turn_config = SessionContextManager.build_turn_config(
+        session_id=session_id,
+        turn_index=turn_idx,
+        action_name=action_title,
+        extra_meta={"audit_case": "orthopedics_consumables_and_split_billing", "auditor_role": "lead_inspector", "model_engine": mid},
+    )
+    final_config = obs.configure_run(node_name=f"Turn_{turn_idx}", session_id=session_id, base_config=turn_config)
+
+    turn_start = time.time()
+    res = await llm.ainvoke(governed_history, config=final_config)
+    turn_elapsed = time.time() - turn_start
+
+    history.append(HumanMessage(content=user_question))
+    history.append(res)
+
+    usage = getattr(res, "usage_metadata", {})
+    in_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+    out_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0))
+    print(f"   ✅ [AI 回复 ({turn_elapsed:.2f}s)]: {str(res.content).strip()}")
+    print(f"   📊 [Token 监控]: In={in_tokens} | Out={out_tokens} | 累计消息数={len(history)}")
+
+
+def _record_expert_feedback(obs):
+    """Record simulated HITL expert feedback ratings for key audit turns."""
+    print("\n" + "=" * 80)
+    print("🌟 触发闭环数据飞轮：审计专家对核查结果打标与沉淀...")
+    obs.record_feedback(
+        run_id=str(uuid.uuid4()),
+        score=1.0,
+        category="clinical_accuracy",
+        comment="单节段骨水泥用量判定非常精准（通常3-6ml/1支），有效支撑超量认定。",
+    )
+    obs.record_feedback(
+        run_id=str(uuid.uuid4()),
+        score=1.0,
+        category="report_acceptance",
+        comment="审计底稿事实清楚、条理清晰，已采纳归入正式通报卷宗。",
+    )
+    print("  ✅ 专家打标已同步上报 LangSmith（2条满分采纳记录）！")
+
+
 async def run_10_turns_dialogue():
+    """Run 10 sequential audit dialogue turns with PII guardrails and feedback."""
     print("=" * 80)
     print("🚀 启动 10 轮全真连贯医保现场审计对话测试")
     print("=" * 80)
 
-    # 1. 确保 DI 容器装配与可观测服务就绪
     register_services()
     obs = ServiceProvider.resolve("observability")
     llm, mid = model_manager.get_adaptive_llm(model_id="ppio-premium")
-    
     session_id = f"audit-ten-turns-{uuid.uuid4().hex[:6]}"
     print(f"📌 会话 ID (LangSmith Thread ID): {session_id}")
     print(f"⚡ 模型引擎通道: {mid} (PPIO 算力链路)")
 
-    # 2. 系统人设与记忆初始化
     system_prompt = (
         "你是国家医保基金现场审计智能 Agent，精通医保政策、ClickHouse SQL 审计与违规反模式核查。"
         "请用严谨、极简的专业语言作答，每次回复严格控制在 2-3 句话（100-200 字符）以内，直击核心要害。"
     )
     history = [SystemMessage(content=system_prompt)]
-
     start_all = time.time()
 
-    # 3. 逐轮推进对话
     for turn_idx, (action_title, user_question) in enumerate(TEN_TURNS_SCRIPT, 1):
-        print(f"\n" + "-" * 75)
-        print(f"▶ [Turn {turn_idx}/10] 动作: {action_title}")
-        print(f"   提问: {user_question}")
-
-        # 敏感信息主动打码校验（针对第 4 轮等携带真实/模拟敏感字段的提问）
-        sanitized_q = PIISanitizer.sanitize(user_question)
-        if sanitized_q != user_question:
-            print(f"   🛡️ [PII 脱敏门禁] 检测到敏感信息输入，已自动掩码处理:")
-            print(f"      脱敏后内容: {sanitized_q}")
-
-        # 会话历史治理：超过 4 轮时自动触发前置历史摘要压缩，防止上下文无限膨胀
-        governed_history = SessionContextManager.compact_history_if_needed(history, max_retained_turns=4)
-        if len(governed_history) < len(history):
-            print(f"   🧹 [上下文防膨胀] 触发历史滑动窗口治理，已自动压缩早期对话为事实摘要")
-
-        governed_history.append(HumanMessage(content=user_question))
-
-        # 核心：构造符合 LangSmith 标准的轮次配置（统一会话ID、轮次专属名称、Tags与Metadata）
-        turn_config = SessionContextManager.build_turn_config(
-            session_id=session_id,
-            turn_index=turn_idx,
-            action_name=action_title,
-            extra_meta={
-                "audit_case": "orthopedics_consumables_and_split_billing",
-                "auditor_role": "lead_inspector",
-                "model_engine": mid
-            }
-        )
-        final_config = obs.configure_run(
-            node_name=f"Turn_{turn_idx}",
-            session_id=session_id,
-            base_config=turn_config
-        )
-
-        turn_start = time.time()
-        # 模型推理调用并实时推送可观测链路
-        res = await llm.ainvoke(governed_history, config=final_config)
-        turn_elapsed = time.time() - turn_start
-
-        # 压入历史
-        history.append(HumanMessage(content=user_question))
-        history.append(res)
-
-        usage = getattr(res, "usage_metadata", {})
-        in_tokens = usage.get("input_tokens", usage.get("prompt_tokens", 0))
-        out_tokens = usage.get("output_tokens", usage.get("completion_tokens", 0))
-
-        print(f"   ✅ [AI 回复 ({turn_elapsed:.2f}s)]: {str(res.content).strip()}")
-        print(f"   📊 [Token 监控]: In={in_tokens} | Out={out_tokens} | 累计消息数={len(history)}")
+        await _execute_turn(turn_idx, action_title, user_question, history, llm, obs, session_id, mid)
 
     total_time = time.time() - start_all
-
-    # 4. 闭环数据飞轮：模拟审计专家对第 4 轮（PII）与第 10 轮（底稿）提交审核评分
-    print("\n" + "=" * 80)
-    print("🌟 触发闭环数据飞轮：审计专家对核查结果打标与沉淀...")
-    
-    # 评价第 4 轮（耗材超量判定准确）
-    run_uuid_4 = str(uuid.uuid4())
-    obs.record_feedback(
-        run_id=run_uuid_4,
-        score=1.0,
-        category="clinical_accuracy",
-        comment="单节段骨水泥用量判定非常精准（通常3-6ml/1支），有效支撑超量认定。"
-    )
-    # 评价第 10 轮（底稿结论采纳）
-    run_uuid_10 = str(uuid.uuid4())
-    obs.record_feedback(
-        run_id=run_uuid_10,
-        score=1.0,
-        category="report_acceptance",
-        comment="审计底稿事实清楚、条理清晰，已采纳归入正式通报卷宗。"
-    )
-    print(f"  ✅ 专家打标已同步上报 LangSmith（2条满分采纳记录）！")
-
+    _record_expert_feedback(obs)
     print("=" * 80)
     print(f"🎉 10 轮全真连续对话测试圆满完成！总耗时: {total_time:.2f}s")
     print(f"📌 请打开 LangSmith 控制台，在 Threads 页面查看聚合会话: {session_id}")
