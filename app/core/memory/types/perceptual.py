@@ -60,7 +60,9 @@ class PerceptualMemory:
             try:
                 with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                     return f.read()
-            except: return ""
+            except Exception as exc:
+                logger.debug(f"[PerceptualMemory] Fallback plain-text read skipped for {path}: {exc}")
+                return ""
 
     async def add_image(self, image_path: str, description: str = "", importance: float = 0.5, **metadata):
         """

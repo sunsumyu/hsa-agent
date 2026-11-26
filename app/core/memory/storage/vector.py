@@ -5,9 +5,9 @@ app/core/memory/storage/vector.py
 """
 
 import os
+import json
 import faiss
 import numpy as np
-import pickle
 from typing import List, Optional
 from loguru import logger
 from app.core.memory.base import MemoryItem, BaseStorage, StorageStats
@@ -17,7 +17,7 @@ class VectorStorage(BaseStorage):
     def __init__(self, storage_dir: str, embeddings=None):
         self.storage_dir = storage_dir
         self.index_path = os.path.join(storage_dir, "vector.index")
-        self.meta_path = os.path.join(storage_dir, "metadata.pkl")
+        self.meta_path = os.path.join(storage_dir, "metadata.json")
         self.index = None
         self.items: List[MemoryItem] = []
         self._embeddings = embeddings or embedding_engine
@@ -30,8 +30,9 @@ class VectorStorage(BaseStorage):
         if os.path.exists(self.index_path) and os.path.exists(self.meta_path):
             try:
                 self.index = faiss.read_index(self.index_path)
-                with open(self.meta_path, "rb") as f:
-                    self.items = pickle.load(f)
+                with open(self.meta_path, "r", encoding="utf-8") as f:
+                    raw_items = json.load(f)
+                self.items = [MemoryItem.model_validate(d) for d in raw_items]
                 logger.info(f"✅ [VectorStorage] 已从磁盘加载索引 (条目数: {len(self.items)})")
             except Exception as e:
                 logger.error(f"加载向量索引失败: {e}")
@@ -90,8 +91,11 @@ class VectorStorage(BaseStorage):
     def _save(self):
         try:
             faiss.write_index(self.index, self.index_path)
-            with open(self.meta_path, "wb") as f:
-                pickle.dump(self.items, f)
+            payload = [item.model_dump(mode="json") for item in self.items]
+            tmp_path = f"{self.meta_path}.tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, self.meta_path)
         except Exception as e:
             logger.error(f"保存向量索引失败: {e}")
 

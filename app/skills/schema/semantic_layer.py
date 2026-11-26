@@ -5,8 +5,8 @@ app/skills/semantic_layer.py
 医保审计语义召回层门面模块。
 对外暴露统一的语义检索接口，内部委托至百科解析器、HyDE 生成器、向量索引器与提示词格式化器。
 """
+import json
 import os
-import pickle
 from typing import List, Dict, Any, Optional
 from loguru import logger
 
@@ -68,14 +68,14 @@ class SemanticRetriever(_MetadataExtractor):
         import faiss
 
         index_path = os.path.join(self.data_dir, "vector.index")
-        meta_path = os.path.join(self.data_dir, "metadata.pkl")
+        meta_path = os.path.join(self.data_dir, "metadata.json")
 
         # 优先从磁盘加载缓存索引
         if os.path.exists(index_path) and os.path.exists(meta_path):
             try:
                 self.index = faiss.read_index(index_path)
-                with open(meta_path, "rb") as f:
-                    self.column_metadata = pickle.load(f)
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    self.column_metadata = json.load(f)
                 logger.info(f"✅ [语义层] 已从磁盘加载缓存索引 (字段数 {len(self.column_metadata)})")
                 return
             except Exception as e:
@@ -104,8 +104,10 @@ class SemanticRetriever(_MetadataExtractor):
         # 4. 持久化到磁盘
         try:
             faiss.write_index(self.index, index_path)
-            with open(meta_path, "wb") as f:
-                pickle.dump(self.column_metadata, f)
+            tmp_path = f"{meta_path}.tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(self.column_metadata, f, ensure_ascii=False)
+            os.replace(tmp_path, meta_path)
             logger.info("✅ [语义层] 索引已成功持久化至磁盘")
         except Exception as e:
             logger.error(f"持久化索引失败: {e}")

@@ -6,7 +6,7 @@
 import re
 import hashlib
 import threading
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Tuple
 
 # [V179.3] 使用 SHA-256 替代 MD5
 def get_finding_hash(finding: str) -> str:
