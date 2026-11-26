@@ -1,7 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -49,5 +49,6 @@ class SQLAuditArtifact(BaseModel):
 class ReviewVerdictArtifact(BaseModel):
     exemption_notes: str = ""
     statutory_citations: List[str] = Field(default_factory=list)
+    citations_ledger: List[Dict[str, Any]] = Field(default_factory=list)
     risk_level: Literal["高", "中", "低"] = "中"
     adjusted_summary: str = ""

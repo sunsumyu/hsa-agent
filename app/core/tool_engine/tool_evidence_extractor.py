@@ -15,11 +15,12 @@ from __future__ import annotations
 import json
 import time
 import hashlib
-from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 from langchain_core.messages import ToolMessage
 
+from app.core.rag.citation_ledger import merge_citation_ledgers, parse_citations_from_tool_output
 from app.skills.security.probe_guard import is_probe_query
 from app.core.tool_engine.evidence_truncation_policy import truncate_evidence_data
 from app.core.tool_engine.core_sql_resolver import resolve_core_audit_sql
@@ -38,6 +39,7 @@ class ProcessedToolResults:
     has_error: bool
     error_msg: str
     evidence_row_count: int = 0  # [证据对账] 证据通道中实际可解析的行数 (Append-Only 累加)
+    retrieved_citations: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """向后兼容字典接口供 LangGraph State 使用"""
@@ -51,6 +53,7 @@ class ProcessedToolResults:
             "execution_trace": self.execution_trace,
             "has_error": self.has_error,
             "error_msg": self.error_msg,
+            "retrieved_citations": self.retrieved_citations,
         }
 
     def __getitem__(self, item: str) -> Any:
@@ -59,6 +62,19 @@ class ProcessedToolResults:
 
     def get(self, item: str, default: Any = None) -> Any:
         return getattr(self, item, default)
+
+
+def _harvest_citations(
+    results: List[Tuple[Dict[str, Any], Any]],
+    existing_citations: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """Harvest structured RAG/law citations from tool outputs without resetting existing ledger."""
+    ledger: List[Dict[str, Any]] = list(existing_citations or [])
+    for t_call, res in results:
+        parsed = parse_citations_from_tool_output(str(t_call.get("name", "")), str(res))
+        if parsed:
+            ledger = merge_citation_ledgers(ledger, [rec.model_dump(mode="json") for rec in parsed])
+    return ledger
 
 
 class ToolEvidenceExtractor:
@@ -182,6 +198,7 @@ class ToolEvidenceExtractor:
             execution_trace=state.get("execution_trace", []) + tool_traces,
             has_error=has_error,
             error_msg=error_msg,
+            retrieved_citations=_harvest_citations(results, state.get("retrieved_citations")),
         )
 
 

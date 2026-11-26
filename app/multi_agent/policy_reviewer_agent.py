@@ -6,6 +6,11 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from loguru import logger
 
+from app.core.rag.citation_ledger import (
+    build_policy_registry_citations,
+    merge_citation_ledgers,
+    parse_citations_from_tool_output,
+)
 from app.multi_agent.contracts import ReviewVerdictArtifact, SQLAuditArtifact
 from app.reporting.policy_matcher import match_policies
 from app.skills.federated.law_rag_tools import query_law_database
@@ -48,6 +53,32 @@ def _infer_risk_level(text: str, total_amt: float, total_rows: int) -> str:
     if total_rows == 0:
         return "低"
     return "中"
+
+
+def _harvest_review_citations(
+    tool_calls: Sequence[Any],
+    tool_msgs: Sequence[ToolMessage],
+    citations: List[str],
+) -> List[Dict[str, Any]]:
+    """Harvest structured citations from review tool outputs and static policy registry."""
+    id_to_name: Dict[str, str] = {}
+    for idx, tc in enumerate(tool_calls):
+        is_dict = isinstance(tc, dict)
+        name = tc.get("name", "") if is_dict else getattr(tc, "name", "")
+        tc_id = (tc.get("id") if is_dict else getattr(tc, "id", None)) or f"call_{idx}"
+        id_to_name[str(tc_id)] = str(name or "")
+
+    ledger: List[Dict[str, Any]] = []
+    for msg in tool_msgs:
+        tool_name = id_to_name.get(str(msg.tool_call_id), "")
+        parsed = parse_citations_from_tool_output(tool_name, str(msg.content))
+        if parsed:
+            ledger = merge_citation_ledgers(ledger, [rec.model_dump(mode="json") for rec in parsed])
+
+    registry_records = build_policy_registry_citations("; ".join(citations))
+    if registry_records:
+        ledger = merge_citation_ledgers(ledger, [rec.model_dump(mode="json") for rec in registry_records])
+    return ledger
 
 
 async def _execute_review_tools(
@@ -121,6 +152,8 @@ class PolicyReviewerSubagent:
         messages = self.build_blind_review_messages(user_query, sql_artifacts, citations)
 
         review_text = ""
+        tool_calls: Sequence[Any] = []
+        tool_msgs: List[ToolMessage] = []
         try:
             resp = await self._call_llm(messages, config, allow_tools=True)
             tool_calls = getattr(resp, "tool_calls", None) or []
@@ -136,9 +169,11 @@ class PolicyReviewerSubagent:
 
         risk = _infer_risk_level(review_text, total_amt, total_rows)
         citation_note = "; ".join(citations) if citations else "请参考 configs/policy_registry.yaml"
+        citations_ledger = _harvest_review_citations(tool_calls, tool_msgs, citations)
         return ReviewVerdictArtifact(
             exemption_notes=review_text,
             statutory_citations=citations,
+            citations_ledger=citations_ledger,
             risk_level=risk,
             adjusted_summary=f"{review_text}\n适用法规依据：{citation_note}",
         )

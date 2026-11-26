@@ -209,7 +209,7 @@ class AuditCoderAgent:
         final_validated = (not processed["has_error"]) or prev_validated
         final_error_log = None if prev_validated else (processed["error_msg"] if processed["has_error"] else None)
 
-        return {
+        state_patch: Dict[str, Any] = {
             "raw_data": processed["raw_data"],
             "evidence_row_count": processed["evidence_row_count"],
             "sql_query": processed["sql_query"],
@@ -222,6 +222,9 @@ class AuditCoderAgent:
             "execution_trace": tracer.to_legacy_list(),
             "temp_table": state.get("temp_table")
         }
+        if processed.get("retrieved_citations"):
+            state_patch["retrieved_citations"] = processed["retrieved_citations"]
+        return state_patch
 
     async def _invoke_tools_parallel(self, tool_calls, tools, state):
         """委托给 audit_tool_executor 深模块进行安全工具调度与探针拦截 [Matt Pocock Deep Module]"""

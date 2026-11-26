@@ -104,7 +104,7 @@ class MultiAgentHubOrchestrator:
         merged = _merge_sql_artifacts(sql_artifacts)
         summary_md, methodology = _build_hub_summary_and_methodology(sql_artifacts, verdict, plan)
 
-        return {
+        patch: Dict[str, Any] = {
             **merged,
             "tasks": [st.focus_title for st in plan.subtasks],
             "methodology": methodology,
@@ -113,6 +113,9 @@ class MultiAgentHubOrchestrator:
             "messages": [AIMessage(content=summary_md)],
             "execution_trace": trace,
         }
+        if verdict and verdict.citations_ledger:
+            patch["retrieved_citations"] = verdict.citations_ledger
+        return patch
 
 
 multi_agent_hub = MultiAgentHubOrchestrator()
