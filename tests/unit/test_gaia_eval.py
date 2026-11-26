@@ -65,67 +65,54 @@ def test_dataset_missing_raises_clear_error(tmp_path: Path, monkeypatch):
         ds.load()
 
 
-def test_evaluator_level_metrics_drop_rate_and_exports(tmp_path: Path):
+def _seed_gaia_validation_fixture(tmp_path: Path) -> Path:
+    """Create temporary GAIA validation dataset fixture files."""
     val_dir = tmp_path / "gaia" / "2023" / "validation"
     val_dir.mkdir(parents=True)
     (val_dir / "note.txt").write_text("Population secret factor = 42", encoding="utf-8")
 
     rows = [
-        {
-            "task_id": "g1",
-            "Question": "Read note.txt and give the factor.",
-            "Level": 1,
-            "Final answer": "42",
-            "file_name": "note.txt",
-            "Annotator Metadata": {"Number of steps": 1},
-        },
-        {
-            "task_id": "g2",
-            "Question": "Name the country.",
-            "Level": 2,
-            "Final answer": "United States",
-            "file_name": "",
-            "Annotator Metadata": {"Number of steps": 3},
-        },
-        {
-            "task_id": "g3",
-            "Question": "Another L2 question.",
-            "Level": 2,
-            "Final answer": "100",
-            "file_name": "",
-            "Annotator Metadata": {"Number of steps": 4},
-        },
-        {
-            "task_id": "g4",
-            "Question": "Hard L3 question.",
-            "Level": 3,
-            "Final answer": "alpha, beta",
-            "file_name": "",
-            "Annotator Metadata": {"Number of steps": 6},
-        },
+        {"task_id": "g1", "Question": "Read note.txt and give the factor.", "Level": 1, "Final answer": "42", "file_name": "note.txt", "Annotator Metadata": {"Number of steps": 1}},
+        {"task_id": "g2", "Question": "Name the country.", "Level": 2, "Final answer": "United States", "file_name": "", "Annotator Metadata": {"Number of steps": 3}},
+        {"task_id": "g3", "Question": "Another L2 question.", "Level": 2, "Final answer": "100", "file_name": "", "Annotator Metadata": {"Number of steps": 4}},
+        {"task_id": "g4", "Question": "Hard L3 question.", "Level": 3, "Final answer": "alpha, beta", "file_name": "", "Annotator Metadata": {"Number of steps": 6}},
     ]
     (val_dir / "metadata.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    return tmp_path / "gaia"
 
-    ds = GAIADataset(split="validation", local_data_dir=tmp_path / "gaia")
-    stats = ds.get_statistics()
+
+def _assert_gaia_exports(evaluator: GAIAEvaluator, report, tmp_path: Path) -> None:
+    """Verify GAIA JSONL submission and Markdown report exports."""
+    jsonl_out = evaluator.export_to_gaia_format(report, output_path=tmp_path / "out.jsonl")
+    assert jsonl_out.exists()
+    exported_rows = [json.loads(line) for line in jsonl_out.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(exported_rows) == 4
+    assert exported_rows[0]["task_id"] == "g1"
+    assert exported_rows[0]["model_answer"] == "42"
+
+    md_out = evaluator.generate_markdown_report(report, output_path=tmp_path / "report.md")
+    assert md_out.exists()
+    md_text = md_out.read_text(encoding="utf-8")
+    assert "50.00%" in md_text
+    assert "Level 1 → Level 2" in md_text
+
+
+def test_evaluator_level_metrics_drop_rate_and_exports(tmp_path: Path):
+    """Verify GAIA evaluator level accuracy, drop rates, avg steps, and exports."""
+    gaia_root = _seed_gaia_validation_fixture(tmp_path)
+    stats = GAIADataset(split="validation", local_data_dir=gaia_root).get_statistics()
     assert stats["total_samples"] == 4
     assert stats["level_distribution"] == {1: 1, 2: 2, 3: 1}
 
     mock_llm = _MockGAIAChatModel(
         responses=[
-            "Reasoning...\nFINAL ANSWER: 42",               # L1: correct
-            "FINAL ANSWER: The United States.",             # L2: correct
-            "FINAL ANSWER: 999",                            # L2: wrong
-            "FINAL ANSWER: wrong",                          # L3: wrong
+            "Reasoning...\nFINAL ANSWER: 42",
+            "FINAL ANSWER: The United States.",
+            "FINAL ANSWER: 999",
+            "FINAL ANSWER: wrong",
         ]
     )
-    agent = ArgusGAIAAgent(model_id="mock-gaia", llm=mock_llm)
-    evaluator = GAIAEvaluator(
-        agent=agent,
-        split="validation",
-        local_data_dir=tmp_path / "gaia",
-        concurrency=1,
-    )
+    evaluator = GAIAEvaluator(agent=ArgusGAIAAgent(model_id="mock-gaia", llm=mock_llm), split="validation", local_data_dir=gaia_root, concurrency=1)
     report = evaluator.evaluate(max_samples=0)
 
     assert report.total_samples == 4
@@ -136,17 +123,6 @@ def test_evaluator_level_metrics_drop_rate_and_exports(tmp_path: Path):
     assert report.level_metrics[3]["accuracy"] == pytest.approx(0.0)
     assert report.drop_rates["1->2"] == pytest.approx(0.5)
     assert report.drop_rates["2->3"] == pytest.approx(1.0)
-    assert report.avg_steps == pytest.approx(2.0)  # (1 + 3) / 2
+    assert report.avg_steps == pytest.approx(2.0)
 
-    jsonl_out = evaluator.export_to_gaia_format(report, output_path=tmp_path / "out.jsonl")
-    assert jsonl_out.exists()
-    exported_rows = [json.loads(l) for l in jsonl_out.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert len(exported_rows) == 4
-    assert exported_rows[0]["task_id"] == "g1"
-    assert exported_rows[0]["model_answer"] == "42"
-
-    md_out = evaluator.generate_markdown_report(report, output_path=tmp_path / "report.md")
-    assert md_out.exists()
-    md_text = md_out.read_text(encoding="utf-8")
-    assert "50.00%" in md_text
-    assert "Level 1 → Level 2" in md_text
+    _assert_gaia_exports(evaluator, report, tmp_path)

@@ -147,6 +147,58 @@ class TestGreenCasesLegitimateQueries:
 # 🟡 边界与健壮性测试区 (Edge Cases)
 # ==============================================================================
 
+def _create_in_memory_audit_db():
+    """Create and seed an in-memory SQLite audit billing table for comparison tests."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE fqz_fymx_test (
+        setl_id TEXT,
+        psn_name TEXT,
+        hilist_name TEXT,
+        det_item_fee_sumamt REAL
+    )
+    """)
+    cursor.execute("INSERT INTO fqz_fymx_test VALUES ('setl_001', '张三', '全身麻醉费', 800.0)")
+    cursor.execute("INSERT INTO fqz_fymx_test VALUES ('setl_001', '张三', '腹腔镜阑尾切除手术', 3500.0)")
+    cursor.execute("INSERT INTO fqz_fymx_test VALUES ('setl_002', '李四', '局部浸润麻醉费', 300.0)")
+    conn.commit()
+    return conn, cursor
+
+
+def _verify_protected_healed_query(cursor, bad_sql: str, archetype) -> None:
+    """Verify ContradictionDetector blocks bad SQL and healed SQL exonerates patient Zhang."""
+    print("\n" + "=" * 70)
+    print("[TEST-RESULT] [PROTECTED-MODE] Interception & Self-Healing Pipeline:")
+    violation = ContradictionDetector.detect(bad_sql, archetypes=[archetype])
+    assert violation is not None, "门禁必须在物理执行前将坏 SQL 截杀！"
+    print(f"   [INTERCEPTED] Successfully blocked bad SQL! Reason: {violation.message}")
+    print("   [SAFETY-GUARD] Bad query blocked before reaching ClickHouse/DB!")
+
+    healed_good_sql = """
+    SELECT setl_id, psn_name, hilist_name, det_item_fee_sumamt
+    FROM fqz_fymx_test
+    WHERE hilist_name LIKE '%麻醉%'
+      AND setl_id NOT IN (
+          SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%手术%'
+      )
+    """
+    assert ContradictionDetector.detect(healed_good_sql, archetypes=[archetype]) is None
+    cursor.execute(healed_good_sql)
+    protected_results = cursor.fetchall()
+    print("\n[TEST-RESULT] [PROTECTED-MODE] Healed Query Results:")
+    for row in protected_results:
+        print(f"   -> [TRUE-VIOLATION] setl_id: {row[0]} | patient: {row[1]} | item: {row[2]} | fee: {row[3]}")
+
+    accused_names_protected = [row[1] for row in protected_results]
+    assert "张三" not in accused_names_protected, "合规病人张三被成功保护，没有被误判！"
+    assert "李四" in accused_names_protected, "真实骗保病人李四被精准命中！"
+    print("   [SUCCESS] Perfect result: Zhang San (legitimate) exonerated, Li Si (fraud) accurately caught!")
+    print("=" * 70 + "\n")
+
+
 class TestEdgeCasesRobustness:
     """边界测试：抗混淆与深层嵌套 AST 遍历能力"""
 
@@ -164,93 +216,27 @@ class TestEdgeCasesRobustness:
         assert violation is not None, "🟡 边界失效：冗余括号导致门禁漏检！"
 
     def test_unprotected_vs_protected_audit_query_comparison(self, missing_companion_archetype):
-        """
-        🔥 实战对比验证：
-        1. 【无防护状态】：大模型写的坏 SQL 直接下发数据库，看查出了什么（假阳性雪崩，正常人被冤枉）；
-        2. 【有防护状态】：经 AST 神经符号门禁拦截并自愈修正为跨行对撞后，看查出了什么（零误报，只抓真骗保）。
-        """
-        import sqlite3
+        """Compare unprotected false positives against ContradictionDetector protected execution."""
+        conn, cursor = _create_in_memory_audit_db()
+        try:
+            unprotected_bad_sql = """
+            SELECT setl_id, psn_name, hilist_name, det_item_fee_sumamt
+            FROM fqz_fymx_test AS t
+            WHERE ((t.hilist_name LIKE '%麻醉%') AND ((t.det_item_fee_sumamt > 0) AND (t.hilist_name NOT LIKE '%手术%')))
+            """
+            cursor.execute(unprotected_bad_sql)
+            unprotected_results = cursor.fetchall()
 
-        # 1. 搭建仿真内存数据库，注入真实医保结算流水
-        conn = sqlite3.connect(":memory:")
-        cursor = conn.cursor()
-        cursor.execute("""
-        CREATE TABLE fqz_fymx_test (
-            setl_id TEXT,
-            psn_name TEXT,
-            hilist_name TEXT,
-            det_item_fee_sumamt REAL
-        )
-        """)
+            print("\n" + "=" * 70)
+            print("[TEST-RESULT] [UNPROTECTED-MODE] Query Results (Directly executing LLM SQL):")
+            for row in unprotected_results:
+                print(f"   -> [VIOLATION-FLAGGED] setl_id: {row[0]} | patient: {row[1]} | item: {row[2]} | fee: {row[3]}")
 
-        # 插入测试流水样本：
-        # 患者 A (张三，setl_001)：明明做了阑尾切除手术，正常收麻醉费（合规守法病人）
-        cursor.execute("INSERT INTO fqz_fymx_test VALUES ('setl_001', '张三', '全身麻醉费', 800.0)")
-        cursor.execute("INSERT INTO fqz_fymx_test VALUES ('setl_001', '张三', '腹腔镜阑尾切除手术', 3500.0)")
+            accused_names_unprotected = [row[1] for row in unprotected_results]
+            assert "张三" in accused_names_unprotected, "无防护状态下，正常病人张三理应被错误冤枉！"
+            assert "李四" in accused_names_unprotected
+            print("   [WARN] Disaster: Patient Zhang San had legitimate surgery, but was WRONGLY FLAGGED as fraud!")
 
-        # 患者 B (李四，setl_002)：没有任何手术，却莫名收了麻醉费（真实违规骗保嫌疑单据）
-        cursor.execute("INSERT INTO fqz_fymx_test VALUES ('setl_002', '李四', '局部浸润麻醉费', 300.0)")
-        conn.commit()
-
-        # ==============================================================================
-        # ❌ 实验 1：【无防护模式】(未挂门禁，直接把大模型生成的单行排除 SQL 丢给数据库)
-        # ==============================================================================
-        unprotected_bad_sql = """
-        SELECT setl_id, psn_name, hilist_name, det_item_fee_sumamt 
-        FROM fqz_fymx_test AS t
-        WHERE ((t.hilist_name LIKE '%麻醉%') AND ((t.det_item_fee_sumamt > 0) AND (t.hilist_name NOT LIKE '%手术%')))
-        """
-
-        cursor.execute(unprotected_bad_sql)
-        unprotected_results = cursor.fetchall()
-
-        print("\n" + "="*70)
-        print("[TEST-RESULT] [UNPROTECTED-MODE] Query Results (Directly executing LLM SQL):")
-        for row in unprotected_results:
-            print(f"   -> [VIOLATION-FLAGGED] setl_id: {row[0]} | patient: {row[1]} | item: {row[2]} | fee: {row[3]}")
-        
-        # 结果分析：
-        # 张三明明做了切除手术，却因为'全身麻醉费'这一行不含'手术'二字，被直接定性为违规！
-        accused_names_unprotected = [row[1] for row in unprotected_results]
-        assert "张三" in accused_names_unprotected, "无防护状态下，正常病人张三理应被错误冤枉！"
-        assert "李四" in accused_names_unprotected
-        print(f"   [WARN] Disaster: Patient Zhang San had legitimate surgery, but was WRONGLY FLAGGED as fraud!")
-
-        # ==============================================================================
-        # 实验 2：【有防护模式】(经过 SQLGuardian / ContradictionDetector 门禁)
-        # ==============================================================================
-        print("\n" + "="*70)
-        print("[TEST-RESULT] [PROTECTED-MODE] Interception & Self-Healing Pipeline:")
-        
-        # 阶段 A：门禁前置 AST 静态检测
-        violation = ContradictionDetector.detect(unprotected_bad_sql, archetypes=[missing_companion_archetype])
-        assert violation is not None, "门禁必须在物理执行前将坏 SQL 截杀！"
-        print(f"   [INTERCEPTED] Successfully blocked bad SQL! Reason: {violation.message}")
-        print(f"   [SAFETY-GUARD] Bad query blocked before reaching ClickHouse/DB!")
-
-        # 阶段 B：反思自愈环（Reflection Loop）根据门禁诊断，将其自愈重构为正确的【跨行对撞子查询】
-        healed_good_sql = """
-        SELECT setl_id, psn_name, hilist_name, det_item_fee_sumamt 
-        FROM fqz_fymx_test 
-        WHERE hilist_name LIKE '%麻醉%' 
-          AND setl_id NOT IN (
-              SELECT setl_id FROM fqz_fymx_test WHERE hilist_name LIKE '%手术%'
-          )
-        """
-        
-        # 门禁对自愈后的合规 SQL 亮绿灯放行
-        assert ContradictionDetector.detect(healed_good_sql, archetypes=[missing_companion_archetype]) is None
-
-        # 阶段 C：下发合规 SQL 执行
-        cursor.execute(healed_good_sql)
-        protected_results = cursor.fetchall()
-
-        print("\n[TEST-RESULT] [PROTECTED-MODE] Healed Query Results:")
-        for row in protected_results:
-            print(f"   -> [TRUE-VIOLATION] setl_id: {row[0]} | patient: {row[1]} | item: {row[2]} | fee: {row[3]}")
-
-        accused_names_protected = [row[1] for row in protected_results]
-        assert "张三" not in accused_names_protected, "合规病人张三被成功保护，没有被误判！"
-        assert "李四" in accused_names_protected, "真实骗保病人李四被精准命中！"
-        print("   [SUCCESS] Perfect result: Zhang San (legitimate) exonerated, Li Si (fraud) accurately caught!")
-        print("="*70 + "\n")
+            _verify_protected_healed_query(cursor, unprotected_bad_sql, missing_companion_archetype)
+        finally:
+            conn.close()

@@ -104,132 +104,81 @@ SIMULATED_USER_TURNS = [
     }
 ]
 
-@pytest.mark.asyncio
-async def test_multiturn_10_turns_context_and_memory():
-    """
-    执行 10 轮模拟用户会话压力与功能全景评测
-    """
-    print("\n" + "=" * 80)
-    print(">> [MULTITURN BENCHMARK] 启动 10 轮端到端用户多轮对话会话压力评测")
-    print("=" * 80)
-    
-    # 初始化待测核心组件
-    role_config = RoleConfigV2(pool="primary", max_input_tokens=4000)
-    context_builder = ContextBuilder(role_config=role_config)
-    working_memory = WorkingMemory(capacity=15)
-    action_cache = ActionCacheManager(cache_file="data/test_multiturn_action_cache.json")
-    
-    # 消息链会话历史
-    chat_history: List[BaseMessage] = [
-        SystemMessage(content="你是国家医保智能审计核心 Agent。请协助审计专家进行严谨的多轮数据穿透核查。")
-    ]
-    
-    # 用于记录前序已注入的种子缓存供第 9 轮变体测试
-    seed_sql = "SELECT psn_no, sum(det_item_fee_sumamt) FROM fqz_fymx_test GROUP BY psn_no"
-    action_cache.save("排查男性结算妇科专属药品", sql=seed_sql, tasks=["task1"])
-    
-    turn_metrics = []
+def _assert_turn_invariants(
+    turn_num: int,
+    user_query: str,
+    safe_messages: List[BaseMessage],
+    context_builder: ContextBuilder,
+    working_memory: WorkingMemory,
+    action_cache: ActionCacheManager,
+    seed_sql: str,
+) -> int:
+    """Assert GSSC, token budget, tool pairing, working memory, and L0.5 cache invariants."""
+    total_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in safe_messages)
+    gssc_payload_count = sum(1 for m in safe_messages if "<context_engineering_payload>" in str(m.content))
+    assert gssc_payload_count <= 1, f"Turn {turn_num} 检测到上下文载荷重复注入: count={gssc_payload_count}"
+    assert total_tokens <= context_builder.max_input_tokens * 1.05, f"Turn {turn_num} Token 预算超限: {total_tokens} > {context_builder.max_input_tokens}"
+    assert len(ensure_tool_pairing(safe_messages)) == len(safe_messages), f"Turn {turn_num} 工具消息出现非配对孤儿节点！"
+    assert len(working_memory.buffer) <= working_memory.capacity, f"工作记忆溢出: len={len(working_memory.buffer)}"
 
-    for turn_info in SIMULATED_USER_TURNS:
-        turn_num = turn_info["turn"]
-        turn_name = turn_info["name"]
-        user_query = turn_info["user_query"]
-        target_tables = turn_info["target_tables"]
-        
-        t0 = time.perf_counter()
-        
-        # 1. 用户输入进入工作记忆与消息链
-        working_memory.add(f"User Turn {turn_num}: {user_query}")
-        chat_history.append(HumanMessage(content=user_query))
-        
-        # 2. 模拟便签注入 (如果存在)
-        metadata = {
-            "target_tables": target_tables,
-            "turn_index": turn_num,
-            "session_id": "multiturn_eval_session"
-        }
-        if "note_evidence" in turn_info:
-            os.makedirs("data", exist_ok=True)
-            with open("data/audit_notes.md", "a", encoding="utf-8") as f:
-                f.write(f"\n---\n{turn_info['note_evidence']}\n")
-        
-        # 3. 运行 ContextBuilder GSSC 治理流水线
-        # 模拟 Gather
-        packets = context_builder._gather_all(user_query, target_tables, chat_history, metadata)
-        # 模拟 Select
-        available_budget = int(context_builder.max_input_tokens * (1.0 - context_builder.config.reserve_ratio))
-        selected_packets = context_builder._select_packets(packets, user_query, available_budget)
-        # 模拟 Structure
-        structured_messages = context_builder._structure_into_messages(selected_packets, chat_history)
-        # 模拟 Compress
-        compressed_messages = await context_builder._compress_messages_budget(structured_messages)
-        # 模拟 Pairing Guard
-        safe_messages = ensure_tool_pairing(compressed_messages)
-        
-        # 4. 模拟 Agent 产出与工具调用
-        ai_reply = f"【Turn {turn_num} 取证完成】已定位关键审计指标，涉及数据已锁定。"
-        # 模拟偶数轮次发生工具调用，测试配对安全
-        tool_call_id = f"call_{turn_num}"
-        ai_msg = AIMessage(
-            content=ai_reply,
-            tool_calls=[{"name": "execute_audit_sql", "args": {"sql": "SELECT 1"}, "id": tool_call_id}]
-        )
-        tool_msg = ToolMessage(
-            content=json.dumps([{"status": "SUCCESS", "rows": turn_num * 10}], ensure_ascii=False),
-            tool_call_id=tool_call_id
-        )
-        chat_history.append(ai_msg)
-        chat_history.append(tool_msg)
-        working_memory.add(f"Agent Turn {turn_num}: {ai_reply}")
-        
-        elapsed = (time.perf_counter() - t0) * 1000
-        
-        # ==================== 核心指标审计与断言 ====================
-        total_tokens = sum(ContextPacket.estimate_tokens(m.content) for m in safe_messages)
-        gssc_payload_count = sum(1 for m in safe_messages if "<context_engineering_payload>" in str(m.content))
-        
-        # 断言 1: GSSC 载荷脱水防重 (无论跑多少轮，每个组装流中绝对只能有至多 1 个事实载荷 XML)
-        assert gssc_payload_count <= 1, f"Turn {turn_num} 检测到上下文载荷重复注入: count={gssc_payload_count}"
-        
-        # 断言 2: Token 预算安全阀有效 (不得超过设定上限)
-        assert total_tokens <= context_builder.max_input_tokens * 1.05, f"Turn {turn_num} Token 预算超限: {total_tokens} > {context_builder.max_input_tokens}"
-        
-        # 断言 3: 工具调用配对安全性 (ToolMessage 必须与 ToolCall 100% 配对)
-        repaired = ensure_tool_pairing(safe_messages)
-        assert len(repaired) == len(safe_messages), f"Turn {turn_num} 工具消息出现非配对孤儿节点！"
-        
-        # 断言 4: 工作记忆容量滑动控制 (维持在容量限制以内)
-        assert len(working_memory.buffer) <= working_memory.capacity, f"工作记忆溢出: len={len(working_memory.buffer)}"
-        
-        # 断言 5: 第 9 轮口语变体 L0.5 意图指纹秒级命中
-        if turn_num == 9:
-            canon_q = action_cache.normalize_question(user_query)
-            cached_item = action_cache.canonical_lookup.get(canon_q)
-            assert cached_item is not None, f"第 9 轮意图变体未能秒级命中 L0.5 规范化缓存: canon_q={canon_q}"
-            assert cached_item["sql"] == seed_sql
-            print(f"  [Turn 9 Cache Hit] 变体「{user_query}」0ms 命中种子缓存！")
-        
-        # 检查静态 DDL 前置策略
-        gssc_msg = next((m for m in safe_messages if "<context_engineering_payload>" in str(m.content)), None)
-        if gssc_msg:
-            content = str(gssc_msg.content)
-            idx_schema = content.find("<database_schema_context>")
-            idx_notes = content.find("<structured_audit_notes>")
-            if idx_schema != -1 and idx_notes != -1:
-                assert idx_schema < idx_notes, f"Turn {turn_num} 静态 DDL 必须排在动态便签之前"
-                
-        turn_metrics.append({
-            "turn": turn_num,
-            "name": turn_name,
-            "tokens": total_tokens,
-            "messages_count": len(safe_messages),
-            "working_mem_items": len(working_memory.buffer),
-            "elapsed_ms": elapsed
-        })
-        
-        print(f"  * Turn {turn_num:02d} [{turn_name:<20}] | Tokens: {total_tokens:<5} | Msgs: {len(safe_messages):<2} | Mem: {len(working_memory.buffer):<2} | 耗时: {elapsed:.1f}ms")
+    if turn_num == 9:
+        canon_q = action_cache.normalize_question(user_query)
+        cached_item = action_cache.canonical_lookup.get(canon_q)
+        assert cached_item is not None, f"第 9 轮意图变体未能秒级命中 L0.5 规范化缓存: canon_q={canon_q}"
+        assert cached_item["sql"] == seed_sql
+        print(f"  [Turn 9 Cache Hit] 变体「{user_query}」0ms 命中种子缓存！")
 
-    # 清理测试副作用
+    gssc_msg = next((m for m in safe_messages if "<context_engineering_payload>" in str(m.content)), None)
+    if gssc_msg:
+        content = str(gssc_msg.content)
+        idx_schema = content.find("<database_schema_context>")
+        idx_notes = content.find("<structured_audit_notes>")
+        if idx_schema != -1 and idx_notes != -1:
+            assert idx_schema < idx_notes, f"Turn {turn_num} 静态 DDL 必须排在动态便签之前"
+    return total_tokens
+
+
+async def _run_single_multiturn_step(
+    turn_info: Dict[str, Any],
+    context_builder: ContextBuilder,
+    working_memory: WorkingMemory,
+    action_cache: ActionCacheManager,
+    chat_history: List[BaseMessage],
+    seed_sql: str,
+) -> Dict[str, Any]:
+    """Execute one simulated dialogue turn through GSSC and verify invariants."""
+    turn_num, turn_name = turn_info["turn"], turn_info["name"]
+    user_query, target_tables = turn_info["user_query"], turn_info["target_tables"]
+    t0 = time.perf_counter()
+
+    working_memory.add(f"User Turn {turn_num}: {user_query}")
+    chat_history.append(HumanMessage(content=user_query))
+    metadata = {"target_tables": target_tables, "turn_index": turn_num, "session_id": "multiturn_eval_session"}
+    if "note_evidence" in turn_info:
+        os.makedirs("data", exist_ok=True)
+        with open("data/audit_notes.md", "a", encoding="utf-8") as f:
+            f.write(f"\n---\n{turn_info['note_evidence']}\n")
+
+    packets = context_builder._gather_all(user_query, target_tables, chat_history, metadata)
+    available_budget = int(context_builder.max_input_tokens * (1.0 - context_builder.config.reserve_ratio))
+    selected_packets = context_builder._select_packets(packets, user_query, available_budget)
+    structured_messages = context_builder._structure_into_messages(selected_packets, chat_history)
+    safe_messages = ensure_tool_pairing(await context_builder._compress_messages_budget(structured_messages))
+
+    ai_reply = f"【Turn {turn_num} 取证完成】已定位关键审计指标，涉及数据已锁定。"
+    tool_call_id = f"call_{turn_num}"
+    chat_history.append(AIMessage(content=ai_reply, tool_calls=[{"name": "execute_audit_sql", "args": {"sql": "SELECT 1"}, "id": tool_call_id}]))
+    chat_history.append(ToolMessage(content=json.dumps([{"status": "SUCCESS", "rows": turn_num * 10}], ensure_ascii=False), tool_call_id=tool_call_id))
+    working_memory.add(f"Agent Turn {turn_num}: {ai_reply}")
+
+    elapsed = (time.perf_counter() - t0) * 1000
+    total_tokens = _assert_turn_invariants(turn_num, user_query, safe_messages, context_builder, working_memory, action_cache, seed_sql)
+    print(f"  * Turn {turn_num:02d} [{turn_name:<20}] | Tokens: {total_tokens:<5} | Msgs: {len(safe_messages):<2} | Mem: {len(working_memory.buffer):<2} | 耗时: {elapsed:.1f}ms")
+    return {"turn": turn_num, "name": turn_name, "tokens": total_tokens, "messages_count": len(safe_messages), "working_mem_items": len(working_memory.buffer), "elapsed_ms": elapsed}
+
+
+def _cleanup_and_print_multiturn_report(turn_metrics: List[Dict[str, Any]]) -> None:
+    """Clean up temporary test artifacts and print multiturn benchmark table."""
     if os.path.exists("data/test_multiturn_action_cache.json"):
         os.remove("data/test_multiturn_action_cache.json")
     if os.path.exists("data/audit_notes.md"):
@@ -247,3 +196,27 @@ async def test_multiturn_10_turns_context_and_memory():
     print("-" * 88)
     print("[PASS] 10 轮上下文治理、预算兜底压缩、工作记忆容量滑动与 L0.5 意图缓存全项对账 100% 通过！")
     print("=" * 80)
+
+
+@pytest.mark.asyncio
+async def test_multiturn_10_turns_context_and_memory():
+    """
+    执行 10 轮模拟用户会话压力与功能全景评测
+    """
+    print("\n" + "=" * 80)
+    print(">> [MULTITURN BENCHMARK] 启动 10 轮端到端用户多轮对话会话压力评测")
+    print("=" * 80)
+
+    context_builder = ContextBuilder(role_config=RoleConfigV2(pool="primary", max_input_tokens=4000))
+    working_memory = WorkingMemory(capacity=15)
+    action_cache = ActionCacheManager(cache_file="data/test_multiturn_action_cache.json")
+    chat_history: List[BaseMessage] = [SystemMessage(content="你是国家医保智能审计核心 Agent。请协助审计专家进行严谨的多轮数据穿透核查。")]
+
+    seed_sql = "SELECT psn_no, sum(det_item_fee_sumamt) FROM fqz_fymx_test GROUP BY psn_no"
+    action_cache.save("排查男性结算妇科专属药品", sql=seed_sql, tasks=["task1"])
+
+    turn_metrics = [
+        await _run_single_multiturn_step(turn_info, context_builder, working_memory, action_cache, chat_history, seed_sql)
+        for turn_info in SIMULATED_USER_TURNS
+    ]
+    _cleanup_and_print_multiturn_report(turn_metrics)

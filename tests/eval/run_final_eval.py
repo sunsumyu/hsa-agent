@@ -46,20 +46,9 @@ class ProductionBenchmarkRunner:
         with open("tests/eval/golden_dataset.json", "r", encoding="utf-8") as f:
             return json.load(f)
 
-    async def run_case(self, model_id: str, item: Dict, case_idx: int):
-        logger.info(f"{'='*60}")
-        logger.info(f">>> [Case {case_idx+1}] {item['input'][:60]}...")
-        logger.info(f"{'='*60}")
-        
-        app, resolved_id = get_graph_executor(
-            checkpointer=self.checkpointer, model_id=model_id
-        )
-        
-        config = {
-            "configurable": {"thread_id": f"eval_{case_idx}_{int(time.time())}"},
-            "recursion_limit": 30
-        }
-        initial_input = {
+    def _build_initial_input(self, item: Dict, case_idx: int) -> Dict:
+        """Build initial LangGraph input dictionary for a single benchmark case."""
+        return {
             "messages": [HumanMessage(content=item["input"])],
             "tasks": [],
             "sql_query": "",
@@ -69,104 +58,103 @@ class ProductionBenchmarkRunner:
             "metadata": {},
             "session_id": f"eval_{case_idx}",
             "error_log": "",
-            "retry_count": 0
+            "retry_count": 0,
         }
-        
+
+    def _build_test_case(
+        self,
+        item: Dict,
+        case_idx: int,
+        final_state: Optional[Dict],
+        output_content: str,
+    ):
+        """Construct DeepEval LLMTestCase and extracted retrieval context."""
+        retrieval_context = []
+        if final_state:
+            if final_state.get("raw_data"):
+                retrieval_context.append(f"[SQL数据] {final_state['raw_data']}")
+            if final_state.get("sql_query"):
+                retrieval_context.append(f"[执行式] {final_state['sql_query']}")
+            if final_state.get("tasks"):
+                retrieval_context.append(f"[计划任务] {', '.join(final_state['tasks'])}")
+
+        additional_metadata = {"ground_truth_amounts": item.get("ground_truth_amounts", [])}
+        if final_state and final_state.get("structured_report"):
+            report_obj = final_state["structured_report"]
+            additional_metadata["structured_report"] = report_obj.model_dump() if hasattr(report_obj, "model_dump") else report_obj
+        else:
+            logger.error(f"!!! [CRITICAL] Case {case_idx+1} 结构化报告缺失，L2 验证将降级！")
+
+        test_case = LLMTestCase(
+            input=item["input"],
+            actual_output=output_content,
+            expected_output=item.get("expected_output"),
+            retrieval_context=retrieval_context,
+            additional_metadata=additional_metadata,
+        )
+        return test_case, retrieval_context
+
+    async def _score_test_case(self, test_case: LLMTestCase) -> Dict[str, float]:
+        """Run L1, L2, and sandboxed L3 metrics against a constructed test case."""
+        l1_score = self.l1_trajectory.measure(test_case)
+        l2_score = self.l2_precision.measure(test_case)
+        l3_evidence = 0.0
+        l3_faithful = 0.0
+        try:
+            l3_evidence = await self.l3_evidence.a_measure(test_case)
+        except Exception as e:
+            logger.warning(f"!!! [L3 Evidence 采集受限] 可能触发了 API 配额: {e}")
+        try:
+            l3_faithful = await self.l3_faithfulness.a_measure(test_case)
+        except Exception as e:
+            logger.warning(f"!!! [L3 Faithfulness 采集受限] 可能触发了 API 配额: {e}")
+        return {
+            "l1_trajectory": l1_score,
+            "l2_precision": l2_score,
+            "l3_evidence": l3_evidence,
+            "l3_faithfulness": l3_faithful,
+        }
+
+    async def run_case(self, model_id: str, item: Dict, case_idx: int):
+        """Execute and score one production benchmark case."""
+        logger.info(f"{'='*60}")
+        logger.info(f">>> [Case {case_idx+1}] {item['input'][:60]}...")
+        logger.info(f"{'='*60}")
+
+        app, _ = get_graph_executor(checkpointer=self.checkpointer, model_id=model_id)
+        config = {"configurable": {"thread_id": f"eval_{case_idx}_{int(time.time())}"}, "recursion_limit": 30}
+        initial_input = self._build_initial_input(item, case_idx)
+
         start_time = time.time()
         final_state = None
         output_content = ""
-        
         try:
             async for event in app.astream(initial_input, config=config, stream_mode="values"):
                 final_state = event
-            
+
             latency = time.time() - start_time
-            
-            # 提取最终输出
             if final_state and final_state.get("messages"):
-                last_msg = final_state["messages"][-1]
-                output_content = str(last_msg.content)
-            
-            # [V35.0] 提取取证上下文: 优先从 raw_data 提取 SQL 执行内容
-            retrieval_context = []
-            if final_state:
-                if final_state.get("raw_data"):
-                    retrieval_context.append(f"[SQL数据] {final_state['raw_data']}")
-                if final_state.get("sql_query"):
-                    retrieval_context.append(f"[执行式] {final_state['sql_query']}")
-                if final_state.get("tasks"):
-                    retrieval_context.append(f"[计划任务] {', '.join(final_state['tasks'])}")
-            
+                output_content = str(final_state["messages"][-1].content)
             turn_count = final_state.get("retry_count", 0) if final_state else 0
-            
             logger.info(f">>> [Case {case_idx+1} 完成] 耗时: {latency:.1f}s, 重试: {turn_count}")
             logger.info(f">>> 输出 (前200字): {output_content[:200]}...")
-            
-            # 构建测试用例 (注入结构化报告与标注金额以供 L2 验证)
-            additional_metadata = {
-                "ground_truth_amounts": item.get("ground_truth_amounts", [])
-            }
-            if final_state and final_state.get("structured_report"):
-                # 显式转换为 dict 以防止序列化问题
-                report_obj = final_state["structured_report"]
-                additional_metadata["structured_report"] = report_obj.model_dump() if hasattr(report_obj, "model_dump") else report_obj
-            else:
-                logger.error(f"!!! [CRITICAL] Case {case_idx+1} 结构化报告缺失，L2 验证将降级！")
-            
-            test_case = LLMTestCase(
-                input=item["input"],
-                actual_output=output_content,
-                expected_output=item.get("expected_output"),
-                retrieval_context=retrieval_context,
-                additional_metadata=additional_metadata
-            )
-            
-            # === L1: 工具轨迹验证 (确定性) ===
-            l1_score = self.l1_trajectory.measure(test_case)
-            
-            # === L2: 数值精确度 (结构化确定性) ===
-            l2_score = self.l2_precision.measure(test_case)
-            
-            # === L3: LLM 评估 (仅质量层) — 增加异常沙盒保障全面完成 ===
-            l3_evidence = 0
-            l3_faithful = 0
-            
-            try:
-                # 尝试评分，如果遇到 403 或超限将记录警告而非中断
-                l3_evidence = await self.l3_evidence.a_measure(test_case)
-            except Exception as e:
-                logger.warning(f"!!! [L3 Evidence 采集受限] 可能触发了 API 配额: {e}")
-                l3_evidence = 0.0 # 记录为 0 分而非抛出异常
-            
-            try:
-                l3_faithful = await self.l3_faithfulness.a_measure(test_case)
-            except Exception as e:
-                logger.warning(f"!!! [L3 Faithfulness 采集受限] 可能触发了 API 配额: {e}")
-                l3_faithful = 0.0
-            
+
+            test_case, retrieval_context = self._build_test_case(item, case_idx, final_state, output_content)
+            scores = await self._score_test_case(test_case)
             return {
                 "case_id": case_idx + 1,
                 "input": item["input"][:50] + "...",
-                "l1_trajectory": l1_score,
-                "l2_precision": l2_score,
-                "l3_evidence": l3_evidence,
-                "l3_faithfulness": l3_faithful,
+                **scores,
                 "latency": latency,
                 "turns": turn_count,
                 "findings_count": len(retrieval_context),
-                "status": "Success"
+                "status": "Success",
             }
-            
         except Exception as e:
             logger.error(f">>> [Case {case_idx+1} 失败] {e}")
             import traceback
             traceback.print_exc()
-            return {
-                "case_id": case_idx + 1,
-                "input": item["input"][:50] + "...",
-                "status": f"Error: {str(e)[:100]}",
-                "latency": time.time() - start_time
-            }
+            return {"case_id": case_idx + 1, "input": item["input"][:50] + "...", "status": f"Error: {str(e)[:100]}", "latency": time.time() - start_time}
 
     async def run_suite(self, model_id: Optional[str] = None):
         display_model = model_id or "default-pool"

@@ -123,84 +123,47 @@ def build_audit_graph():
 # =============================================================================
 # 3. 完整多轮对话测试用例
 # =============================================================================
-@pytest.mark.asyncio
-async def test_live_multiturn_dialogue_postgres():
-    test_session_id = f"session_live_multiturn_{uuid.uuid4().hex[:8]}"
-    print("\n" + "=" * 75)
-    print(f"🚀 开始真实 PostgreSQL 多轮对话演进测试！会话 ID: {test_session_id}")
-    print("=" * 75)
+async def _run_three_dialogue_turns(graph, config: Dict[str, Any]) -> None:
+    """Execute three progressive dialogue turns against the compiled audit graph."""
+    print("\n💬 [第 1 轮 - 用户]: 排查市一医院促红素(EPO)的超频次违规用药。")
+    res1 = await graph.ainvoke({"current_query": "排查市一医院促红素(EPO)的超频次违规用药。"}, config=config)
+    print(f"🤖 [第 1 轮 - Agent]: {res1['dialogue_history'][-1]['agent_output']}")
+    assert res1["target_hospital"] == "市一医院"
+    assert res1["target_drug"] == "重组人促红素(EPO)"
+    assert len(res1["dialogue_history"]) == 1
 
-    config = {"configurable": {"thread_id": test_session_id}}
-    pg_uri = os.getenv("POSTGRES_URI")
+    print("\n💬 [第 2 轮 - 用户]: 其中有哪些重点违规医生？只筛选单笔金额大于 2000 元的严重违规。")
+    res2 = await graph.ainvoke({"current_query": "其中有哪些重点违规医生？只筛选单笔金额大于 2000 元的严重违规。"}, config=config)
+    print(f"🤖 [第 2 轮 - Agent]: {res2['dialogue_history'][-1]['agent_output']}")
+    assert res2["target_hospital"] == "市一医院"
+    assert len(res2["drill_down_doctors"]) == 3
+    assert len(res2["dialogue_history"]) == 2
+    print("   ✅ 上下文继承验证成功：自动识别上轮【市一医院】与【重组人促红素(EPO)】！")
 
-    # 1. 初始化由真实 PostgreSQL 连接池驱动的 Checkpointer
-    async with create_checkpointer() as checkpointer:
-        builder = build_audit_graph()
-        graph = builder.compile(checkpointer=checkpointer)
+    print("\n💬 [第 3 轮 - 用户]: 汇总前两轮分析，生成正式核查通知书。")
+    res3 = await graph.ainvoke({"current_query": "汇总前两轮分析，生成正式核查通知书。"}, config=config)
+    print(f"🤖 [第 3 轮 - Agent]:\n{res3['dialogue_history'][-1]['agent_output']}")
+    assert res3["final_notice"] is not None
+    assert "42.6 万元" in res3["final_notice"]
+    assert len(res3["dialogue_history"]) == 3
+    print("   ✅ 多轮收敛验证成功：累计 3 轮对话历史完整保存在 State 中！")
 
-        # -------------------------------------------------------------
-        # 第 1 轮交互：用户发起宏观核查
-        # -------------------------------------------------------------
-        print("\n💬 [第 1 轮 - 用户]: 排查市一医院促红素(EPO)的超频次违规用药。")
-        res1 = await graph.ainvoke(
-            {"current_query": "排查市一医院促红素(EPO)的超频次违规用药。"},
-            config=config,
-        )
-        t1_reply = res1["dialogue_history"][-1]["agent_output"]
-        print(f"🤖 [第 1 轮 - Agent]: {t1_reply}")
-        assert res1["target_hospital"] == "市一医院"
-        assert res1["target_drug"] == "重组人促红素(EPO)"
-        assert len(res1["dialogue_history"]) == 1
 
-        # -------------------------------------------------------------
-        # 第 2 轮交互：用户追问下钻，不重复输入医院与药品！
-        # -------------------------------------------------------------
-        print("\n💬 [第 2 轮 - 用户]: 其中有哪些重点违规医生？只筛选单笔金额大于 2000 元的严重违规。")
-        # 注意：这里只传新的用户 query，不传 target_hospital 和 target_drug
-        # 状态自动从 PostgreSQL checkpoints 中恢复！
-        res2 = await graph.ainvoke(
-            {"current_query": "其中有哪些重点违规医生？只筛选单笔金额大于 2000 元的严重违规。"},
-            config=config,
-        )
-        t2_reply = res2["dialogue_history"][-1]["agent_output"]
-        print(f"🤖 [第 2 轮 - Agent]: {t2_reply}")
-        # 验证上一轮状态完美保留
-        assert res2["target_hospital"] == "市一医院"
-        assert len(res2["drill_down_doctors"]) == 3
-        assert len(res2["dialogue_history"]) == 2
-        print("   ✅ 上下文继承验证成功：自动识别上轮【市一医院】与【重组人促红素(EPO)】！")
+def _verify_postgres_checkpoint_tables(pg_uri: Optional[str], test_session_id: str) -> None:
+    """Query PostgreSQL checkpoint tables directly to confirm DAG and blob writes."""
+    import psycopg
 
-        # -------------------------------------------------------------
-        # 第 3 轮交互：用户要求汇总出具最终通知书
-        # -------------------------------------------------------------
-        print("\n💬 [第 3 轮 - 用户]: 汇总前两轮分析，生成正式核查通知书。")
-        res3 = await graph.ainvoke(
-            {"current_query": "汇总前两轮分析，生成正式核查通知书。"},
-            config=config,
-        )
-        t3_reply = res3["dialogue_history"][-1]["agent_output"]
-        print(f"🤖 [第 3 轮 - Agent]:\n{t3_reply}")
-        assert res3["final_notice"] is not None
-        assert "42.6 万元" in res3["final_notice"]
-        assert len(res3["dialogue_history"]) == 3
-        print("   ✅ 多轮收敛验证成功：累计 3 轮对话历史完整保存在 State 中！")
-
-    # -----------------------------------------------------------------
-    # 直连 PostgreSQL 校验物理落盘与因果依赖链 (Parent-Child DAG)
-    # -----------------------------------------------------------------
     print("\n" + "=" * 75)
     print("🐘 正在直连 PostgreSQL 校验多轮对话的物理数据存储...")
     print("=" * 75)
-    
-    import psycopg
+
     conn = psycopg.connect(pg_uri)
     cur = conn.cursor()
-
     cur.execute(
         """
-        SELECT checkpoint_id, parent_checkpoint_id, metadata 
-        FROM checkpoints 
-        WHERE thread_id = %s 
+        SELECT checkpoint_id, parent_checkpoint_id, metadata
+        FROM checkpoints
+        WHERE thread_id = %s
         ORDER BY checkpoint_id ASC;
         """,
         (test_session_id,),
@@ -211,30 +174,37 @@ async def test_live_multiturn_dialogue_postgres():
         step = meta.get("step") if isinstance(meta, dict) else "?"
         print(f"   [{idx}] 版本: {cid} | 父版本: {pid} | 超步Step: {step}")
 
-    # 验证因果链：除了根节点，后续节点的 parent 必须是前序节点
     assert len(checkpoint_rows) >= 6, "三轮对话应该至少包含 6 个以上的细粒度超步检查点！"
-    first_cid = checkpoint_rows[0][0]
-    second_pid = checkpoint_rows[1][1]
-    assert second_pid == first_cid, "检查点因果依赖链断裂！父子指针不匹配！"
+    assert checkpoint_rows[1][1] == checkpoint_rows[0][0], "检查点因果依赖链断裂！父子指针不匹配！"
     print("   ✅ 检查点因果依赖链完整度 100%！")
 
-    cur.execute(
-        "SELECT COUNT(*) FROM checkpoint_blobs WHERE thread_id = %s;",
-        (test_session_id,),
-    )
+    cur.execute("SELECT COUNT(*) FROM checkpoint_blobs WHERE thread_id = %s;", (test_session_id,))
     blob_count = cur.fetchone()[0]
     print(f"\n📦 【checkpoint_blobs 表】已持久化 {blob_count} 个二进制 Channel 状态块。")
     assert blob_count > 0
 
-    cur.execute(
-        "SELECT COUNT(*) FROM checkpoint_writes WHERE thread_id = %s;",
-        (test_session_id,),
-    )
+    cur.execute("SELECT COUNT(*) FROM checkpoint_writes WHERE thread_id = %s;", (test_session_id,))
     writes_count = cur.fetchone()[0]
     print(f"✍️ 【checkpoint_writes 表】已持久化 {writes_count} 个超步节点写入动作。")
     assert writes_count > 0
-
     conn.close()
+
+
+@pytest.mark.asyncio
+async def test_live_multiturn_dialogue_postgres():
+    """Verify multi-turn dialogue state evolution persisted in live PostgreSQL."""
+    test_session_id = f"session_live_multiturn_{uuid.uuid4().hex[:8]}"
+    print("\n" + "=" * 75)
+    print(f"🚀 开始真实 PostgreSQL 多轮对话演进测试！会话 ID: {test_session_id}")
+    print("=" * 75)
+
+    config = {"configurable": {"thread_id": test_session_id}}
+    pg_uri = os.getenv("POSTGRES_URI")
+    async with create_checkpointer() as checkpointer:
+        graph = build_audit_graph().compile(checkpointer=checkpointer)
+        await _run_three_dialogue_turns(graph, config)
+
+    _verify_postgres_checkpoint_tables(pg_uri, test_session_id)
     print("\n" + "=" * 75)
     print("🎉 恭喜！真实 PostgreSQL 多轮对话端到端演进与物理落盘全部验证通过！")
     print("=" * 75 + "\n")
