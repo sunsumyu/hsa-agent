@@ -17,6 +17,7 @@ from app.multi_agent.contracts import (
 )
 from app.multi_agent.hub_orchestrator import MultiAgentHubOrchestrator
 from app.multi_agent.policy_reviewer_agent import PolicyReviewerSubagent
+from app.multi_agent.sql_auditor_agent import SQLAuditorSubagent
 
 
 def test_tool_evidence_extractor_harvests_law_rag_citations():
@@ -220,3 +221,56 @@ async def test_coder_agent_omits_retrieved_citations_when_empty_and_forwards_whe
             patch_non_empty = await agent.execute(base_state, config={})
         assert len(patch_non_empty["retrieved_citations"]) == 1
         assert patch_non_empty["retrieved_citations"][0]["citation_id"] == "law_abcdef12"
+
+
+@pytest.mark.asyncio
+async def test_hub_merges_sql_auditor_and_policy_reviewer_citations():
+    sql_cit = {
+        "citation_id": "rag_sql11223",
+        "source_type": "vector_rag",
+        "source_doc": "指南.md",
+        "content_hash": "1111aaaa2222",
+    }
+    policy_cit = {
+        "citation_id": "law_pol44556",
+        "source_type": "law_rag",
+        "source_doc": "条例.pdf",
+        "content_hash": "3333bbbb4444",
+    }
+    mock_coder = AsyncMock(
+        return_value={
+            "sql_query": "SELECT 1",
+            "raw_data": json.dumps([{"psn_no": "P1", "medfee_sumamt": 500.0}]),
+            "sql_validated": True,
+            "retrieved_citations": [sql_cit],
+        }
+    )
+    sql_agent = SQLAuditorSubagent(coder_executor=mock_coder)
+    subtask = SubTaskSpec(subtask_id="st-1", focus_title="主表排查", query_instruction="查总额")
+    artifact = await sql_agent.run_subtask(subtask, session_id="s-l2")
+    assert artifact.retrieved_citations == [sql_cit]
+
+    mock_sql_pool = AsyncMock()
+    mock_sql_pool.run_parallel.return_value = [artifact]
+    mock_policy = AsyncMock()
+    mock_policy.review.return_value = ReviewVerdictArtifact(
+        exemption_notes="无",
+        statutory_citations=["第十五条"],
+        citations_ledger=[policy_cit],
+        risk_level="高",
+        adjusted_summary="建议核查 [CITE:law_pol44556]。",
+    )
+    plan = OrchestrationPlan(
+        tier=ExecutionTier.L2_MULTI_AGENT,
+        reason="多维度复核",
+        requires_graph=False,
+        requires_policy_review=True,
+        subtasks=[subtask],
+    )
+    hub = MultiAgentHubOrchestrator(sql_agent=mock_sql_pool, policy_agent=mock_policy)
+    patch_out = await hub.execute_hub(
+        {"session_id": "s-l2", "metadata": {"user_question": "排查重复住院", "execution_plan": plan.model_dump()}},
+        config={},
+    )
+    ids = {c["citation_id"] for c in patch_out["retrieved_citations"]}
+    assert ids == {"rag_sql11223", "law_pol44556"}

@@ -44,6 +44,7 @@ class SQLAuditArtifact(BaseModel):
     total_amount: float = 0.0
     validated: bool = False
     error: Optional[str] = None
+    retrieved_citations: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ReviewVerdictArtifact(BaseModel):

@@ -12,7 +12,25 @@ app/reporting/conclusion_prompt_builder.py
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+
+
+def _format_citation_ledger_block(retrieved_citations: Optional[List[Dict[str, Any]]]) -> str:
+    """将已核验检索台账格式化为 [CITE:<id>] 锚点指引；无台账时明确禁止编造具体条号。"""
+    records = [r for r in (retrieved_citations or []) if isinstance(r, dict) and r.get("citation_id")]
+    if not records:
+        return (
+            "6. **【可引用法规台账】**：当前轮次未挂载向量库法条台账；仅可依据“审计方法论”中已明确给出的政策依据，"
+            "严禁凭记忆编造未检索到的《法规》条文编号或红头文件文号。\n"
+        )
+    lines = ["6. **【可引用法规台账（引用下列依据时必须标注对应 `[CITE:<id>]` 锚点）】**："]
+    for rec in records[:10]:
+        cid = str(rec.get("citation_id") or "").strip()
+        title = str(rec.get("law_title") or rec.get("source_doc") or "法规条款").strip()
+        article = str(rec.get("article_num") or "").strip()
+        snippet = str(rec.get("snippet") or "").replace("\n", " ").strip()[:120]
+        lines.append(f"   - [CITE:{cid}] 《{title}》{article} | 摘要: {snippet}")
+    return "\n".join(lines) + "\n"
 
 
 def build_conclusion_prompt(
@@ -23,6 +41,7 @@ def build_conclusion_prompt(
     hard_sum: float,
     rewritten_question: Optional[str] = None,
     is_restricted: bool = False,
+    retrieved_citations: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """构造事实强制对齐且逻辑白盒化之 LLM 结论生成 Prompt"""
 
@@ -41,6 +60,8 @@ def build_conclusion_prompt(
     else:
         defense_instruction = f"5. **事实强制对齐**：当前发现 {hard_count} 条记录，结论必须明确指出违规嫌疑，严禁敷衍。\n"
         data_summary = f"共穿透扫描相关记录 {hard_count} 条，涉及金额 ¥{hard_sum:,.2f}"
+
+    defense_instruction += _format_citation_ledger_block(retrieved_citations)
 
     from app.core.prompts import CONCLUSION_PROMPT
 

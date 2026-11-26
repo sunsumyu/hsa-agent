@@ -97,6 +97,7 @@ class SQLAuditorSubagent:
             total_amount=hard_sum,
             validated=bool(res_dict.get("sql_validated", False)),
             error=res_dict.get("error_log"),
+            retrieved_citations=list(res_dict.get("retrieved_citations") or []),
         )
 
     async def run_parallel(

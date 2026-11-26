@@ -11,7 +11,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.reporting.report_renderer import AuditReportRenderer
-from app.reporting.reporter_node_orchestrator import orchestrate_reporter_node
+from app.reporting.reporter_node_orchestrator import handle_synthesis_bypass, orchestrate_reporter_node
 from app.reporting.traceability_section_builder import build_traceability_section
 
 
@@ -200,3 +200,32 @@ async def test_orchestrator_persists_sanitized_conclusion_in_turn_commit():
     booster_conclusion = mock_booster.call_args.args[1]
     assert "FAKE_99" not in booster_conclusion
     assert "虚假医保特别法" not in booster_conclusion
+
+
+def test_handle_synthesis_bypass_enforces_citation_grounding():
+    state = {
+        "metadata": {
+            "synthesis_done": True,
+            "direct_response": "阶段结论：依据 [CITE:law_55aa66bb] 核实异常，排除《虚假医保特别法》第九十九条。",
+            "user_question": "排查分解住院",
+        },
+        "messages": [],
+        "retrieved_citations": [
+            {
+                "citation_id": "law_55aa66bb",
+                "source_type": "law_rag",
+                "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+                "page_num": 5,
+                "law_title": "医疗保障基金使用监督管理条例",
+                "article_num": "第十五条",
+                "snippet": "第十五条 严禁分解住院。",
+                "content_hash": "deadbeef1234",
+            }
+        ],
+    }
+    res = handle_synthesis_bypass(state)
+    assert res is not None
+    msg = res["messages"][0].content
+    assert "《医疗保障基金使用监督管理条例》第十五条" in msg
+    assert "虚假医保特别法" not in msg
+    assert "[已拦截未核验法规引用]" in msg

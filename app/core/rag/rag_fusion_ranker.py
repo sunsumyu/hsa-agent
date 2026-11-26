@@ -242,6 +242,7 @@ def render_rag_report(sorted_hits: List[Any], expansion_count: int = 1) -> str:
             f"{i}. [CITE:{cid}] [来源: {source}] | [层级: {path}] | [哈希: {chash}]\n   内容: {content_str}\n"
         )
 
+    formatted.append("（引用上述条文时请标注 [CITE:xxx] 编号与来源，严禁编造未召回条款）")
     return "\n".join(formatted)
 
 

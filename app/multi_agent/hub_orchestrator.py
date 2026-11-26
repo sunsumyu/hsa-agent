@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.messages import AIMessage
+from app.core.rag.citation_ledger import merge_citation_ledgers
 from app.core.sql_evidence_resolver import resolve_user_query
 from app.multi_agent.contracts import OrchestrationPlan, ReviewVerdictArtifact, SQLAuditArtifact
 from app.multi_agent.graph_detective_agent import GraphDetectiveSubagent
@@ -49,6 +50,20 @@ def _build_hub_summary_and_methodology(
     if verdict and verdict.statutory_citations:
         methodology += f" | 法规依据：{'; '.join(verdict.statutory_citations)}"
     return summary_md, methodology
+
+
+def _collect_hub_citations(
+    sql_artifacts: List[SQLAuditArtifact],
+    verdict: Optional[ReviewVerdictArtifact],
+) -> List[Dict[str, Any]]:
+    """汇总 L2 数仓专员与政策复核专员检索到的去重引文台账。"""
+    combined: List[Dict[str, Any]] = []
+    for art in sql_artifacts:
+        if art.retrieved_citations:
+            combined = merge_citation_ledgers(combined, art.retrieved_citations)
+    if verdict and verdict.citations_ledger:
+        combined = merge_citation_ledgers(combined, verdict.citations_ledger)
+    return combined
 
 
 def _cleanup_sideload_temp_table(temp_table: Optional[str]) -> None:
@@ -113,8 +128,9 @@ class MultiAgentHubOrchestrator:
             "messages": [AIMessage(content=summary_md)],
             "execution_trace": trace,
         }
-        if verdict and verdict.citations_ledger:
-            patch["retrieved_citations"] = verdict.citations_ledger
+        hub_citations = _collect_hub_citations(sql_artifacts, verdict)
+        if hub_citations:
+            patch["retrieved_citations"] = hub_citations
         return patch
 
 

@@ -26,12 +26,17 @@ _LAW_BLOCK_RE = re.compile(
 
 _RAG_BLOCK_RE = re.compile(
     r"\[CITE:(?P<cid>[a-z]+_[a-f0-9]+)\]\s*\[来源:\s*(?P<src>[^\]]+)\]\s*\|\s*\[层级:\s*(?P<path>[^\]]+)\]"
-    r"(?:\s*\|\s*\[哈希:\s*(?P<chash>[a-f0-9]+)\])?\s*\n\s*内容:\s*(?P<body>.*?)(?=\n\d+\.\s*\[CITE:|\Z)",
+    r"(?:\s*\|\s*\[哈希:\s*(?P<chash>[a-f0-9]+)\])?\s*\n\s*内容:\s*(?P<body>.*?)(?=\n\d+\.\s*\[CITE:|\n（引用|\Z)",
     re.DOTALL,
 )
 
 _LAW_TITLE_RE = re.compile(r"《([^》]{2,45})》")
-_ARTICLE_NUM_RE = re.compile(r"(第[一二三四五六七八九十百千0-9]+条(?:第[一二三四五六七八九十0-9]+款)?)")
+_ARTICLE_NUM_RE = re.compile(
+    r"(第[一二三四五六七八九十百千0-9]+条"
+    r"(?:之[一二三四五六七八九十0-9]+)?"
+    r"(?:第[一二三四五六七八九十0-9]+款)?"
+    r"(?:第[（(]?[一二三四五六七八九十0-9]+[）)]?项)?)"
+)
 
 
 class CitationRecord(BaseModel):

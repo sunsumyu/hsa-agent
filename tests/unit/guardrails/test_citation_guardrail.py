@@ -115,3 +115,52 @@ def test_non_strict_mode_still_redacts_fabricated_cite_marker():
     assert res.blocked_citations == ["[CITE:law_deadbeef]"]
     assert "[CITE:law_deadbeef]" not in res.sanitized_text
     assert "[已拦截未核验法规引用]" in res.sanitized_text
+
+
+def test_blocks_sub_article_suffix_hallucination_and_allows_exact_match():
+    fake_sub = "本案触犯《医疗保障基金使用监督管理条例》第十五条之二。"
+    res_blocked = enforce_citation_grounding(fake_sub, _sample_ledger(), strict=True)
+    assert res_blocked.passed is False
+    assert "第十五条之二" not in res_blocked.sanitized_text
+    assert res_blocked.blocked_citations == ["《医疗保障基金使用监督管理条例》第十五条之二"]
+
+    exact_ledger = [
+        {
+            "citation_id": "law_sub01",
+            "source_type": "law_rag",
+            "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+            "law_title": "医疗保障基金使用监督管理条例",
+            "article_num": "第十五条之二",
+            "snippet": "第十五条之二 新增约束条款。",
+        }
+    ]
+    res_ok = enforce_citation_grounding(fake_sub, exact_ledger, strict=True)
+    assert res_ok.passed is True
+    assert "第十五条之二" in res_ok.sanitized_text
+
+
+def test_blocks_bare_doc_ref_when_unverified_and_preserves_grounded_ones():
+    hallucinated = "依据医保发〔2023〕X号与国家医保局第99号令第十条认定违规，并结合 [CITE:rag_doc01] 复核。"
+    ledger = [
+        {
+            "citation_id": "rag_doc01",
+            "source_type": "vector_rag",
+            "source_doc": "医保发〔2021〕48号指引.md",
+            "section_path": "第三章",
+            "law_title": "",
+            "article_num": "第十条",
+            "snippet": "依据医保发〔2021〕48号第十条开展监督检查。",
+        }
+    ]
+    res = enforce_citation_grounding(hallucinated, ledger, strict=True)
+    assert res.passed is False
+    assert "医保发〔2023〕X号" not in res.sanitized_text
+    assert "国家医保局第99号令第十条" not in res.sanitized_text
+    assert res.blocked_citations == ["医保发〔2023〕X号", "国家医保局第99号令第十条"]
+    assert "医保发〔2021〕48号指引.md" in res.sanitized_text
+
+    grounded = "根据医保发〔2021〕48号第十条执行。"
+    res_ok = enforce_citation_grounding(grounded, ledger, strict=True)
+    assert res_ok.passed is True
+    assert res_ok.blocked_citations == []
+    assert "rag_doc01" in res_ok.verified_ids

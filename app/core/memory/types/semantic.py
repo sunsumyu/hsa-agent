@@ -5,12 +5,47 @@ app/core/memory/types/semantic.py
 """
 
 from typing import List, Any, Optional, Dict
+import hashlib
 import os
 import json
 from loguru import logger
 from app.core.memory.base import MemoryItem
 from app.core.memory.storage.vector import VectorStorage
 from app.infra.neo4j_manager import field_kg
+
+def _build_semantic_chunk_item(
+    idx: int,
+    doc_name: str,
+    chunk: Dict[str, Any],
+    importance: float,
+) -> MemoryItem:
+    """将结构化切分结果装配为带完整溯源元数据的 MemoryItem。"""
+    from app.core.memory.rag_utils import preprocess_markdown_for_embedding
+    from app.core.rag.citation_ledger import extract_law_and_article, make_content_hash
+
+    raw_content = str(chunk.get("content") or "")
+    processed_content = preprocess_markdown_for_embedding(raw_content)
+    heading_path = str(chunk.get("heading_path") or "ROOT")
+    law_title, article_num = extract_law_and_article(f"{heading_path} {raw_content}", doc_name)
+    doc_id = hashlib.sha256(doc_name.encode("utf-8")).hexdigest()[:12]
+    return MemoryItem(
+        content=processed_content,
+        memory_type="semantic",
+        importance=importance,
+        metadata={
+            "doc_id": doc_id,
+            "source": doc_name,
+            "chunk_index": idx,
+            "heading_path": heading_path,
+            "law_title": law_title,
+            "article_num": article_num,
+            "content_hash": make_content_hash(processed_content),
+            "tokens": chunk.get("tokens", 0),
+            "raw_len": len(raw_content),
+            "ingestion_type": "rag_structured",
+        },
+    )
+
 
 class MetadataMappingLayer:
     """[V110.0] 企业级“语义—物理”映射层：解决业务术语混淆及字段幻觉 (SSOT)"""
@@ -143,39 +178,17 @@ class SemanticMemory:
     async def learn_document(self, text: str, doc_name: str, importance: float = 0.9):
         """
         [V4.6] 企业级文档索引接口
-        利用标题感知分块算法，将长文档转化为具备上下文层级的语义切片。
+        利用标题感知分块算法，将长文档转化为具备上下文层级与溯源元数据的语义切片。
         """
-        from app.core.memory.rag_utils import split_paragraphs_with_headings, chunk_paragraphs, preprocess_markdown_for_embedding
-        
+        from app.core.memory.rag_utils import chunk_paragraphs, split_paragraphs_with_headings
+
         logger.info(f"📚 [SemanticMemory] 正在对文档进行结构化分块: {doc_name}")
-        
-        # 1. 执行标题感知分割
         paragraphs = split_paragraphs_with_headings(text)
-        
-        # 2. 执行智能 Token 分块 (500 tokens/chunk)
         chunks = chunk_paragraphs(paragraphs, chunk_tokens=500, overlap_tokens=50)
-        
-        # 3. 批量封装为 MemoryItem
-        items = []
-        for c in chunks:
-            # 预处理内容以提升嵌入质量
-            raw_content = c["content"]
-            processed_content = preprocess_markdown_for_embedding(raw_content)
-            
-            items.append(MemoryItem(
-                content=processed_content, # 存储清理后的内容
-                memory_type="semantic",
-                importance=importance,
-                metadata={
-                    "source": doc_name,
-                    "heading_path": c["heading_path"],
-                    "tokens": c["tokens"],
-                    "raw_len": len(raw_content),
-                    "ingestion_type": "rag_structured"
-                }
-            ))
-        
-        # 4. 物理入库
+        items = [
+            _build_semantic_chunk_item(idx, doc_name, chunk, importance)
+            for idx, chunk in enumerate(chunks)
+        ]
         await self.storage.add(items)
         logger.success(f"✅ [SemanticMemory] 文档索引完成 | {doc_name} | 切片数: {len(items)}")
 

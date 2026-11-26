@@ -74,6 +74,8 @@ class _StreamRenderState:
         self.interceptor = ProtocolInterceptor()  # 协议拦截器 (thought 标签变体过滤)
         self.internal_thoughts: List[str] = []    # on_chain_end 收集的内部推演步骤
         self.root_run_id: Optional[str] = None    # 首个 on_chain_start 捕获的根 run_id
+        self.reporter_stream_buffer: str = ""     # REPORTER 缓冲流，待门禁完成后放行或回退
+        self.reporter_final_emitted: bool = False  # REPORTER 经门禁净化后的终稿是否已下发
 
 
 class _LangGraphEventTranslator:
@@ -123,11 +125,7 @@ class _LangGraphEventTranslator:
                                 if not self._is_sse:
                                     yield "\n:::\n\n"
                                 state.in_thought = False
-                            state.ai_response_content += filtered_content
-                            if self._is_sse:
-                                yield SSEEvent(event=SSEEventType.MESSAGE, data=filtered_content).to_sse_packet()
-                            else:
-                                yield filtered_content
+                            state.reporter_stream_buffer += filtered_content
                         else:
                             if not state.in_thought:
                                 if not self._is_sse:
@@ -207,15 +205,10 @@ class _LangGraphEventTranslator:
             data = event.get("data", {}) or {}
             output = data.get("output")
 
-            if state.active_node == "REPORTER" and output and len(state.ai_response_content) < 50:
+            if state.active_node == "REPORTER" and output and not state.reporter_final_emitted:
                 final_text = getattr(output, "content", "")
-                if final_text and len(str(final_text)) > len(state.ai_response_content):
-                    patch_content = sanitize(str(final_text))
-                    state.ai_response_content = patch_content
-                    if self._is_sse:
-                        yield SSEEvent(event=SSEEventType.MESSAGE, data=patch_content).to_sse_packet()
-                    else:
-                        yield patch_content
+                if final_text and len(str(final_text)) > len(state.reporter_stream_buffer):
+                    state.reporter_stream_buffer = sanitize(str(final_text))
 
             usage = getattr(output, "usage_metadata", {}) if output else {}
             if self._is_sse:
@@ -238,12 +231,14 @@ class _LangGraphEventTranslator:
                     state.internal_thoughts.extend([str(s) for s in steps])
 
             if lg_node == "REPORTER":
-                if isinstance(output, dict) and "messages" in output:
+                if isinstance(output, dict) and output.get("messages"):
                     last_msg = output["messages"][-1]
-                    if hasattr(last_msg, "content") and len(state.ai_response_content) < 50:
+                    if hasattr(last_msg, "content") and not state.reporter_final_emitted:
                         static_content = sanitize(str(last_msg.content))
                         if static_content:
                             state.ai_response_content = static_content
+                            state.reporter_final_emitted = True
+                            state.reporter_stream_buffer = ""
                             if self._is_sse:
                                 yield SSEEvent(event=SSEEventType.MESSAGE, data=static_content).to_sse_packet()
                             else:
@@ -431,11 +426,24 @@ class ChatStreamCoordinator:
         if final:
             cleaned = sanitize(final)
             if cleaned:
-                state.ai_response_content += cleaned
-                if is_sse:
-                    yield SSEEvent(event=SSEEventType.MESSAGE, data=cleaned).to_sse_packet()
+                if state.active_node == "REPORTER":
+                    if not state.reporter_final_emitted:
+                        state.reporter_stream_buffer += cleaned
                 else:
-                    yield cleaned
+                    state.ai_response_content += cleaned
+                    if is_sse:
+                        yield SSEEvent(event=SSEEventType.MESSAGE, data=cleaned).to_sse_packet()
+                    else:
+                        yield cleaned
+
+        if not state.reporter_final_emitted and state.reporter_stream_buffer:
+            buffered = state.reporter_stream_buffer
+            state.reporter_stream_buffer = ""
+            state.ai_response_content += buffered
+            if is_sse:
+                yield SSEEvent(event=SSEEventType.MESSAGE, data=buffered).to_sse_packet()
+            else:
+                yield buffered
 
         # 对话结束后，异步保存至持久化层
         history_manager.save_turn(session_id, message, state.ai_response_content)

@@ -5,6 +5,7 @@ tests/unit/reporting/test_conclusion_orchestrator_red.py
 """
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 from langchain_core.messages import AIMessage
 from app.reporting.conclusion_orchestrator import resolve_conclusion
 
@@ -96,3 +97,38 @@ async def test_resolve_conclusion_restricted_fallback():
     )
     assert is_restricted is True
     assert "受限" in conclusion or "未产出确切违规结论" in conclusion or "记录" in conclusion
+
+
+@pytest.mark.asyncio
+async def test_resolve_conclusion_injects_retrieved_citations_into_llm_prompt():
+    """验证动态生成结论时，已核验 retrieved_citations 账本与 [CITE:<id>] 协议会被注入 Prompt"""
+    state = {
+        "metadata": {"user_question": "排查分解住院"},
+        "sql_query": "SELECT psn_no FROM fqz_gz_jzsj_all_ql",
+        "sql_validated": True,
+        "messages": [AIMessage(content="ok")],
+        "retrieved_citations": [
+            {
+                "citation_id": "law_99887766",
+                "source_type": "law_rag",
+                "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+                "law_title": "医疗保障基金使用监督管理条例",
+                "article_num": "第十五条",
+                "snippet": "定点医药机构不得分解住院。",
+            }
+        ],
+    }
+    mock_chat = AsyncMock(return_value=MagicMock(content="经核查，依据 [CITE:law_99887766] 存在违规。"))
+    with patch("app.core.llm_provider.llm_provider.chat", mock_chat):
+        conclusion, is_restricted = await resolve_conclusion(
+            state=state,
+            raw_data_list=[{"psn_no": "P1", "medfee_sumamt": 800.0}],
+            hard_count=1,
+            hard_sum=800.0,
+        )
+
+    assert not is_restricted
+    assert "[CITE:law_99887766]" in conclusion
+    sent_prompt = mock_chat.call_args.kwargs["messages"][0].content
+    assert "[CITE:law_99887766]" in sent_prompt
+    assert "《医疗保障基金使用监督管理条例》第十五条" in sent_prompt

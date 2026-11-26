@@ -164,6 +164,7 @@ class AuditReportRenderer:
         hard_sum: float,
         rewritten_question: Optional[str] = None,
         is_restricted: bool = False,
+        retrieved_citations: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """[Matt Pocock Deep Module] 构造事实强制对齐且逻辑白盒化之 LLM Prompt，委托给专职深模块"""
         from app.reporting.conclusion_prompt_builder import build_conclusion_prompt
@@ -175,6 +176,7 @@ class AuditReportRenderer:
             hard_sum=hard_sum,
             rewritten_question=rewritten_question,
             is_restricted=is_restricted,
+            retrieved_citations=retrieved_citations,
         )
 
     def _extract_boundary_from_raw_data(self, raw_data_str: Any) -> tuple[Optional[int], Optional[str], Optional[str]]:

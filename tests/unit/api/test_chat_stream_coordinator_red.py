@@ -131,3 +131,75 @@ def test_chat_route_endpoint(mock_app_state):
         assert resp.status_code == 200
         assert "Hello Stream" in resp.text
         assert resp.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_format", ["legacy", "sse"])
+async def test_reporter_raw_stream_is_buffered_and_final_guarded_report_is_delivered(stream_format):
+    coordinator = ChatStreamCoordinator()
+    raw_draft = (
+        "初步核查认为本案违反《虚假医保特别法》第九十九条及医保发〔2023〕X号，需要退回全部违规资金并处五倍罚款。"
+    )
+    guarded_report = (
+        "# 📋 医保专项稽核报告\n\n## 四、核查结论\n\n[已拦截未核验法规引用]\n\n"
+        "## 六、证据链溯源明细\n| Citation ID | 来源类型 |"
+    )
+
+    mock_executor = MagicMock()
+    mock_snapshot = MagicMock()
+    mock_snapshot.next = []
+    mock_snapshot.values = {}
+    mock_executor.aget_state = AsyncMock(return_value=mock_snapshot)
+
+    async def fake_stream_events(*args, **kwargs):
+        yield {
+            "event": "on_chain_start",
+            "name": "REPORTER",
+            "metadata": {"langgraph_node": "REPORTER"},
+            "data": {},
+        }
+        yield {
+            "event": "on_chat_model_stream",
+            "name": "reporter_llm",
+            "metadata": {"langgraph_node": "REPORTER"},
+            "data": {"chunk": MagicMock(content=raw_draft)},
+        }
+        yield {
+            "event": "on_chain_end",
+            "name": "REPORTER",
+            "metadata": {"langgraph_node": "REPORTER"},
+            "data": {"output": {"messages": [MagicMock(content=guarded_report)]}},
+        }
+
+    mock_executor.astream_events = fake_stream_events
+    mock_request = MagicMock(spec=Request)
+    mock_request.app.state.saver = None
+    mock_request.headers = {}
+    mock_request.query_params = {}
+    mock_bg = MagicMock(spec=BackgroundTasks)
+
+    with (
+        patch("app.api.chat_stream_coordinator.get_graph_executor", return_value=(mock_executor, "qwen-max")),
+        patch("app.core.memory.history.HistoryManager.get_history", return_value=[]),
+        patch("app.core.memory.history.HistoryManager.save_turn") as mock_save,
+        patch("app.core.memory.history.HistoryManager.dump_debug_history"),
+    ):
+        chunks = [
+            c
+            async for c in coordinator.coordinate_stream(
+                request=mock_request,
+                background_tasks=mock_bg,
+                session_id=f"sess_guard_{stream_format}",
+                model_id="qwen-max",
+                message="排查分解住院",
+                stream_format=stream_format,
+            )
+        ]
+
+    full_output = "".join(chunks)
+    assert "虚假医保特别法" not in full_output
+    assert "## 六、证据链溯源明细" in full_output
+    assert "[已拦截未核验法规引用]" in full_output
+    persisted = mock_save.call_args.args[2]
+    assert "虚假医保特别法" not in persisted
+    assert "## 六、证据链溯源明细" in persisted

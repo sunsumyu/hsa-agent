@@ -29,6 +29,30 @@ from app.reporting.turn_lifecycle import (
 )
 
 
+def _guard_synthesis_response(
+    rendered_content: str,
+    state: Dict[str, Any],
+    user_query: str,
+) -> str:
+    """对 synthesis_done 直通响应执行 System 2 法条引文核验。"""
+    from app.core.guardrails.citation_guardrail import enforce_citation_grounding
+    from app.core.rag.citation_ledger import (
+        build_policy_registry_citations,
+        merge_citation_ledgers,
+    )
+    from app.reporting.policy_matcher import match_policies
+
+    retrieved = [r for r in (state.get("retrieved_citations") or []) if isinstance(r, dict)]
+    matched = match_policies(user_query)
+    if isinstance(matched, list):
+        static_policy = "; ".join(str(x) for x in matched if x)
+    else:
+        static_policy = str(matched or "")
+    static_records = [r.model_dump(mode="json") for r in build_policy_registry_citations(static_policy)]
+    full_ledger = merge_citation_ledgers(retrieved, static_records or None)
+    return enforce_citation_grounding(rendered_content, full_ledger, strict=True).sanitized_text
+
+
 def handle_synthesis_bypass(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     [SPEC-227] 直通底稿/便签/回溯/经验沉淀渲染。
@@ -45,11 +69,12 @@ def handle_synthesis_bypass(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         rendered_content = str(getattr(last_ai, "content", "")) if last_ai else "核查完成"
 
     current_q = state.get("current_turn_query") or metadata.get("user_question") or "医保审计任务"
+    guarded_content = _guard_synthesis_response(str(rendered_content), state, current_q)
 
     commit_patch = create_turn_commit_patch(
         state=state,
         user_query=current_q,
-        summary_conclusion=rendered_content[:150],
+        summary_conclusion=guarded_content[:150],
         hard_count=0,
         hard_sum=0.0,
         key_entities=[],
@@ -57,7 +82,7 @@ def handle_synthesis_bypass(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     )
 
     return {
-        "messages": [AIMessage(content=rendered_content)],
+        "messages": [AIMessage(content=guarded_content)],
         **commit_patch
     }
 

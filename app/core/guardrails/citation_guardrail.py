@@ -9,8 +9,23 @@ _CITE_TOKEN_RE = re.compile(r"\[CITE:([^\s\]]+)\]")
 _FREEFORM_STATUTE_RE = re.compile(
     r"《(?P<title>[^》]{2,45})》"
     r"(?:（[^）]{1,25}）)?"
-    r"(?P<article>第[一二三四五六七八九十百千0-9]+条(?:第[一二三四五六七八九十0-9]+款)?)?"
+    r"(?P<article>第[一二三四五六七八九十百千0-9]+条"
+    r"(?:之[一二三四五六七八九十0-9]+)?"
+    r"(?:第[一二三四五六七八九十0-9]+款)?"
+    r"(?:第[（(]?[一二三四五六七八九十0-9]+[）)]?项)?)?"
 )
+_BARE_DOC_REF_RE = re.compile(
+    r"(?P<lead>(?:依据|根据|按照|依照|违反|触犯|参见|参照|结合|详见|另见|以及|[和与及])+)?(?P<ref>"
+    r"(?P<doc>"
+    r"[\u4e00-\u9fa5]{1,8}[〔\[（(](?:19|20)\d{2}[〕\]）)][0-9一二三四五六七八九十百千X×]+号"
+    r"|(?:[\u4e00-\u9fa5]{2,10})?第?[一二三四五六七八九十百千0-9]+号令"
+    r")"
+    r"(?P<article>第[一二三四五六七八九十百千0-9]+条"
+    r"(?:之[一二三四五六七八九十0-9]+)?"
+    r"(?:第[一二三四五六七八九十0-9]+款)?"
+    r"(?:第[（(]?[一二三四五六七八九十0-9]+[）)]?项)?)?)"
+)
+_AUTHORITATIVE_SPAN_RE = re.compile(r"（\[(?:向量库实查|规则库基准)\][^）]*）")
 _DOC_EXT_RE = re.compile(r"\.(pdf|md|txt|docx?)$", re.IGNORECASE)
 _REDACTED_TAG = "[已拦截未核验法规引用]"
 
@@ -106,6 +121,40 @@ def _audit_freeform_statutes(
     return _FREEFORM_STATUTE_RE.sub(_check, text), verified, blocked
 
 
+def _audit_bare_doc_refs(
+    text: str,
+    ledger: List[Dict[str, Any]],
+    strict: bool,
+) -> Tuple[str, Set[str], List[str]]:
+    """审计无书名号的红头文件文号与部委令号引用，跳过已展开的权威锚点括号。"""
+    protected = [(m.start(), m.end()) for m in _AUTHORITATIVE_SPAN_RE.finditer(text)]
+    verified: Set[str] = set()
+    blocked: List[str] = []
+
+    def _check(match: re.Match[str]) -> str:
+        s, e = match.span("ref")
+        if any(ps <= s and e <= pe for ps, pe in protected):
+            return match.group(0)
+        lead = match.group("lead") or ""
+        ref = match.group("ref")
+        doc_ref = match.group("doc").strip()
+        article = (match.group("article") or "").strip()
+        for rec in ledger:
+            haystack = " ".join(str(rec.get(k) or "") for k in ("law_title", "source_doc", "section_path", "snippet"))
+            if doc_ref in haystack:
+                if article:
+                    art_hay = " ".join(str(rec.get(k) or "") for k in ("article_num", "section_path", "snippet"))
+                    if article not in art_hay:
+                        continue
+                if rec.get("citation_id"):
+                    verified.add(str(rec["citation_id"]))
+                return match.group(0)
+        blocked.append(ref)
+        return f"{lead}{_REDACTED_TAG}" if strict else match.group(0)
+
+    return _BARE_DOC_REF_RE.sub(_check, text), verified, blocked
+
+
 def enforce_citation_grounding(
     text: str,
     ledger: List[Dict[str, Any]],
@@ -119,12 +168,15 @@ def enforce_citation_grounding(
     ledger_by_id = {str(r["citation_id"]): r for r in ledger_list if r.get("citation_id")}
 
     expanded_text, id_verified, id_blocked = _resolve_cite_markers(text, ledger_by_id)
-    final_text, free_verified, free_blocked = _audit_freeform_statutes(
+    free_text, free_verified, free_blocked = _audit_freeform_statutes(
         expanded_text, ledger_list, strict=strict
     )
+    final_text, bare_verified, bare_blocked = _audit_bare_doc_refs(
+        free_text, ledger_list, strict=strict
+    )
 
-    all_blocked = id_blocked + free_blocked
-    all_verified = sorted(id_verified | free_verified)
+    all_blocked = id_blocked + free_blocked + bare_blocked
+    all_verified = sorted(id_verified | free_verified | bare_verified)
     return CitationGuardResult(
         passed=(len(all_blocked) == 0),
         sanitized_text=final_text,

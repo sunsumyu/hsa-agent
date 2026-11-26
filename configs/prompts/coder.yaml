@@ -194,6 +194,11 @@ system_template: |
   LIMIT 20;
   ```
 
+  ### 8.4 法条与知识库引用规范 (Citation Anchoring)
+
+  - 若调用 `query_law_database` 或 `query_knowledge_base` 检索到法规条文与业务指引，在总结分析中引用具体条款时，必须标注工具输出中的 `[CITE:<id>]` 编号与来源。
+  - 严禁凭记忆编造任何未在工具返回结果中出现的法规名称、条号或文号。
+
   ## 当前审计协议 (Methodology):
   {methodology}
 

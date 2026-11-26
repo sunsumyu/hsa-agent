@@ -2,6 +2,9 @@
 import importlib
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from app.core.rag.citation_ledger import parse_citations_from_tool_output
 from app.core.rag.rag_fusion_ranker import render_rag_report
@@ -150,3 +153,50 @@ def test_build_memory_item_preserves_provenance_and_round_trips(monkeypatch):
     assert parsed[0].law_title == "医疗保障基金使用监督管理条例"
     assert parsed[0].article_num == "第十五条"
     assert parsed[0].content_hash == chunk["content_hash"]
+
+
+def test_render_rag_report_footer_does_not_pollute_parsed_snippet():
+    hit = SimpleNamespace(
+        content="第十五条 定点医药机构不得分解住院。",
+        metadata={"source": "条例.md", "heading_path": "第三章"},
+    )
+    report = render_rag_report([hit], expansion_count=1)
+    assert "（引用上述条文时请标注 [CITE:xxx]" in report
+
+    parsed = parse_citations_from_tool_output("query_knowledge_base", report)
+    assert len(parsed) == 1
+    assert "请标注 [CITE:xxx]" not in parsed[0].snippet
+    assert parsed[0].snippet.endswith("不得分解住院。")
+
+
+@pytest.mark.asyncio
+async def test_semantic_memory_learn_document_enriches_provenance_and_round_trips():
+    from app.core.memory.types.semantic import SemanticMemory
+
+    storage = SimpleNamespace(add=AsyncMock())
+    semantic = SemanticMemory(storage=storage)
+    doc_text = (
+        "## 第一编\n### 第三章\n"
+        "《医疗保障基金使用监督管理条例》第十五条 严禁定点医药机构分解住院、挂床住院。"
+    )
+    await semantic.learn_document(text=doc_text, doc_name="医保条例精选.md", importance=0.9)
+
+    storage.add.assert_awaited_once()
+    items = storage.add.call_args.args[0]
+    assert len(items) == 1
+    meta = items[0].metadata
+    assert meta["doc_id"]
+    assert meta["source"] == "医保条例精选.md"
+    assert meta["chunk_index"] == 0
+    assert "第一编" in meta["heading_path"]
+    assert meta["law_title"] == "医疗保障基金使用监督管理条例"
+    assert meta["article_num"] == "第十五条"
+    assert len(meta["content_hash"]) == 12
+
+    report = render_rag_report(items, expansion_count=1)
+    assert "Unknown" not in report
+    parsed = parse_citations_from_tool_output("query_knowledge_base", report)
+    assert len(parsed) == 1
+    assert parsed[0].source_doc == "医保条例精选.md"
+    assert parsed[0].article_num == "第十五条"
+    assert parsed[0].content_hash == meta["content_hash"]

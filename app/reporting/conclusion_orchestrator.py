@@ -126,6 +126,7 @@ async def resolve_conclusion(
         hard_sum,
         rewritten_question=rewritten_q,
         is_restricted=is_restricted,
+        retrieved_citations=state.get("retrieved_citations"),
     )
 
     try:
