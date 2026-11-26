@@ -122,6 +122,7 @@ class RenderedReport:
     total_amount: float
     finding_count: int
     audit_metadata: Dict[str, Any] = field(default_factory=dict) # [V156.0] 审计元数据
+    sanitized_conclusion: str = ""
     rendered_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -234,6 +235,7 @@ class AuditReportRenderer:
         policy_basis, llm_conclusion, updated_meta = _apply_citation_guardrail(
             policy_basis, llm_conclusion, audit_metadata
         )
+        sanitized_conclusion = llm_conclusion
 
         # [Phase 3] Zero-finding boundary proof + topic-matched visualization + actionable steps
         # — all extracted to policy_matcher.py for testability and separation of concerns
@@ -288,7 +290,8 @@ class AuditReportRenderer:
             risk_level=risk_level,
             total_amount=total_amount,
             finding_count=finding_count,
-            audit_metadata=updated_meta
+            audit_metadata=updated_meta,
+            sanitized_conclusion=sanitized_conclusion,
         )
 
     # ──────────────────────────────────────────────────────

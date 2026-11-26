@@ -105,6 +105,11 @@ def build_risk_section(
     ])
 
 
+def _escape_md_cell(val: Any) -> str:
+    """转义 Markdown 表格单元格中的管道符，防止畸形元数据破坏表格列结构。"""
+    return str(val).replace("|", "\\|")
+
+
 def build_citation_provenance_table(citations: List[Dict[str, Any]]) -> str:
     """渲染法规与知识引文溯源核验台账表。"""
     rows = [c for c in (citations or []) if isinstance(c, dict) and c.get("citation_id")]
@@ -113,15 +118,16 @@ def build_citation_provenance_table(citations: List[Dict[str, Any]]) -> str:
     labels = {"law_rag": "法规向量库 (law_rag)", "vector_rag": "知识向量库 (vector_rag)", "policy_registry": "静态规则库 (policy_registry)"}
     lines = ["### 法条与知识引文溯源台账", "", "| Citation ID | 来源类型 | 文档 / 页码 / 章节 | 内容哈希 |", "| :--- | :--- | :--- | :--- |"]
     for rec in rows:
-        origin = labels.get(str(rec.get("source_type") or ""), str(rec.get("source_type") or "-"))
+        cid = _escape_md_cell(rec.get("citation_id", ""))
+        origin = _escape_md_cell(labels.get(str(rec.get("source_type") or ""), str(rec.get("source_type") or "-")))
         parts = [str(rec.get("source_doc") or "-")]
         if rec.get("page_num"):
             parts.append(f"第{rec['page_num']}页")
         if rec.get("section_path"):
             parts.append(str(rec["section_path"]).strip())
-        locator = " / ".join(p.replace("|", "\\|") for p in parts if p)
-        chash = str(rec.get("content_hash") or "-")
-        lines.append(f"| `{rec.get('citation_id', '')}` | {origin} | {locator} | `{chash}` |")
+        locator = " / ".join(_escape_md_cell(p) for p in parts if p)
+        chash = _escape_md_cell(rec.get("content_hash") or "-")
+        lines.append(f"| `{cid}` | {origin} | {locator} | `{chash}` |")
     return "\n".join(lines)
 
 

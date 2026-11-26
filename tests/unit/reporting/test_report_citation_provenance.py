@@ -132,3 +132,71 @@ async def test_orchestrator_forwards_retrieved_citations_without_mutating_ai_kwa
         assert passed_meta["source"] == "ClickHouse"
         assert passed_meta["retrieved_citations"] == retrieved
         assert ai_kwargs == {"source": "ClickHouse"}
+
+
+def test_traceability_provenance_table_escapes_pipe_in_all_cells():
+    md = build_traceability_section(
+        {
+            "trace_id": "TR-PIPE",
+            "retrieved_citations": [
+                {
+                    "citation_id": "law|fake_id",
+                    "source_type": "custom|type",
+                    "source_doc": "法规|文档.pdf",
+                    "section_path": "第一章|第一节",
+                    "content_hash": "hash|1234",
+                }
+            ],
+        }
+    )
+    row_line = next(line for line in md.splitlines() if "fake_id" in line)
+    assert "`law\\|fake_id`" in row_line
+    assert "custom\\|type" in row_line
+    assert "法规\\|文档.pdf / 第一章\\|第一节" in row_line
+    assert "`hash\\|1234`" in row_line
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_persists_sanitized_conclusion_in_turn_commit():
+    retrieved = [
+        {
+            "citation_id": "law_55aa66bb",
+            "source_type": "law_rag",
+            "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+            "section_path": "第三章",
+            "page_num": 5,
+            "law_title": "医疗保障基金使用监督管理条例",
+            "article_num": "第十五条",
+            "snippet": "第十五条 严禁分解住院。",
+            "content_hash": "deadbeef1234",
+        }
+    ]
+    state = {
+        "raw_data": '[{"psn_no": "P001", "medfee_sumamt": 1500.0}]',
+        "sql_query": "SELECT psn_no, medfee_sumamt FROM fqz_fymx_test",
+        "sql_history": ["SELECT psn_no, medfee_sumamt FROM fqz_fymx_test"],
+        "methodology": "频次核查",
+        "metadata": {"user_question": "排查分解住院"},
+        "messages": [AIMessage(content="SQL已执行")],
+        "retrieved_citations": retrieved,
+    }
+    hallucinated_conclusion = (
+        "依据 [CITE:law_55aa66bb] 发现异常，同时触犯 [CITE:FAKE_99] 与《虚假医保特别法》第九十九条。"
+    )
+
+    with patch("app.reporting.reporter_node_orchestrator.resolve_conclusion", new_callable=AsyncMock) as mock_resolve, \
+         patch("app.core.booster.PrecisionBooster.verify_semantic_alignment") as mock_booster:
+        mock_resolve.return_value = (hallucinated_conclusion, False)
+        mock_booster.return_value = (True, "")
+
+        res = await orchestrate_reporter_node(state, config={}, max_retries=1)
+
+    persisted_summary = res["accumulated_findings"][-1]["summary_conclusion"]
+    assert "FAKE_99" not in persisted_summary
+    assert "虚假医保特别法" not in persisted_summary
+    assert "[已拦截未核验法规引用]" in persisted_summary
+    assert "《医疗保障基金使用监督管理条例》第十五条" in persisted_summary
+
+    booster_conclusion = mock_booster.call_args.args[1]
+    assert "FAKE_99" not in booster_conclusion
+    assert "虚假医保特别法" not in booster_conclusion

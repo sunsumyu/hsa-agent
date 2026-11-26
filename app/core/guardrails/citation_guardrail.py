@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Set, Tuple
 
 from pydantic import BaseModel, Field
 
-_CITE_TOKEN_RE = re.compile(r"\[CITE:([a-z]+_[a-f0-9]+)\]")
+_CITE_TOKEN_RE = re.compile(r"\[CITE:([^\s\]]+)\]")
 _FREEFORM_STATUTE_RE = re.compile(
     r"《(?P<title>[^》]{2,45})》"
     r"(?:（[^）]{1,25}）)?"

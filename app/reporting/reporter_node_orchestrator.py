@@ -79,6 +79,17 @@ def reconcile_evidence_counts(parsed_count: int, evidence_row_count: Optional[in
     return None
 
 
+def _resolve_effective_conclusion(rendered: Any, fallback: str) -> str:
+    """优先提取经引文门禁净化后的结论，兼容未提供该字段的渲染对象或测试桩。"""
+    raw_sanitized = getattr(rendered, "sanitized_conclusion", None)
+    if isinstance(raw_sanitized, str) and raw_sanitized:
+        return raw_sanitized
+    raw_summary = getattr(rendered, "summary", None)
+    if isinstance(raw_summary, str) and raw_summary:
+        return raw_summary
+    return fallback
+
+
 async def orchestrate_standard_report(
     state: Dict[str, Any],
     config: Any,
@@ -138,18 +149,18 @@ async def orchestrate_standard_report(
         format_preference=format_pref
     )
 
-    # 4. 语义偏离核验
+    effective_conclusion = _resolve_effective_conclusion(rendered, llm_conclusion)
+
     if not is_restricted:
-        is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), llm_conclusion)
+        is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), effective_conclusion)
         if not is_aligned:
             logger.warning("🚨 [SEMANTIC_MISMATCH] 报告语义偏离")
 
-    # 5. [SPEC-227 Turn Commit Hook] 提取关键实体并沉淀为不可变审计发现
     key_entities = extract_key_entities(raw_data_list)
     commit_patch = create_turn_commit_patch(
         state=state,
         user_query=user_question,
-        summary_conclusion=llm_conclusion,
+        summary_conclusion=effective_conclusion,
         hard_count=hard_count,
         hard_sum=hard_sum,
         key_entities=key_entities,

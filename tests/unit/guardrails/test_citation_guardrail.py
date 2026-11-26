@@ -96,3 +96,22 @@ def test_empty_text_passes_cleanly():
     assert res.sanitized_text == ""
     assert res.verified_ids == []
     assert res.blocked_citations == []
+
+
+def test_blocks_non_hex_fabricated_cite_markers():
+    text = "依据 [CITE:law_xyz] 及 [CITE:FAKE_99] 开展核查。"
+    res = enforce_citation_grounding(text, _sample_ledger(), strict=True)
+    assert res.passed is False
+    assert res.blocked_citations == ["[CITE:law_xyz]", "[CITE:FAKE_99]"]
+    assert "[CITE:law_xyz]" not in res.sanitized_text
+    assert "[CITE:FAKE_99]" not in res.sanitized_text
+    assert res.sanitized_text.count("[已拦截未核验法规引用]") == 2
+
+
+def test_non_strict_mode_still_redacts_fabricated_cite_marker():
+    text = "依据 [CITE:law_deadbeef] 认定违规。"
+    res = enforce_citation_grounding(text, _sample_ledger(), strict=False)
+    assert res.passed is False
+    assert res.blocked_citations == ["[CITE:law_deadbeef]"]
+    assert "[CITE:law_deadbeef]" not in res.sanitized_text
+    assert "[已拦截未核验法规引用]" in res.sanitized_text

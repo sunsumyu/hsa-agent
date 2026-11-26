@@ -5,10 +5,8 @@
 import sys
 import io
 import os
-import re
 import json
 import asyncio
-import numpy as np
 
 # 保证 UTF-8 输出
 if hasattr(sys.stdout, "reconfigure"):
@@ -67,6 +65,35 @@ def _build_chunk_record(
         "text": body_text,
         "char_count": len(body_text),
     }
+
+
+def _build_memory_item(idx: int, chunk: dict) -> MemoryItem:
+    """构造带完整法规溯源元数据的语义记忆项。"""
+    part = chunk.get("part", "")
+    chapter = chunk.get("chapter", "")
+    title = chunk.get("title", "")
+    heading_path = chunk.get("heading_path") or f"{part} > {chapter} > {title}"
+    text = chunk.get("text", "")
+    return MemoryItem(
+        content=f"【{heading_path}】\n{text}",
+        memory_type="semantic",
+        importance=0.9,
+        metadata={
+            "chunk_id": idx,
+            "doc_id": chunk.get("doc_id", ""),
+            "source": chunk.get("source", ""),
+            "chunk_index": chunk.get("chunk_index", idx),
+            "heading_path": heading_path,
+            "law_title": chunk.get("law_title", ""),
+            "article_num": chunk.get("article_num", ""),
+            "content_hash": chunk.get("content_hash", ""),
+            "part": part,
+            "chapter": chapter,
+            "title": title,
+            "char_count": chunk.get("char_count", len(text)),
+            "tenant_id": "default",
+        },
+    )
 
 
 def perform_semantic_chunking(filepath: str):
@@ -138,23 +165,7 @@ async def main():
     embedder = RealEmbedder()
     storage = VectorStorage(storage_dir=MASSIVE_STORAGE_DIR, embeddings=embedder)
 
-    items = []
-    for idx, c in enumerate(raw_chunks):
-        # 带有完整的上下文元数据
-        item = MemoryItem(
-            content=f"【{c['part']} > {c['chapter']} > {c['title']}】\n{c['text']}",
-            memory_type="semantic",
-            importance=0.9,
-            metadata={
-                "chunk_id": idx,
-                "part": c["part"],
-                "chapter": c["chapter"],
-                "title": c["title"],
-                "char_count": c["char_count"],
-                "tenant_id": "default"
-            }
-        )
-        items.append(item)
+    items = [_build_memory_item(idx, c) for idx, c in enumerate(raw_chunks)]
 
     # 写入 FAISS 索引
     await storage.add(items)

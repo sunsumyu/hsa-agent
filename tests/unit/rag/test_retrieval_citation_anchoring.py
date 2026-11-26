@@ -107,3 +107,46 @@ def test_build_chunk_record_enriches_metadata(monkeypatch, tmp_path):
     assert chunks[0]["chunk_index"] == 0
     assert chunks[0]["article_num"] == "第十九条"
     assert chunks[0]["law_title"] == "医疗保障基金使用监督管理条例"
+
+
+def test_build_memory_item_preserves_provenance_and_round_trips(monkeypatch):
+    if "sentence_transformers" not in sys.modules:
+        monkeypatch.setitem(
+            sys.modules,
+            "sentence_transformers",
+            SimpleNamespace(SentenceTransformer=object),
+        )
+    module = importlib.import_module("scripts.chunk_and_ingest_corpus")
+    chunk = module._build_chunk_record(
+        filepath="data/knowledge_base/regulations/official_hsa_regulations_corpus.md",
+        chunk_index=0,
+        part="第一编 核心法规",
+        chapter="第三章 监督管理",
+        title="第十五条 分解住院",
+        body_text="《医疗保障基金使用监督管理条例》第十五条 严禁定点医药机构分解住院、挂床住院。",
+    )
+    item = module._build_memory_item(0, chunk)
+    meta = item.metadata
+    assert meta["doc_id"] == "official_hsa_regulations_corpus"
+    assert meta["source"] == "official_hsa_regulations_corpus.md"
+    assert meta["chunk_index"] == 0
+    assert meta["heading_path"] == "第一编 核心法规 > 第三章 监督管理 > 第十五条 分解住院"
+    assert meta["law_title"] == "医疗保障基金使用监督管理条例"
+    assert meta["article_num"] == "第十五条"
+    assert meta["content_hash"] == chunk["content_hash"]
+    assert meta["chunk_id"] == 0
+    assert meta["tenant_id"] == "default"
+
+    report = render_rag_report([item], expansion_count=1)
+    assert "Unknown" not in report
+    assert "ROOT" not in report
+    assert "official_hsa_regulations_corpus.md" in report
+    assert "第一编 核心法规 > 第三章 监督管理 > 第十五条 分解住院" in report
+
+    parsed = parse_citations_from_tool_output("query_knowledge_base", report)
+    assert len(parsed) == 1
+    assert parsed[0].source_doc == "official_hsa_regulations_corpus.md"
+    assert parsed[0].section_path == "第一编 核心法规 > 第三章 监督管理 > 第十五条 分解住院"
+    assert parsed[0].law_title == "医疗保障基金使用监督管理条例"
+    assert parsed[0].article_num == "第十五条"
+    assert parsed[0].content_hash == chunk["content_hash"]
