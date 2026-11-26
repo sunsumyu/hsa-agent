@@ -47,8 +47,8 @@ def bulk_upsert(models):
                 status = 'Warning'
             elif rem < tot:
                 status = 'Active'
-        except Exception:
-            pass
+        except (KeyError, ValueError, TypeError, AttributeError) as exc:
+            print(f"[WARN] status auto-calc skipped for {m.get('name')}: {exc}")
         upsert_model(conn, m['name'], m['platform'], m['remaining'], m['total'], status, m.get('hint', ''))
     conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]

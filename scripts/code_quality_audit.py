@@ -247,22 +247,16 @@ class CodeQualityAuditor:
                     ))
 
     # ── 报告生成 ──────────────────────────────────────────────────────────
-    def print_report(self):
-        """打印报告"""
-        print("\n" + "=" * 70)
-        print(f"{Colors.BOLD}Argus 代码质量审计报告{Colors.NC}")
-        print("=" * 70)
-
-        # 1. 文件统计
-        total_lines = sum(m.total_lines for m in self.metrics)
-        total_funcs = sum(len(m.functions) for m in self.metrics)
-        long_files = [m for m in self.metrics if m.total_lines > self.MAX_FILE_LINES]
+    def _collect_long_functions(self):
         long_funcs = []
         for m in self.metrics:
             for name, line, length in m.functions:
                 if length > self.MAX_FUNCTION_LINES:
                     long_funcs.append((m.path, name, line, length))
+        return long_funcs
 
+    def _print_summary(self, total_lines, long_files, long_funcs):
+        total_funcs = sum(len(m.functions) for m in self.metrics)
         print(f"\n{Colors.BLUE}📊 总体统计{Colors.NC}")
         print(f"  扫描文件数:     {len(self.metrics)}")
         print(f"  代码总行数:     {total_lines}")
@@ -273,35 +267,30 @@ class CodeQualityAuditor:
         print(f"  全局变量使用:   {sum(m.global_vars for m in self.metrics)}")
         print(f"  TODO/FIXME:     {sum(m.todo_count for m in self.metrics)}")
 
-        # 2. 过长文件 Top 10
+    def _print_hotspots(self, long_files, long_funcs):
         if long_files:
             print(f"\n{Colors.YELLOW}📁 过长文件 (>{self.MAX_FILE_LINES} 行){Colors.NC}")
-            sorted_files = sorted(long_files, key=lambda x: x.total_lines, reverse=True)
-            for m in sorted_files[:10]:
+            for m in sorted(long_files, key=lambda x: x.total_lines, reverse=True)[:10]:
                 print(f"  {Colors.RED}{m.total_lines:4d}{Colors.NC} 行  {m.path}")
 
-        # 3. 过长函数 Top 10
         if long_funcs:
             print(f"\n{Colors.YELLOW}🔧 过长函数 (>{self.MAX_FUNCTION_LINES} 行){Colors.NC}")
-            sorted_funcs = sorted(long_funcs, key=lambda x: x[3], reverse=True)
-            for path, name, line, length in sorted_funcs[:10]:
+            for path, name, line, length in sorted(long_funcs, key=lambda x: x[3], reverse=True)[:10]:
                 print(f"  {Colors.RED}{length:4d}{Colors.NC} 行  {path}:{line}  {name}()")
 
-        # 4. 静默异常
         silent = [m for m in self.metrics if m.silent_exception_count > 0]
         if silent:
             print(f"\n{Colors.YELLOW}🤐 静默异常 (except: pass){Colors.NC}")
             for m in silent:
                 print(f"  {m.silent_exception_count} 个  {m.path}")
 
-        # 5. 全局可变状态
         globals_files = [m for m in self.metrics if m.global_vars > 0]
         if globals_files:
             print(f"\n{Colors.YELLOW}🌍 全局可变状态{Colors.NC}")
             for m in globals_files:
                 print(f"  {m.global_vars} 个  {m.path}")
 
-        # 6. 测试覆盖率估算
+    def _print_coverage(self, total_lines):
         test_files = list(Path("tests").rglob("test_*.py")) if Path("tests").exists() else []
         test_lines = sum(len(f.read_text().splitlines()) for f in test_files if f.exists())
         coverage_ratio = (test_lines / total_lines * 100) if total_lines > 0 else 0
@@ -316,15 +305,29 @@ class CodeQualityAuditor:
         else:
             print(f"  {Colors.GREEN}[OK]{Colors.NC} 测试覆盖率良好")
 
-        # 7. 问题汇总
+    def _print_issue_summary(self):
         error_count = sum(1 for i in self.all_issues if i.severity == "ERROR")
         warn_count = sum(1 for i in self.all_issues if i.severity == "WARN")
         info_count = sum(1 for i in self.all_issues if i.severity == "INFO")
-
         print(f"\n{Colors.BOLD}📋 问题汇总{Colors.NC}")
         print(f"  {Colors.RED}ERROR: {error_count}{Colors.NC}")
         print(f"  {Colors.YELLOW}WARN:   {warn_count}{Colors.NC}")
         print(f"  {Colors.BLUE}INFO:   {info_count}{Colors.NC}")
+
+    def print_report(self):
+        """打印报告"""
+        print("\n" + "=" * 70)
+        print(f"{Colors.BOLD}Argus 代码质量审计报告{Colors.NC}")
+        print("=" * 70)
+
+        total_lines = sum(m.total_lines for m in self.metrics)
+        long_files = [m for m in self.metrics if m.total_lines > self.MAX_FILE_LINES]
+        long_funcs = self._collect_long_functions()
+
+        self._print_summary(total_lines, long_files, long_funcs)
+        self._print_hotspots(long_files, long_funcs)
+        self._print_coverage(total_lines)
+        self._print_issue_summary()
 
         print("\n" + "=" * 70)
         print(f"{Colors.GREEN}审计完成!{Colors.NC}")

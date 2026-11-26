@@ -171,8 +171,8 @@ async def test_api_session_burst_stress():
                 # 模拟推演首包耗时，保持锁持有
                 if passed_count == 0 and "[[[ENGINE" in chunk:
                     await asyncio.sleep(0.05)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[WARN] client #{client_id} stream aborted: {exc}")
 
         full_resp = "".join(chunks)
         if "请勿重复提交" in full_resp:
