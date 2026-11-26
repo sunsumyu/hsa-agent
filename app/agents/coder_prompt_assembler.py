@@ -13,6 +13,7 @@ app/agents/coder_prompt_assembler.py
 6. 顶层端到端 Prompt 组装渲染 (assemble_coder_prompt)
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, Any, List, Optional, Tuple
 from loguru import logger
@@ -150,6 +151,23 @@ def resolve_ontology_context(user_q: str, methodology: str = "") -> str:
     return "（当前任务为单表/两表关系查询，暂无需加载图谱本体）"
 
 
+def _recall_golden_experience(tasks_list: List[str], user_q: str) -> str:
+    """在非隔离模式下召回匹配当前任务的黄金 SQL Few-Shot 范例。"""
+    is_isolated_mode = (
+        os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true"
+        or os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true"
+    )
+    if is_isolated_mode:
+        return ""
+    try:
+        from app.core.memory.experience import experience_manager
+        query_tasks = tasks_list if tasks_list else ([user_q] if user_q else [])
+        return experience_manager.get_relevant_experience(query_tasks, k=1) or ""
+    except Exception as e:
+        logger.debug(f"[CoderPromptAssembler] 黄金经验 Few-Shot 召回跳过: {e}")
+        return ""
+
+
 def assemble_coder_prompt(
     state: Dict[str, Any], 
     metadata: Optional[Dict[str, Any]] = None
@@ -162,17 +180,18 @@ def assemble_coder_prompt(
     tasks_list = state.get("tasks", [])
     scene_enforcement = meta.get("scene_enforcement")
 
-    # 1. 意图与当前轮自包含命题消解 (AuditIntent 单次抽取，作为 Payload 与场景指引的共同来源)
     user_q = resolve_user_query(state, max_chars=300)
 
     from app.core.planning.audit_intent_planner import AuditIntentPlanner
     audit_intent = AuditIntentPlanner.extract_intent(user_q)
 
-    # 2. Schema 提示组装与主表提取
     schema_hint, primary_tbl, related_tbls = build_schema_hint(user_q)
 
-    # 3. 经验与场景防漂移指引注入
     experiences_combined = "【已启用 GSSC 统一上下文引擎：相关的向量专家经验与外部便签线索已挂载于消息流尾部】"
+    golden_exp = _recall_golden_experience(tasks_list, user_q)
+    if golden_exp:
+        experiences_combined = f"{experiences_combined}\n\n{golden_exp}"
+
     scenario_guidelines = build_scenario_guidelines(user_q, scene_enforcement, audit_intent=audit_intent)
     if scenario_guidelines:
         experiences_combined = f"{experiences_combined}\n\n{scenario_guidelines}" if experiences_combined else scenario_guidelines

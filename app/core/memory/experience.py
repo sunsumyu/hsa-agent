@@ -43,6 +43,7 @@ class ExperienceManager:
         os.makedirs(os.path.dirname(POOL_FILE), exist_ok=True)
         self._adapter = vector_adapter or get_vector_adapter()
         self._vector_store: Optional[Any] = None
+        self._stats: Dict[str, int] = {"queries": 0, "hits": 0, "misses": 0}
 
     def _load_pool(self) -> List[dict]:
         """加载已持久化的经验池数据"""
@@ -107,6 +108,7 @@ class ExperienceManager:
             "intent": task_str,
             "golden_sql": sql,
             "ts": os.path.getmtime(POOL_FILE) if os.path.exists(POOL_FILE) else 0,
+            "hit_count": 0,
         }
         pool.append(entry)
 
@@ -136,12 +138,65 @@ class ExperienceManager:
         except Exception as e:
             logger.error(f"[经验库] 固化失败: {e}")
 
+    def _record_hits(self, matched_intents: List[str]) -> None:
+        """为命中的黄金经验条目递增 hit_count 并持久化回 pool.json。"""
+        if not matched_intents:
+            return
+        pool = self._load_pool()
+        if not pool:
+            return
+        intent_set = set(matched_intents)
+        changed = False
+        from datetime import datetime
+        now_iso = datetime.now().isoformat()
+        for entry in pool:
+            if entry.get("intent") in intent_set:
+                entry["hit_count"] = int(entry.get("hit_count", 0)) + 1
+                entry["last_hit_at"] = now_iso
+                changed = True
+        if changed:
+            try:
+                with open(POOL_FILE, "w", encoding="utf-8") as f:
+                    json.dump(pool, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.debug(f"[经验库] 命中计数持久化跳过: {e}")
+
+    def get_stats(self, top_n: int = 5) -> Dict[str, Any]:
+        """返回黄金经验池的命中率、总条目数与高频 SQL 统计。"""
+        pool = self._load_pool()
+        queries = self._stats["queries"]
+        hits = self._stats["hits"]
+        hit_rate = round(hits / queries, 4) if queries > 0 else 0.0
+        sorted_entries = sorted(
+            pool,
+            key=lambda x: int(x.get("hit_count", 0)),
+            reverse=True,
+        )[:top_n]
+        top_entries = [
+            {
+                "intent": str(e.get("intent", ""))[:80],
+                "hit_count": int(e.get("hit_count", 0)),
+                "last_hit_at": e.get("last_hit_at"),
+            }
+            for e in sorted_entries
+        ]
+        return {
+            "total_entries": len(pool),
+            "queries": queries,
+            "hits": hits,
+            "misses": self._stats["misses"],
+            "hit_rate": hit_rate,
+            "total_entry_hits": sum(int(e.get("hit_count", 0)) for e in pool),
+            "top_hit_entries": top_entries,
+        }
+
     def get_relevant_experience(self, tasks: List[str], k: int = 1) -> str:
         """[检索] 语义级找回历史成功案例 (Golden Examples)"""
         task_str = " ".join(tasks).strip()
         if not task_str:
             return ""
 
+        self._stats["queries"] += 1
         try:
             # 兼容外部测试 monkeypatch 了 _get_vector_store 的场景
             if self._is_vector_store_overridden():
@@ -155,18 +210,25 @@ class ExperienceManager:
                 results = self._adapter.search(INDEX_PATH, get_embeddings(), task_str, k=k)
 
             if not results:
+                self._stats["misses"] += 1
                 return ""
 
+            self._stats["hits"] += 1
+            matched_intents = []
             formatted = []
             for res in results:
                 meta = res.metadata
+                if meta.get("intent"):
+                    matched_intents.append(meta["intent"])
                 formatted.append(
                     f"### 参考历史成功案例 (Semantic Match):\n"
                     f"意图: {meta.get('intent', '')}\n"
                     f"SQL: \n```sql\n{meta.get('golden_sql', '')}\n```"
                 )
+            self._record_hits(matched_intents)
             return "\n\n".join(formatted)
         except Exception as e:
+            self._stats["misses"] += 1
             logger.error(f"[经验库] 检索失败: {e}")
             return ""
 

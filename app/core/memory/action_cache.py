@@ -41,6 +41,13 @@ class ActionCacheManager:
             if item.get("question")
         }
         self._engine = None
+        self._stats: Dict[str, Any] = {
+            "queries": 0,
+            "hits": 0,
+            "misses": 0,
+            "evictions": 0,
+            "hits_by_tier": {"L0": 0, "L0.5": 0, "L1": 0, "L2": 0},
+        }
 
     @staticmethod
     def normalize_question(q: str) -> str:
@@ -110,12 +117,57 @@ class ActionCacheManager:
         if canon_q in self.canonical_lookup:
             del self.canonical_lookup[canon_q]
         self.cache = [item for item in self.cache if item.get("question", "").strip() != q_strip]
+        self._stats["evictions"] += 1
         self._persist()
         try:
             redis_manager.delete(f"action_cache:{q_strip}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[ActionCacheManager] Redis delete skipped for {q_strip[:20]}: {exc}")
         logger.warning(f"🧹 [Action Cache] 契约断言未通过，已物理淘汰脏缓存: {question[:20]}...")
+
+    def _record_hit(self, item: Dict[str, Any], tier: str) -> None:
+        """记录单次命中统计并更新条目 hit_count。"""
+        self._stats["hits"] += 1
+        if tier in self._stats["hits_by_tier"]:
+            self._stats["hits_by_tier"][tier] += 1
+        item["hit_count"] = int(item.get("hit_count", 0)) + 1
+        item["last_hit_at"] = datetime.now().isoformat()
+        q_strip = str(item.get("question", "") or "").strip()
+        if q_strip and q_strip in self.lookup:
+            self.lookup[q_strip]["hit_count"] = item["hit_count"]
+            self.lookup[q_strip]["last_hit_at"] = item["last_hit_at"]
+            self._persist()
+
+    def get_stats(self, top_n: int = 5) -> Dict[str, Any]:
+        """返回动作语义缓存的实时命中率、分层命中分布与高频条目摘要。"""
+        queries = self._stats["queries"]
+        hits = self._stats["hits"]
+        hit_rate = round(hits / queries, 4) if queries > 0 else 0.0
+        sorted_entries = sorted(
+            self.cache,
+            key=lambda x: int(x.get("hit_count", 0)),
+            reverse=True,
+        )[:top_n]
+        top_entries = [
+            {
+                "question": str(e.get("question", ""))[:80],
+                "hit_count": int(e.get("hit_count", 0)),
+                "last_hit_at": e.get("last_hit_at"),
+                "prompt_version": e.get("prompt_version"),
+            }
+            for e in sorted_entries
+        ]
+        return {
+            "total_entries": len(self.cache),
+            "queries": queries,
+            "hits": hits,
+            "misses": self._stats["misses"],
+            "evictions": self._stats["evictions"],
+            "hit_rate": hit_rate,
+            "hits_by_tier": dict(self._stats["hits_by_tier"]),
+            "total_entry_hits": sum(int(e.get("hit_count", 0)) for e in self.cache),
+            "top_hit_entries": top_entries,
+        }
 
     def save(
         self,
@@ -134,6 +186,7 @@ class ActionCacheManager:
             except Exception:
                 emb = None
 
+        prev_item = self.lookup.get(q_strip) or {}
         item: Dict[str, Any] = {
             "question": question,
             "sql": sql,
@@ -141,7 +194,10 @@ class ActionCacheManager:
             "methodology": methodology,
             "embedding": emb,
             "timestamp": datetime.now().isoformat(),
+            "hit_count": int(prev_item.get("hit_count", 0)),
         }
+        if prev_item.get("last_hit_at"):
+            item["last_hit_at"] = prev_item["last_hit_at"]
         if fingerprint:
             item.update(fingerprint)
 
@@ -157,8 +213,8 @@ class ActionCacheManager:
         # 分布式同步
         try:
             redis_manager.set_cache(f"action_cache:{q_strip}", json.dumps(item), expire_hours=48)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[ActionCacheManager] Redis set_cache skipped for {q_strip[:20]}: {exc}")
         logger.success(f"💾 [Action Cache] 已固化审计动作链至缓存 (含指纹与规范化键): {question[:15]}...")
 
     def get_or_compute(
@@ -178,12 +234,16 @@ class ActionCacheManager:
            绑定新指纹并写回持久化存储；
         5. 返回有效结果。
         """
+        self._stats["queries"] += 1
         q_strip = question.strip()
+        hit_tier = "L0"
         matched_item = self.lookup.get(q_strip)
         if not matched_item:
             canon_q = self.normalize_question(q_strip)
             if canon_q:
                 matched_item = self.canonical_lookup.get(canon_q)
+                if matched_item:
+                    hit_tier = "L0.5"
 
         if matched_item:
             fingerprint_valid = True
@@ -198,13 +258,16 @@ class ActionCacheManager:
                 cached_sql = matched_item.get("sql", "")
                 if validator:
                     if validator(cached_sql):
+                        self._record_hit(matched_item, hit_tier)
                         return cached_sql
                     else:
                         logger.warning(f"⚠️ [Action Cache] 缓存内容未通过运行时契约校验，执行淘汰: {question[:20]}")
                         self.evict(question)
                 else:
+                    self._record_hit(matched_item, hit_tier)
                     return cached_sql
 
+        self._stats["misses"] += 1
         if computer:
             logger.info(f"⚙️ [Action Cache] 触发重新生成: {question[:20]}")
             computed_sql = computer()
@@ -215,29 +278,38 @@ class ActionCacheManager:
 
     def search(self, question: str, threshold: float = 0.85) -> Optional[Dict[str, Any]]:
         """[V159.0] 高性能语义搜索：返回完整的动作链载荷。"""
+        self._stats["queries"] += 1
         if not self.cache:
+            self._stats["misses"] += 1
             return None
 
         q_strip = question.strip()
         # A. 内存字典精确匹配 (L0)
         if q_strip in self.lookup:
             logger.success(f"⚡ [Action Cache] 字典精确命中: {question[:15]}...")
-            return self.lookup[q_strip]
+            item = self.lookup[q_strip]
+            self._record_hit(item, "L0")
+            return item
 
         # A.1 规范化意图匹配 (L0.5 极速语义命中，免除向量与网络计算)
         canon_q = self.normalize_question(q_strip)
         if canon_q and canon_q in self.canonical_lookup:
             logger.success(f"🎯 [Action Cache] 规范化意图直通命中 ({canon_q[:15]}...): {question[:15]}...")
-            return self.canonical_lookup[canon_q]
+            item = self.canonical_lookup[canon_q]
+            self._record_hit(item, "L0.5")
+            return item
 
         # B. Redis 分布式缓存匹配 (L1)
         cached_json = redis_manager.get_cache(f"action_cache:{q_strip}")
         if cached_json:
             logger.success(f"🚀 [REDIS] 动作链缓存命中: {question[:15]}...")
-            return json.loads(cached_json)
+            item = json.loads(cached_json)
+            self._record_hit(item, "L1")
+            return item
 
         # C. 语义相似度匹配 (L2)
         if not self.engine:
+            self._stats["misses"] += 1
             return None
 
         query_emb = np.array(self.engine.embed_query(question))
@@ -260,9 +332,11 @@ class ActionCacheManager:
                     best_score = score
                     best_item = item
 
-        if best_score >= threshold:
+        if best_score >= threshold and best_item is not None:
             logger.success(f"🔍 [Action Cache] 语义命中 (Score: {best_score:.2f}): {question[:15]}...")
+            self._record_hit(best_item, "L2")
             return best_item
+        self._stats["misses"] += 1
         return None
 
 

@@ -117,13 +117,12 @@ class ContextBuilder:
         logger.info(f"✅ [ContextBuilder] GSSC 治理成功！共精选出 {len(selected_packets)} 个黄金上下文信息包。")
         return structured_messages
 
-    def _gather_all(self, query: str, target_tables: List[str], history: List[BaseMessage], metadata: Dict[str, Any]) -> List[ContextPacket]:
-        packets = []
-
-        # 0. Gather Semantic Alignment Context (最高优先级，强保留)
+    def _gather_semantic_alignment_packets(self, metadata: Dict[str, Any]) -> List[ContextPacket]:
+        """收集高优先级的语义对齐上下文信息包。"""
         alignment = metadata.get("semantic_alignment")
-        if alignment:
-            alignment_xml = f"""<semantic_alignment_context>
+        if not alignment:
+            return []
+        alignment_xml = f"""<semantic_alignment_context>
   <explanation>{alignment.get('explanation', '')}</explanation>
   <disease_keywords>{', '.join(alignment.get('disease_keywords', []))}</disease_keywords>
   <aligned_icd10_codes>{', '.join(alignment.get('aligned_codes', []))}</aligned_icd10_codes>
@@ -131,23 +130,27 @@ class ContextBuilder:
   <baseline_strategy>{alignment.get('baseline_meta', {}).get('strategy', 'NONE')}</baseline_strategy>
   <phase1_baseline_sql>{alignment.get('baseline_meta', {}).get('phase1_baseline_sql', 'None')}</phase1_baseline_sql>
 </semantic_alignment_context>"""
-            packets.append(ContextPacket(
+        return [
+            ContextPacket(
                 content=alignment_xml,
                 relevance_score=1.0,
-                metadata={"type": "semantic_alignment", "priority": "high"}
-            ))
+                metadata={"type": "semantic_alignment", "priority": "high"},
+            )
+        ]
 
-        # 1. Gather ClickHouse Schemas
+    def _gather_schema_packets(
+        self, query: str, target_tables: List[str], metadata: Dict[str, Any]
+    ) -> List[ContextPacket]:
+        """收集场景表选择策略与确定性排序后的 ClickHouse Schema 包。"""
+        packets: List[ContextPacket] = []
         try:
             from app.core.registry.schema_registry import schema_registry
-            # [V2.0 NEW] 使用场景感知表选择器
             from app.core.scene_table_selector import scene_table_selector
 
-            # 如果没有指定 target_tables，使用场景感知选择
-            if not target_tables:
+            resolved_tables = target_tables
+            if not resolved_tables:
                 primary_table, all_tables = scene_table_selector.select_tables(query)
-                target_tables = all_tables
-                # [V2.0 NEW] 将场景强制提示注入 metadata
+                resolved_tables = all_tables
                 enforcement_hint = scene_table_selector.get_enforcement_hint(query)
                 if enforcement_hint:
                     metadata["scene_enforcement"] = enforcement_hint
@@ -155,76 +158,96 @@ class ContextBuilder:
                     packets.append(ContextPacket(
                         content=f"<table_selection_policy>\n{enforcement_hint.strip()}\n</table_selection_policy>",
                         relevance_score=1.0,
-                        metadata={"type": "scene_enforcement", "priority": "high"}
+                        metadata={"type": "scene_enforcement", "priority": "high"},
                     ))
             elif "scene_enforcement" in metadata:
                 packets.append(ContextPacket(
                     content=f"<table_selection_policy>\n{metadata['scene_enforcement'].strip()}\n</table_selection_policy>",
                     relevance_score=1.0,
-                    metadata={"type": "scene_enforcement", "priority": "high"}
+                    metadata={"type": "scene_enforcement", "priority": "high"},
                 ))
 
-            # [V227.0 Cache-Alignment] 确定性表排序：主表固化居首，辅助表按表名字母升序排列，实现跨查询 DDL 前缀字节级 100% 对齐
             main_tbl = schema_registry.get_main_table()
-            candidate_tables = target_tables if target_tables else [main_tbl]
-            sorted_tables = []
-            if main_tbl in candidate_tables:
-                sorted_tables.append(main_tbl)
-            for t in sorted(set(candidate_tables)):
-                if t != main_tbl:
-                    sorted_tables.append(t)
-            tables = sorted_tables
+            candidate_tables = resolved_tables if resolved_tables else [main_tbl]
+            sorted_tables = ([main_tbl] if main_tbl in candidate_tables else []) + [
+                t for t in sorted(set(candidate_tables)) if t != main_tbl
+            ]
 
-            for idx, table in enumerate(tables):
+            for idx, table in enumerate(sorted_tables):
                 entry = schema_registry.get_table(table)
-                if entry:
-                    # [V226.0 弹性分级] 前 2 张核心表注入完备字段；辅助表仅注入轻量头描述，节省 3000+ Tokens
-                    if idx < 2:
-                        detail_xml = self.selector.schema_to_xml(entry)
-                    else:
-                        detail_xml = self.selector.schema_to_header_only(entry)
-                    packets.append(ContextPacket(
-                        content=detail_xml,
-                        relevance_score=1.0 if idx == 0 else 0.8,
-                        metadata={"type": "clickhouse_schema", "table_name": table, "priority": "high" if idx == 0 else "medium"}
-                    ))
+                if not entry:
+                    continue
+                detail_xml = (
+                    self.selector.schema_to_xml(entry)
+                    if idx < 2
+                    else self.selector.schema_to_header_only(entry)
+                )
+                packets.append(ContextPacket(
+                    content=detail_xml,
+                    relevance_score=1.0 if idx == 0 else 0.8,
+                    metadata={"type": "clickhouse_schema", "table_name": table, "priority": "high" if idx == 0 else "medium"},
+                ))
         except Exception as e:
             logger.warning(f"⚠️ [ContextBuilder] Gather Schemas 失败: {e}")
+        return packets
 
-        # 2. Gather Cognitive Memories
+    def _gather_cognitive_memory_packets(self, query: str) -> List[ContextPacket]:
+        """从语义认知记忆库召回相关专家知识条目。"""
+        packets: List[ContextPacket] = []
         try:
             from app.core.memory.semantic_memory import cognitive_memory_manager
             cognitive_memory_manager._init_components()
             if cognitive_memory_manager.semantic:
-                docs = cognitive_memory_manager.semantic.recall_expert_knowledge(query)
-                for doc in docs:
-                    xml_mem = f'<experience>\n  {doc.page_content}\n</experience>'
+                for doc in cognitive_memory_manager.semantic.recall_expert_knowledge(query):
                     packets.append(ContextPacket(
-                        content=xml_mem,
+                        content=f"<experience>\n  {doc.page_content}\n</experience>",
                         relevance_score=0.7,
-                        metadata={"type": "cognitive_memory"}
+                        metadata={"type": "cognitive_memory"},
                     ))
         except Exception as e:
             logger.warning(f"⚠️ [ContextBuilder] Gather Memories 失败: {e}")
+        return packets
 
-        # 3. Gather NoteTool 外部便签簿里程碑 (最高优先级，强保留)
-        # [V216.0 Pocock 会话隔离] 在基准测试/缓存禁用模式下，跳过全局外部便签注入，杜绝跨场景脏状态污染
+    def _gather_experience_and_note_packets(self, query: str) -> List[ContextPacket]:
+        """在非隔离模式下召回黄金 SQL 经验范例与外部审计便签线索。"""
         is_isolated_mode = (
-            os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true" or
-            os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true"
+            os.getenv("DISABLE_AUDIT_CACHE", "false").lower() == "true"
+            or os.getenv("IS_BENCHMARK_MODE", "false").lower() == "true"
         )
-        if not is_isolated_mode:
-            from app.skills.federated.audit_note_store import audit_note_store
-            recent_notes = audit_note_store.read_relevant_notes(query=query, limit=3)
-            if recent_notes:
-                note_content_cleaned = "\n\n---\n\n".join(recent_notes)
-                logger.info("📓 [ContextBuilder] 成功 Gather 高优/相关外部审计便签线索")
-                packets.append(ContextPacket(
-                    content=note_content_cleaned,
-                    relevance_score=1.0,
-                    metadata={"type": "note_evidence", "priority": "high"}
-                ))
+        if is_isolated_mode:
+            return []
 
+        packets: List[ContextPacket] = []
+        try:
+            from app.core.memory.experience import experience_manager
+            golden_exp = experience_manager.get_relevant_experience([query], k=1)
+            if golden_exp:
+                packets.append(ContextPacket(
+                    content=f"<golden_sql_example>\n{golden_exp}\n</golden_sql_example>",
+                    relevance_score=0.85,
+                    metadata={"type": "golden_sql_experience"},
+                ))
+        except Exception as e:
+            logger.debug(f"[ContextBuilder] Gather Golden Experience 跳过: {e}")
+
+        from app.skills.federated.audit_note_store import audit_note_store
+        recent_notes = audit_note_store.read_relevant_notes(query=query, limit=3)
+        if recent_notes:
+            logger.info("📓 [ContextBuilder] 成功 Gather 高优/相关外部审计便签线索")
+            packets.append(ContextPacket(
+                content="\n\n---\n\n".join(recent_notes),
+                relevance_score=1.0,
+                metadata={"type": "note_evidence", "priority": "high"},
+            ))
+        return packets
+
+    def _gather_all(self, query: str, target_tables: List[str], history: List[BaseMessage], metadata: Dict[str, Any]) -> List[ContextPacket]:
+        """收集多源上下文候选信息包。"""
+        packets: List[ContextPacket] = []
+        packets.extend(self._gather_semantic_alignment_packets(metadata))
+        packets.extend(self._gather_schema_packets(query, target_tables, metadata))
+        packets.extend(self._gather_cognitive_memory_packets(query))
+        packets.extend(self._gather_experience_and_note_packets(query))
         return packets
 
     def _select_packets(self, packets: List[ContextPacket], query: str, budget: int) -> List[ContextPacket]:

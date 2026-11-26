@@ -72,3 +72,22 @@ async def trigger_forget(strategy: str = "combined", threshold: float = 0.2, max
     except Exception as e:
         logger.error(f"❌ [MemoryAPI] 遗忘引擎触发失败: {e}")
         return ResponseEnvelope.error(error=str(e), status_code=500)
+
+
+@router.get("/cache-stats")
+async def get_cache_and_experience_stats():
+    """
+    返回动作语义缓存 (action_cache) 与黄金经验池 (pool.json) 的命中次数与命中率统计。
+    """
+    try:
+        from app.core.memory.action_cache import action_cache_manager
+        from app.core.memory.experience import experience_manager
+        return ResponseEnvelope.success(
+            data={
+                "action_cache": action_cache_manager.get_stats(),
+                "experience_pool": experience_manager.get_stats(),
+            }
+        )
+    except Exception as e:
+        logger.error(f"❌ [MemoryAPI] 缓存统计采集失败: {e}")
+        return ResponseEnvelope.error(error=str(e), status_code=500)
