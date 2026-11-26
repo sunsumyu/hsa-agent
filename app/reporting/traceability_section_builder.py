@@ -14,6 +14,7 @@ app/reporting/traceability_section_builder.py
 from datetime import datetime
 import hashlib
 from typing import Any, Dict, List, Optional
+from loguru import logger
 
 # 默认风险评级阈值配置
 DEFAULT_RISK_THRESHOLDS: Dict[str, Dict[str, Any]] = {
@@ -152,8 +153,8 @@ def build_traceability_section(metadata: Optional[Dict[str, Any]]) -> str:
         try:
             time_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
             lines.append(f"| 执行时间戳 | {time_str} |")
-        except Exception:
-            pass
+        except (ValueError, TypeError, OverflowError, OSError) as exc:
+            logger.debug(f"[TraceabilitySection] Audit timestamp format skipped: {exc}")
 
     lines.append(f"| 物理算力节点 | `{model_id}` |")
     lines.append(f"| 全链路 TraceID | `{trace_id}` |")

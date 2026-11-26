@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+from loguru import logger
 
 
 from app.reporting.row_totals_extractor import (
@@ -109,8 +110,8 @@ class AuditMetricEvaluator:
                     try:
                         det_sum = float(sm.group(1).replace(",", ""))
                         break
-                    except ValueError:
-                        pass
+                    except ValueError as exc:
+                        logger.debug(f"[AuditMetricEvaluator] Report sum float cast skipped: {exc}")
 
         entity_coverage = 100.0
         if key_entities:

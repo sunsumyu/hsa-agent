@@ -261,8 +261,8 @@ def extract_file_content(path: str) -> str:
         content = getattr(result, "text_content", "")
         if content:
             return content
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"[RAGFusionRanker] MarkItDown parse fallback for {path}: {exc}")
 
     # Fallback: 基础文件读取
     try:

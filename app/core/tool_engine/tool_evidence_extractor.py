@@ -12,11 +12,12 @@ app/core/tool_engine/tool_evidence_extractor.py
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 import time
-import hashlib
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from loguru import logger
 from langchain_core.messages import ToolMessage
 
@@ -38,7 +39,7 @@ class ProcessedToolResults:
     execution_trace: List[str]
     has_error: bool
     error_msg: str
-    evidence_row_count: int = 0  # [证据对账] 证据通道中实际可解析的行数 (Append-Only 累加)
+    evidence_row_count: int = 0
     retrieved_citations: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -57,7 +58,6 @@ class ProcessedToolResults:
         }
 
     def __getitem__(self, item: str) -> Any:
-        """支持字典下标访问兼容现有代码"""
         return getattr(self, item)
 
     def get(self, item: str, default: Any = None) -> Any:
@@ -77,6 +77,48 @@ def _harvest_citations(
     return ledger
 
 
+def _parse_tool_payload(res: Any) -> Any:
+    if not (isinstance(res, str) and res.strip().startswith("{")):
+        return res
+    try:
+        return json.loads(res)
+    except (json.JSONDecodeError, ValueError, TypeError) as json_exc:
+        try:
+            return ast.literal_eval(res)
+        except (ValueError, SyntaxError, TypeError) as ast_exc:
+            logger.debug(f"[ToolEvidenceExtractor] Payload parse fallback skipped: json={json_exc}, ast={ast_exc}")
+            return res
+
+
+def _extract_non_probe_data(
+    parsed_res: Dict[str, Any],
+    truncate_fn: Callable[[Any], str],
+    warn_on_empty: bool = False,
+) -> Optional[str]:
+    sql_logic = parsed_res.get("sql_logic", "")
+    if sql_logic and is_probe_query(sql_logic):
+        if warn_on_empty:
+            logger.info(f"🔮 [EVIDENCE] Skipped probe query data extraction: {sql_logic[:80]}...")
+        return None
+    for data_field in ("data", "records_sample", "raw_evidence"):
+        if parsed_res.get(data_field):
+            return truncate_fn(parsed_res[data_field])
+    if warn_on_empty and parsed_res.get("status") == "SUCCESS":
+        logger.warning(f"🔮 [EVIDENCE] SUCCESS status but no data fields! Keys: {list(parsed_res.keys())}")
+    return None
+
+
+def _merge_append_only_raw_data(existing_raw: str, raw_data_list: List[str]) -> Tuple[str, bool, str]:
+    new_chunk = "\n---\n".join(raw_data_list) if raw_data_list else ""
+    if existing_raw and new_chunk:
+        if new_chunk.strip() not in existing_raw:
+            return f"{existing_raw}\n---\n{new_chunk}", True, new_chunk
+        return existing_raw, False, new_chunk
+    if new_chunk:
+        return new_chunk, True, new_chunk
+    return existing_raw, False, new_chunk
+
+
 class ToolEvidenceExtractor:
     """审计证据链提取与工具结果标准化深模块"""
 
@@ -89,112 +131,51 @@ class ToolEvidenceExtractor:
 
     def process(self, results: List[Tuple[Dict[str, Any], Any]], state: Dict[str, Any]) -> ProcessedToolResults:
         """执行工具响应解析与证据链归集"""
-        tool_msgs = []
-        raw_data_list = []
-        sql_logics = []
-        methodologies = []
-        tool_traces = []
-        has_error = False
-        error_msg = ""
+        tool_msgs, raw_data_list, sql_logics, methodologies, tool_traces = [], [], [], [], []
+        has_error, error_msg = False, ""
 
         for t_call, res in results:
             trace_id = hashlib.sha256(f"{t_call['name']}_{time.time()}".encode()).hexdigest()[:8].upper()
-            tool_msg = ToolMessage(content=str(res)[:2000], tool_call_id=t_call["id"])
-            tool_msgs.append(tool_msg)
+            tool_msgs.append(ToolMessage(content=str(res)[:2000], tool_call_id=t_call["id"]))
+            parsed_res = _parse_tool_payload(res)
+            if not isinstance(parsed_res, dict):
+                continue
+            if "sql_logic" in parsed_res:
+                sql_logics.append(parsed_res["sql_logic"])
+            if "methodology" in parsed_res:
+                methodologies.append(parsed_res["methodology"])
+            if "trace_hint" in parsed_res:
+                tool_traces.append(f"[{trace_id}] {parsed_res['trace_hint']}")
+            if parsed_res.get("status") == "ERROR":
+                has_error = True
+                error_msg = parsed_res.get("error_message") or "Tool execution failed"
+            extracted = _extract_non_probe_data(parsed_res, self.truncate_data, warn_on_empty=True)
+            if extracted:
+                raw_data_list.append(extracted)
 
-            parsed_res = res
-            if isinstance(res, str) and res.strip().startswith("{"):
-                try:
-                    parsed_res = json.loads(res)
-                except Exception:
-                    try:
-                        import ast
-                        parsed_res = ast.literal_eval(res)
-                    except Exception:
-                        pass
-
-            if isinstance(parsed_res, dict):
-                if "sql_logic" in parsed_res:
-                    sql_logics.append(parsed_res["sql_logic"])
-                if "methodology" in parsed_res:
-                    methodologies.append(parsed_res["methodology"])
-                if "trace_hint" in parsed_res:
-                    tool_traces.append(f"[{trace_id}] {parsed_res['trace_hint']}")
-                if parsed_res.get("status") == "ERROR":
-                    has_error = True
-                    error_msg = parsed_res.get("error_message") or "Tool execution failed"
-
-                sql_logic = parsed_res.get("sql_logic", "")
-                is_probe = bool(sql_logic and is_probe_query(sql_logic))
-
-                if not is_probe:
-                    data_extracted = False
-                    for field in ["data", "records_sample", "raw_evidence"]:
-                        if field in parsed_res and parsed_res[field]:
-                            raw_data_list.append(self.truncate_data(parsed_res[field]))
-                            data_extracted = True
-                            break
-                    if not data_extracted and parsed_res.get("status") == "SUCCESS":
-                        logger.warning(f"🔮 [EVIDENCE] SUCCESS status but no data fields! Keys: {list(parsed_res.keys())}")
-                else:
-                    logger.info(f"🔮 [EVIDENCE] Skipped probe query data extraction: {sql_logic[:80]}...")
-
-        # 委托核心审计 SQL 仲裁解析器
         accumulated_sql_history = state.get("sql_history", []) + sql_logics
         core_sql = resolve_core_audit_sql(accumulated_sql_history)
-
-        # 兜底保障：若所有结果被过滤导致 raw_data_list 为空，提取非探针结果
         if not raw_data_list:
-            for t_call, res in results:
-                parsed_res = res
-                if isinstance(res, str) and res.strip().startswith("{"):
-                    try:
-                        parsed_res = json.loads(res)
-                    except Exception:
-                        pass
+            for _, res in results:
+                parsed_res = _parse_tool_payload(res)
                 if isinstance(parsed_res, dict):
-                    sql_logic = parsed_res.get("sql_logic", "")
-                    if sql_logic and is_probe_query(sql_logic):
-                        continue  # 探针数据绝不作为业务证据兜底
-                    for field in ["data", "records_sample", "raw_evidence"]:
-                        if field in parsed_res and parsed_res[field]:
-                            raw_data_list.append(self.truncate_data(parsed_res[field]))
-                            break
+                    extracted = _extract_non_probe_data(parsed_res, self.truncate_data)
+                    if extracted:
+                        raw_data_list.append(extracted)
 
-        # [V180.0 Pocock 证据链保全] 多轮执行采用 Append-Only 累加保全，杜绝后序辅助探针覆盖核心金额证据
-        new_chunk = "\n---\n".join(raw_data_list) if raw_data_list else ""
-        existing_raw = state.get("raw_data", "")
-
-        appended = False
-        if existing_raw and new_chunk:
-            if new_chunk.strip() not in existing_raw:
-                new_raw_data = f"{existing_raw}\n---\n{new_chunk}"
-                appended = True
-            else:
-                new_raw_data = existing_raw
-        elif new_chunk:
-            new_raw_data = new_chunk
-            appended = True
-        else:
-            new_raw_data = existing_raw
-
-        # [证据对账] 用与 Reporter 完全相同的解析器统计通道实际可解析行数，Append-Only 累加。
-        # 截断损失由 truncate_evidence_data 的 total_records 汇总行自证；此处计数是解析丢失的对照基准。
+        new_raw_data, appended, new_chunk = _merge_append_only_raw_data(state.get("raw_data", ""), raw_data_list)
         carried_before = int(state.get("evidence_row_count") or 0)
-        if appended and new_chunk:
-            evidence_row_count = carried_before + len(RawDataSanitizer.sanitize_and_parse(new_chunk))
-        else:
-            evidence_row_count = carried_before
-
-        final_methodology = "\n\n".join(methodologies) if methodologies else state.get("methodology", "")
-
+        evidence_row_count = (
+            carried_before + len(RawDataSanitizer.sanitize_and_parse(new_chunk))
+            if (appended and new_chunk) else carried_before
+        )
         return ProcessedToolResults(
             tool_msgs=tool_msgs,
             raw_data=new_raw_data,
             evidence_row_count=evidence_row_count,
             sql_query=core_sql,
             sql_history=accumulated_sql_history,
-            methodology=final_methodology,
+            methodology="\n\n".join(methodologies) if methodologies else state.get("methodology", ""),
             execution_trace=state.get("execution_trace", []) + tool_traces,
             has_error=has_error,
             error_msg=error_msg,

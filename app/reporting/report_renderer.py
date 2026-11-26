@@ -44,6 +44,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from loguru import logger
 
 
 # ──────────────────────────────────────────────────────────
@@ -55,7 +56,6 @@ from app.reporting.policy_matcher import (
     match_visualization,
     build_actionable_steps,
 )
-from app.core.prompts import CONCLUSION_PROMPT
 
 
 # 风险等级阈值配置（可在实例化时覆盖）
@@ -389,8 +389,8 @@ class AuditReportRenderer:
                     try:
                         total += float(row[key] or 0)
                         break
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug(f"[AuditReportRenderer] Row amount parse skipped for key={key}: {exc}")
         return total
 
     def _extract_threshold_value(self, sql_query: Optional[str], methodology: Optional[str]) -> float:
