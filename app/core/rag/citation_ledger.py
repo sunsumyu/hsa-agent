@@ -17,7 +17,9 @@ _PREFIX_MAP: Dict[str, str] = {
 _LAW_BLOCK_RE = re.compile(
     r"\[CITE:(?P<cid>[a-z]+_[a-f0-9]+)\]\s*\[来源:\s*(?P<src>[^|\]]+)"
     r"(?:\s*\|\s*第(?P<page>\d+)页)?"
-    r"(?:\s*\|\s*哈希:\s*(?P<chash>[a-f0-9]+))?[^\]]*\]\s*\n\s*(?:条文|表格):\s*(?P<body>.*?)"
+    r"(?:\s*\|\s*哈希:\s*(?P<chash>[a-f0-9]+))?[^\]]*\]"
+    r"(?:\s*\|\s*\[哈希:\s*(?P<chash2>[a-f0-9]+)\])?"
+    r"\s*\n\s*(?:条文|表格):\s*(?P<body>.*?)"
     r"(?=\n\d+\.\s*\[CITE:|\n\[表\d+\]|\n（引用|\Z)",
     re.DOTALL,
 )
@@ -86,7 +88,7 @@ def _parse_law_blocks(output_text: str) -> List[CitationRecord]:
                 law_title=law_title,
                 article_num=article_num,
                 snippet=body[:300],
-                content_hash=m.group("chash") or make_content_hash(body),
+                content_hash=m.group("chash") or m.group("chash2") or make_content_hash(body),
             )
         )
     return records

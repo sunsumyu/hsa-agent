@@ -23,6 +23,7 @@ os.environ["HF_HUB_OFFLINE"] = "0"
 from sentence_transformers import SentenceTransformer
 from app.core.memory.storage.vector import VectorStorage
 from app.core.memory.base import MemoryItem
+from app.core.rag.citation_ledger import extract_law_and_article, make_content_hash
 
 INPUT_CORPUS_FILE = "data/knowledge_base/regulations/official_hsa_regulations_corpus.md"
 MASSIVE_STORAGE_DIR = "data/official_vector_storage"
@@ -40,6 +41,34 @@ class RealEmbedder:
         return self.model.encode(texts).tolist()
 
 
+def _build_chunk_record(
+    filepath: str,
+    chunk_index: int,
+    part: str,
+    chapter: str,
+    title: str,
+    body_text: str,
+) -> dict:
+    """构造带确定性溯源元数据的语义切片记录。"""
+    source = os.path.basename(filepath)
+    heading_path = f"{part} > {chapter} > {title}"
+    law_title, article_num = extract_law_and_article(f"{heading_path}\n{body_text}", source)
+    return {
+        "doc_id": os.path.splitext(source)[0],
+        "source": source,
+        "chunk_index": chunk_index,
+        "heading_path": heading_path,
+        "law_title": law_title,
+        "article_num": article_num,
+        "content_hash": make_content_hash(body_text),
+        "part": part,
+        "chapter": chapter,
+        "title": title,
+        "text": body_text,
+        "char_count": len(body_text),
+    }
+
+
 def perform_semantic_chunking(filepath: str):
     """
     语义层级切块核心算法：
@@ -47,11 +76,9 @@ def perform_semantic_chunking(filepath: str):
     同时向前继承其所属的 '## ' 和 '### ' 章节父标题。
     """
     with open(filepath, "r", encoding="utf-8") as f:
-        content = f.read()
+        lines = f.read().split("\n")
 
     chunks = []
-    lines = content.split("\n")
-
     current_part = "未分类大编"
     current_chapter = "未分类章节"
     current_title = ""
@@ -63,35 +90,17 @@ def perform_semantic_chunking(filepath: str):
         elif line.startswith("### "):
             current_chapter = line.replace("### ", "").strip()
         elif line.startswith("#### "):
-            # 遇到了新的法条，保存上一个切片
-            if current_title and current_buffer:
-                body_text = "\n".join(current_buffer).strip()
-                if len(body_text) > 30:  # 过滤无意义空白块
-                    chunks.append({
-                        "part": current_part,
-                        "chapter": current_chapter,
-                        "title": current_title,
-                        "text": body_text,
-                        "char_count": len(body_text)
-                    })
-            # 开启新切片
+            body_text = "\n".join(current_buffer).strip()
+            if current_title and len(body_text) > 30:
+                chunks.append(_build_chunk_record(filepath, len(chunks), current_part, current_chapter, current_title, body_text))
             current_title = line.replace("#### ", "").strip()
             current_buffer = []
-        else:
-            if current_title:
-                current_buffer.append(line)
+        elif current_title:
+            current_buffer.append(line)
 
-    # 保存最后一个切片
-    if current_title and current_buffer:
-        body_text = "\n".join(current_buffer).strip()
-        if len(body_text) > 30:
-            chunks.append({
-                "part": current_part,
-                "chapter": current_chapter,
-                "title": current_title,
-                "text": body_text,
-                "char_count": len(body_text)
-            })
+    body_text = "\n".join(current_buffer).strip()
+    if current_title and len(body_text) > 30:
+        chunks.append(_build_chunk_record(filepath, len(chunks), current_part, current_chapter, current_title, body_text))
 
     return chunks
 

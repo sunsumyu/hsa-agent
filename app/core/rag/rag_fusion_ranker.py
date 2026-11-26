@@ -223,20 +223,24 @@ def deduplicate_and_rank_hits(hits: List[Any], limit: int = 5) -> List[Any]:
 
 
 def render_rag_report(sorted_hits: List[Any], expansion_count: int = 1) -> str:
-    """
-    将排序后的 RAG 命中项渲染为结构化报告。
-    """
+    """将排序后的 RAG 命中项渲染为带确定性 [CITE:<id>] 锚点的结构化报告。"""
     if not sorted_hits:
         return "🔍 [RAG] 未在知识库中找到相关合规性依据。"
+
+    from app.core.rag.citation_ledger import make_citation_id, make_content_hash
 
     formatted = [f"【RAG 专家检索报告 - 基于 {expansion_count} 组查询扩展】"]
     for i, item in enumerate(sorted_hits, 1):
         metadata = getattr(item, "metadata", {}) or {}
-        source = metadata.get("source", "Unknown")
-        path = metadata.get("heading_path", "ROOT")
+        source = str(metadata.get("source", "Unknown"))
+        path = str(metadata.get("heading_path", "ROOT"))
         content = getattr(item, "content", "")
         content_str = content.strip() if isinstance(content, str) else str(content)
-        formatted.append(f"{i}. [来源: {source}] | [层级: {path}]\n   内容: {content_str}\n")
+        cid = str(metadata.get("citation_id") or make_citation_id("vector_rag", source, path, content_str))
+        chash = str(metadata.get("content_hash") or make_content_hash(content_str))
+        formatted.append(
+            f"{i}. [CITE:{cid}] [来源: {source}] | [层级: {path}] | [哈希: {chash}]\n   内容: {content_str}\n"
+        )
 
     return "\n".join(formatted)
 

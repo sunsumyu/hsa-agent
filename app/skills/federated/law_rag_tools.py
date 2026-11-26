@@ -39,8 +39,16 @@ def _client() -> httpx.AsyncClient:
     return _http_client
 
 
+def _truncate_law_text(raw_text: Optional[str]) -> str:
+    """规范化并按上限截断法规条文或表格文本。"""
+    text = (raw_text or "").strip()
+    if len(text) > CONTENT_MAX_CHARS:
+        return text[:CONTENT_MAX_CHARS] + "…"
+    return text
+
+
 def _render_law_report(payload: dict, query: str, top_k: int) -> str:
-    """把 /api/search 响应渲染为法规条文报告（对齐 render_rag_report 风格）"""
+    """把 /api/search 响应渲染为带 [CITE:<id>] 锚点的法规条文报告（对齐 render_rag_report 风格）"""
     text_hits = payload.get("text_results") or []
     table_hits = payload.get("table_results") or []
 
@@ -52,27 +60,29 @@ def _render_law_report(payload: dict, query: str, top_k: int) -> str:
             + "。"
         )
 
+    from app.core.rag.citation_ledger import make_citation_id, make_content_hash
+
     lines = [f"【法规库检索报告 - 「{query}」 Top {min(top_k, len(text_hits))} 条命中】"]
     for i, hit in enumerate(text_hits, 1):
         source = hit.get("source", "Unknown")
         page = hit.get("page_num")
         page_note = f" | 第{page}页" if page else ""
-        content = (hit.get("text") or "").strip()
-        if len(content) > CONTENT_MAX_CHARS:
-            content = content[:CONTENT_MAX_CHARS] + "…"
-        lines.append(f"{i}. [来源: {source}{page_note}]\n   条文: {content}\n")
+        content = _truncate_law_text(hit.get("text"))
+        cid = make_citation_id("law_rag", source, str(page or ""), content)
+        chash = make_content_hash(content)
+        lines.append(f"{i}. [CITE:{cid}] [来源: {source}{page_note}] | [哈希: {chash}]\n   条文: {content}\n")
 
     for j, tb in enumerate(table_hits[:2], 1):
         header = (tb.get("header") or "").strip()
         source = tb.get("source", "Unknown")
         page = tb.get("page_num")
         page_note = f" | 第{page}页" if page else ""
-        text = (tb.get("text") or "").strip()
-        if len(text) > CONTENT_MAX_CHARS:
-            text = text[:CONTENT_MAX_CHARS] + "…"
-        lines.append(f"[表{j}] [来源: {source}{page_note} | 表头: {header}]\n   表格: {text}\n")
+        text = _truncate_law_text(tb.get("text"))
+        cid = make_citation_id("law_rag", source, f"{page or ''}|{header}", text)
+        chash = make_content_hash(text)
+        lines.append(f"[表{j}] [CITE:{cid}] [来源: {source}{page_note} | 表头: {header}] | [哈希: {chash}]\n   表格: {text}\n")
 
-    lines.append("（引用上述条文时请标注法规名称与页码，作为审计判定的政策对齐依据）")
+    lines.append("（引用上述条文时请标注 [CITE:xxx] 编号、法规名称与页码，作为审计判定的政策对齐依据）")
     return "\n".join(lines)
 
 
