@@ -115,6 +115,27 @@ def _resolve_effective_conclusion(rendered: Any, fallback: str) -> str:
     return fallback
 
 
+def _build_report_audit_metadata(state: Dict[str, Any]) -> Dict[str, Any]:
+    """合并末条 AI 消息元数据与检索引用台账。"""
+    messages = state.get("messages", [])
+    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
+    return {
+        **dict(getattr(last_ai, "additional_kwargs", {}) or {}),
+        "retrieved_citations": list(state.get("retrieved_citations") or []),
+    }
+
+
+def _verify_semantic_alignment(
+    state: Dict[str, Any], effective_conclusion: str, is_restricted: bool
+) -> None:
+    """在非受限结论下校验报告语义与 SQL 逻辑是否一致。"""
+    if is_restricted:
+        return
+    is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), effective_conclusion)
+    if not is_aligned:
+        logger.warning("🚨 [SEMANTIC_MISMATCH] 报告语义偏离")
+
+
 async def orchestrate_standard_report(
     state: Dict[str, Any],
     config: Any,
@@ -126,12 +147,10 @@ async def orchestrate_standard_report(
     raw_data_list = report_renderer.clean_and_parse_raw_data(state.get("raw_data"))
     hard_count, hard_sum = AuditMetricEvaluator.extract_totals(raw_data_list)
 
-    # [证据对账] 双源交叉核对, 解析丢失不留静默缺口
     reconcile_msg = reconcile_evidence_counts(len(raw_data_list), state.get("evidence_row_count"))
     if reconcile_msg:
         logger.warning(f"🚨 [EVIDENCE_RECONCILE] {reconcile_msg}")
 
-    # 1. 仲裁与生成审计结论 [Matt Pocock Deep Module: conclusion_orchestrator]
     llm_conclusion, is_restricted = await resolve_conclusion(
         state=state,
         raw_data_list=raw_data_list,
@@ -143,59 +162,40 @@ async def orchestrate_standard_report(
 
     metadata = state.get("metadata") or {}
     user_question = metadata.get("user_question") or "医保专项审计"
-
-    messages = state.get("messages", [])
-    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-    audit_meta = {
-        **dict(getattr(last_ai, "additional_kwargs", {}) or {}),
-        "retrieved_citations": list(state.get("retrieved_citations") or []),
-    }
-
-    methodology = state.get("methodology", "基础核查逻辑")
-    execution_trace = state.get("execution_trace") or []
-    format_pref = resolve_format_preference(state)
-
-    # 3. 渲染结构化报告
     rendered = report_renderer.render(
         user_question=user_question,
         llm_conclusion=llm_conclusion,
         raw_data=raw_data_list,
         sql_query=state.get("sql_query"),
         sql_history=state.get("sql_history", []),
-        methodology=methodology,
+        methodology=state.get("methodology", "基础核查逻辑"),
         table_info=f"{schema_registry.get_main_table()}",
         total_amount=hard_sum,
         finding_count=hard_count,
-        execution_trace=execution_trace,
-        audit_metadata=audit_meta,
+        execution_trace=state.get("execution_trace") or [],
+        audit_metadata=_build_report_audit_metadata(state),
         semantic_alignment=metadata.get("semantic_alignment"),
         raw_data_str=state.get("raw_data"),
         is_restricted=is_restricted,
-        format_preference=format_pref
+        format_preference=resolve_format_preference(state),
     )
 
     effective_conclusion = _resolve_effective_conclusion(rendered, llm_conclusion)
-
-    if not is_restricted:
-        is_aligned, _ = booster.verify_semantic_alignment(state.get("sql_query"), effective_conclusion)
-        if not is_aligned:
-            logger.warning("🚨 [SEMANTIC_MISMATCH] 报告语义偏离")
-
-    key_entities = extract_key_entities(raw_data_list)
+    _verify_semantic_alignment(state, effective_conclusion, is_restricted)
     commit_patch = create_turn_commit_patch(
         state=state,
         user_query=user_question,
         summary_conclusion=effective_conclusion,
         hard_count=hard_count,
         hard_sum=hard_sum,
-        key_entities=key_entities,
-        core_sql=state.get("sql_query")
+        key_entities=extract_key_entities(raw_data_list),
+        core_sql=state.get("sql_query"),
     )
 
     return {
         "structured_report": rendered,
         "messages": [AIMessage(content=rendered.markdown)],
-        **commit_patch
+        **commit_patch,
     }
 
 

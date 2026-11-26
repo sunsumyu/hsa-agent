@@ -124,8 +124,8 @@ class UsageTracker:
                             rem = 0
                             try:
                                 rem = int(remaining.replace(",", ""))
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug(f"[UsageTracker] Failed to parse cloud remaining tokens for {name}: {exc}")
                             all_endpoints[name] = ModelConfig(
                                 provider=platform if platform else "unknown",
                                 model_name=name,

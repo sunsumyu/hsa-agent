@@ -83,7 +83,7 @@ class CharsetProxy:
                 # 已经是 UTF-8 或无法修复，直接返回清理后的字符串，忽略非法字符
                 try:
                     return item.encode('utf-8', 'ignore').decode('utf-8')
-                except:
+                except Exception:
                     return str(item)
         elif isinstance(item, list):
             return [self._normalize_item(i) for i in item]
@@ -172,8 +172,8 @@ class CharsetProxy:
         """非查询路径失败后尽力刷新全局客户端 (不重试当前操作, 写入非幂等)。"""
         try:
             _rebuild_after_failure(self)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[DB_CONN] Quiet client refresh failed: {exc}")
 
 def _make_http_pool():
     """[方案1] 显式 HTTP 连接池。
@@ -191,12 +191,91 @@ def _make_http_pool():
         return None
 
 
-def _build_raw_client():
-    """三路径探测链 (Native 9000 → WSL HTTP → localhost HTTP), 返回已验证的原始客户端。
+def _try_connect_native(host: str, user: str, password: str, database: str, readonly_val: int):
+    """路径 1: Native 协议 (Port 9000) 探测与连接。"""
+    import socket
 
-    失败冷却 [方案4]: 距上次建连失败不足 _CK_BUILD_COOLDOWN_S 秒时直接快速失败,
-    不再执行 socket 预检 / WSL 子进程 / HTTP 的完整探测链 (防下线期重建风暴)。
-    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            if s.connect_ex((host, 9000)) != 0:
+                logger.debug(f"[DB_CONN] 跳过路径 1: {host}:9000 未开放")
+                return None
+            logger.info(f"🔌 [DB_CONN] 路径 1: 尝试 Native 协议 ({host}:9000)...")
+            import clickhouse_driver
+
+            client = clickhouse_driver.Client(
+                host=host,
+                port=9000,
+                user=user,
+                password=password,
+                database=database,
+                connect_timeout=3,
+                send_receive_timeout=5,
+                settings={"readonly": readonly_val},
+            )
+            client.execute("SELECT 1")
+            logger.success("✅ [DB_CONN] 路径 1 (Native 9000) 连接成功！")
+            return client
+    except Exception as e1:
+        logger.warning(f"⚠️ [DB_CONN] 路径 1 (Native) 失败: {e1}")
+        return None
+
+
+def _try_connect_wsl_http(user: str, password: str, database: str, readonly_val: int):
+    """路径 2: 探测 WSL IP 直连 HTTP (Port 8123)。"""
+    try:
+        import subprocess
+
+        logger.info("🔌 [DB_CONN] 路径 2: 探测 WSL IP 直连 (HTTP)...")
+        res = subprocess.run(["wsl", "hostname", "-I"], capture_output=True, text=True, timeout=3)
+        for wsl_ip in (res.stdout.split() if res.stdout else []):
+            try:
+                logger.info(f"🔗 [DB_CONN] 尝试连接 WSL IP: {wsl_ip}")
+                client = clickhouse_connect.get_client(
+                    host=wsl_ip,
+                    port=8123,
+                    username=user,
+                    password=password,
+                    database=database,
+                    connect_timeout=3,
+                    settings={"readonly": readonly_val},
+                    pool_mgr=_make_http_pool(),
+                )
+                logger.success(f"✅ [DB_CONN] 路径 2 ({wsl_ip}) 连接成功！")
+                return client
+            except Exception:
+                continue
+    except Exception as e_wsl:
+        logger.warning(f"⚠️ [DB_CONN] 路径 2 (WSL IP) 探测失败: {e_wsl}")
+    return None
+
+
+def _connect_localhost_http(user: str, password: str, database: str, readonly_val: int):
+    """路径 3: 标准 localhost HTTP 回退连接。"""
+    http_port = int(_os.getenv("CLICKHOUSE_HTTP_PORT", _os.getenv("CLICKHOUSE_PORT", "8223")))
+    try:
+        logger.info(f"🔌 [DB_CONN] 路径 3: localhost:{http_port} (HTTP)...")
+        client = clickhouse_connect.get_client(
+            host='localhost',
+            port=http_port,
+            username=user,
+            password=password,
+            database=database,
+            connect_timeout=3,
+            settings={"readonly": readonly_val},
+            pool_mgr=_make_http_pool(),
+        )
+        client.query("SELECT 1")
+        logger.success("✅ [DB_CONN] 路径 3 连接成功！")
+        return client
+    except Exception as e3:
+        logger.error(f"❌ [DB_CONN] 所有路径均告失败。最后报错: {e3}")
+        raise RuntimeError("无法建立 ClickHouse 连接。请检查服务是否开启。")
+
+
+def _build_raw_client():
+    """三路径探测链 (Native 9000 → WSL HTTP → localhost HTTP), 返回已验证的原始客户端。"""
     global _CK_LAST_BUILD_FAIL_TS
     if time.time() - _CK_LAST_BUILD_FAIL_TS < _CK_BUILD_COOLDOWN_S:
         raise RuntimeError(
@@ -208,70 +287,13 @@ def _build_raw_client():
         user = _os.getenv("CLICKHOUSE_USER", "default")
         password = _os.getenv("CLICKHOUSE_PASSWORD", "")
         database = _os.getenv("CLICKHOUSE_DB", "default")
-
-        # ── [V110.6] 物理自愈：优先使用 Native 协议（Port 9000） ──────────────────
-        client = None
         readonly_val = 0 if _os.getenv("ARGUS_DB_READWRITE") == "true" else 1
 
-        # 路径 1: Native 协议 (Port 9000) - 经测试在该环境最稳定，避开 8123 端口冲突
-        try:
-            import socket
-            # [V131.2] 预检：先通过 Socket 探测端口是否开放，避免 clickhouse-driver 打印内部 Traceback
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(1.0)
-                if s.connect_ex((host, 9000)) == 0:
-                    logger.info(f"🔌 [DB_CONN] 路径 1: 尝试 Native 协议 ({host}:9000)...")
-                    import clickhouse_driver
-                    client = clickhouse_driver.Client(
-                        host=host, port=9000, user=user, password=password, database=database,
-                        connect_timeout=3, send_receive_timeout=5, settings={"readonly": readonly_val}
-                    )
-                    client.execute("SELECT 1")
-                    logger.success("✅ [DB_CONN] 路径 1 (Native 9000) 连接成功！")
-                else:
-                    logger.debug(f"[DB_CONN] 跳过路径 1: {host}:9000 未开放")
-                    client = None
-        except Exception as e1:
-            logger.warning(f"⚠️ [DB_CONN] 路径 1 (Native) 失败: {e1}")
-            client = None
-
-        # 路径 2: 探测 WSL IP (HTTP 8123)
-        if not client:
-            try:
-                import subprocess
-                logger.info("🔌 [DB_CONN] 路径 2: 探测 WSL IP 直连 (HTTP)...")
-                res = subprocess.run(["wsl", "hostname", "-I"], capture_output=True, text=True, timeout=3)
-                wsl_ips = res.stdout.split() if res.stdout else []
-                for wsl_ip in wsl_ips:
-                    try:
-                        logger.info(f"🔗 [DB_CONN] 尝试连接 WSL IP: {wsl_ip}")
-                        client = clickhouse_connect.get_client(
-                            host=wsl_ip, port=8123, username=user, password=password, database=database,
-                            connect_timeout=3, settings={"readonly": readonly_val},
-                            pool_mgr=_make_http_pool(),
-                        )
-                        logger.success(f"✅ [DB_CONN] 路径 2 ({wsl_ip}) 连接成功！")
-                        break
-                    except Exception: continue
-            except Exception as e_wsl:
-                logger.warning(f"⚠️ [DB_CONN] 路径 2 (WSL IP) 探测失败: {e_wsl}")
-
-        # 路径 3: 标准 localhost (HTTP)
-        if not client:
-            http_port = int(_os.getenv("CLICKHOUSE_HTTP_PORT", _os.getenv("CLICKHOUSE_PORT", "8223")))
-            try:
-                logger.info(f"🔌 [DB_CONN] 路径 3: localhost:{http_port} (HTTP)...")
-                client = clickhouse_connect.get_client(
-                    host='localhost', port=http_port, username=user, password=password, database=database,
-                    connect_timeout=3, settings={"readonly": readonly_val},
-                    pool_mgr=_make_http_pool(),
-                )
-                client.query("SELECT 1")
-                logger.success("✅ [DB_CONN] 路径 3 连接成功！")
-            except Exception as e3:
-                logger.error(f"❌ [DB_CONN] 所有路径均告失败。最后报错: {e3}")
-                raise RuntimeError(f"无法建立 ClickHouse 连接。请检查服务是否开启。")
-
+        client = (
+            _try_connect_native(host, user, password, database, readonly_val)
+            or _try_connect_wsl_http(user, password, database, readonly_val)
+            or _connect_localhost_http(user, password, database, readonly_val)
+        )
         _CK_LAST_BUILD_FAIL_TS = 0.0
         return client
     except Exception:

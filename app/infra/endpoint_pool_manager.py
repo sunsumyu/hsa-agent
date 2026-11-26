@@ -232,8 +232,8 @@ class EndpointPoolManager:
                     if isinstance(name, str):
                         # 尝试将 latin1 编码的乱码还原为 UTF-8
                         name = name.encode('latin1').decode('utf-8')
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"[EndpointPoolManager] Endpoint name latin1->utf8 decode skipped: {exc}")
                 
                 remote_endpoints[item.id] = {
                     "name": name,

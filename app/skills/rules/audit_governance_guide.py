@@ -13,6 +13,7 @@ app/skills/audit_governance_guide.py
 from __future__ import annotations
 
 from typing import Any, List
+from loguru import logger
 
 
 class AuditGovernanceGuide:
@@ -58,8 +59,8 @@ class AuditGovernanceGuide:
             graph_hints = mgr.get_audit_graph_hints()
             if graph_hints:
                 lines.append(graph_hints.strip())
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[AuditGovernanceGuide] Neo4j graph hints unavailable: {exc}")
 
         # 3. 企业级审计红线
         lines.append("\n## 🛑 [企业级审计红线] 严禁违反以下物理逻辑，否则召回率将严重不足：")

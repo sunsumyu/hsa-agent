@@ -164,8 +164,8 @@ class SchemaRegistry:
                 for t, dyn_cols in schema_manager._schema_cache.items():
                     if t.lower() == table_name.lower():
                         cols.update([c.lower() for c in dyn_cols])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[SchemaRegistry] Dynamic schema cache lookup skipped for {table_name}: {exc}")
         return sorted(cols)
 
     def reload(self) -> None:

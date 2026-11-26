@@ -32,6 +32,47 @@ class VisualizationTopic:
         return any(kw in q for kw in self.keywords)
 
 
+_DEFAULT_TOPIC_SPECS = (
+    (
+        "family_fraud",
+        ["家族", "套保", "团伙", "地址", "手机号", "电话", "画出来", "关系网", "图谱"],
+        lambda count, q: _viz_family_fraud_positive() if count > 0 else _viz_family_fraud_zero(),
+    ),
+    (
+        "surgeon_timeline",
+        ["手术", "主刀", "时长", "时间轴", "资质", "连轴转", "分身术", "冲突", "重叠"],
+        lambda count, q: _viz_surgeon_overlap() if ("分身" in q or "冲突" in q or "重叠" in q) else _viz_surgeon_workload(),
+    ),
+    (
+        "therapy_overlap",
+        ["理疗", "康复", "手法", "按摩", "推拿"],
+        lambda count, q: _viz_therapy_overlap() if count > 0 else _viz_therapy_normal(),
+    ),
+    (
+        "batch_billing",
+        ["批量", "连续", "快速", "秒级", "时序异常", "刷卡", "刷单"],
+        lambda count, q: _viz_batch_billing_positive() if count > 0 else _viz_batch_billing_zero(),
+    ),
+    ("pharmacy_inventory", ["进销存", "库存倒挂", "负库存", "无中生有", "大药房"], lambda count, q: _viz_pharmacy_inventory()),
+    ("duplicate_testing", ["重复检查", "检查结果互认", "增强ct", "核磁共振", "大型检查"], lambda count, q: _viz_duplicate_testing()),
+    ("malicious_transfer", ["转院", "盈亏临界点", "推诿", "肿瘤", "重症"], lambda count, q: _viz_transfer_loop()),
+    ("consumables_match", ["不用工具", "耗材", "匹配", "配对", "钛板", "钛钉", "耗材缺失"], lambda count, q: _viz_consumables_match()),
+    ("dental_chart", ["牙", "拔牙", "口腔"], lambda count, q: _viz_dental_chart()),
+    ("icu_bundled", ["icu", "重症", "双头", "重复收费", "抢救", "打包"], lambda count, q: _viz_icu_bundled()),
+    (
+        "medication_hoarding",
+        ["跨院", "重复开药", "慢病", "时间窗", "滚动", "囤药"],
+        lambda count, q: _viz_medication_hoarding() if count > 0 else _viz_medication_hoarding_zero(),
+    ),
+    ("drg_revolving", ["drg", "假出院", "出院", "入院", "48小时", "再次"], lambda count, q: _viz_drg_revolving()),
+    (
+        "high_value_ranking",
+        ["大额", "排名", "结算金额", "最高", "金额排名", "频繁", "异常案件"],
+        lambda count, q: _viz_high_value_ranking_positive() if count > 0 else _viz_high_value_ranking_zero(),
+    ),
+)
+
+
 class AuditVisualizationRegistry:
     """反欺诈可视化模板策略注册中心深模块"""
 
@@ -65,97 +106,9 @@ class AuditVisualizationRegistry:
         return ""
 
     def _register_default_topics(self) -> None:
-        """注册 13 个系统内置的医保反欺诈 Mermaid 可视化专题"""
-        # A. 关系网络（家族套保、共享电话/地址等）
-        self.register(VisualizationTopic(
-            topic_id="family_fraud",
-            keywords=["家族", "套保", "团伙", "地址", "手机号", "电话", "画出来", "关系网", "图谱"],
-            renderer=lambda count, q: _viz_family_fraud_positive() if count > 0 else _viz_family_fraud_zero()
-        ))
-
-        # B. 手术时间轴 / 主刀冲突与工作负荷极限
-        self.register(VisualizationTopic(
-            topic_id="surgeon_timeline",
-            keywords=["手术", "主刀", "时长", "时间轴", "资质", "连轴转", "分身术", "冲突", "重叠"],
-            renderer=lambda count, q: _viz_surgeon_overlap() if ("分身" in q or "冲突" in q or "重叠" in q) else _viz_surgeon_workload()
-        ))
-
-        # C. 理疗/康复重叠
-        self.register(VisualizationTopic(
-            topic_id="therapy_overlap",
-            keywords=["理疗", "康复", "手法", "按摩", "推拿"],
-            renderer=lambda count, q: _viz_therapy_overlap() if count > 0 else _viz_therapy_normal()
-        ))
-
-        # D. 批量刷卡 / 秒级时序
-        self.register(VisualizationTopic(
-            topic_id="batch_billing",
-            keywords=["批量", "连续", "快速", "秒级", "时序异常", "刷卡", "刷单"],
-            renderer=lambda count, q: _viz_batch_billing_positive() if count > 0 else _viz_batch_billing_zero()
-        ))
-
-        # E. 药店进销存
-        self.register(VisualizationTopic(
-            topic_id="pharmacy_inventory",
-            keywords=["进销存", "库存倒挂", "负库存", "无中生有", "大药房"],
-            renderer=lambda count, q: _viz_pharmacy_inventory()
-        ))
-
-        # F. 重复检查 / 互认
-        self.register(VisualizationTopic(
-            topic_id="duplicate_testing",
-            keywords=["重复检查", "检查结果互认", "增强ct", "核磁共振", "大型检查"],
-            renderer=lambda count, q: _viz_duplicate_testing()
-        ))
-
-        # G. 恶意转院
-        self.register(VisualizationTopic(
-            topic_id="malicious_transfer",
-            keywords=["转院", "盈亏临界点", "推诿", "肿瘤", "重症"],
-            renderer=lambda count, q: _viz_transfer_loop()
-        ))
-
-        # H. 耗材匹配
-        self.register(VisualizationTopic(
-            topic_id="consumables_match",
-            keywords=["不用工具", "耗材", "匹配", "配对", "钛板", "钛钉", "耗材缺失"],
-            renderer=lambda count, q: _viz_consumables_match()
-        ))
-
-        # I. 牙科
-        self.register(VisualizationTopic(
-            topic_id="dental_chart",
-            keywords=["牙", "拔牙", "口腔"],
-            renderer=lambda count, q: _viz_dental_chart()
-        ))
-
-        # J. ICU 打包重复收费
-        self.register(VisualizationTopic(
-            topic_id="icu_bundled",
-            keywords=["icu", "重症", "双头", "重复收费", "抢救", "打包"],
-            renderer=lambda count, q: _viz_icu_bundled()
-        ))
-
-        # K. 跨院开药囤药
-        self.register(VisualizationTopic(
-            topic_id="medication_hoarding",
-            keywords=["跨院", "重复开药", "慢病", "时间窗", "滚动", "囤药"],
-            renderer=lambda count, q: _viz_medication_hoarding() if count > 0 else _viz_medication_hoarding_zero()
-        ))
-
-        # L. DRG 假出院 / 分解住院
-        self.register(VisualizationTopic(
-            topic_id="drg_revolving",
-            keywords=["drg", "假出院", "出院", "入院", "48小时", "再次"],
-            renderer=lambda count, q: _viz_drg_revolving()
-        ))
-
-        # M. 大额结算排名与频次
-        self.register(VisualizationTopic(
-            topic_id="high_value_ranking",
-            keywords=["大额", "排名", "结算金额", "最高", "金额排名", "频繁", "异常案件"],
-            renderer=lambda count, q: _viz_high_value_ranking_positive() if count > 0 else _viz_high_value_ranking_zero()
-        ))
+        """注册内置的医保反欺诈 Mermaid 可视化专题"""
+        for topic_id, keywords, renderer in _DEFAULT_TOPIC_SPECS:
+            self.register(VisualizationTopic(topic_id=topic_id, keywords=keywords, renderer=renderer))
 
 
 # 全局单例策略注册中心

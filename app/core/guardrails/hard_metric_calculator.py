@@ -26,6 +26,54 @@ _EXEMPT_FIELD_PATTERNS = {"amt", "fee", "price", "sumamt", "pay", "rate", "money
 _SUSPICIOUS_COUNT_PATTERNS = {"item_count", "cartesian", "cross_join_cnt", "dup_cnt"}
 
 
+def _parse_raw_metric_rows(raw_data_str: str) -> List[Dict[str, Any]]:
+    """按 JSON -> literal_eval -> KV 正则三轨提取结构化行记录。"""
+    rows_data: List[Dict[str, Any]] = []
+    try:
+        clean_str = re.sub(r'[\x00-\x1f\x7f]', '', raw_data_str).strip()
+        if clean_str.startswith("[") or clean_str.startswith("{"):
+            parsed = json.loads(clean_str)
+            rows_data = parsed if isinstance(parsed, list) else [parsed]
+    except (ValueError, KeyError) as exc:
+        logger.debug(f"[HardMetricCalculator] JSON track fallback: {exc}")
+
+    if not rows_data:
+        try:
+            parsed = ast.literal_eval(raw_data_str.strip())
+            rows_data = parsed if isinstance(parsed, list) else [parsed]
+        except (ValueError, SyntaxError) as exc:
+            logger.debug(f"[HardMetricCalculator] literal_eval track fallback: {exc}")
+
+    if not rows_data:
+        kv_pattern = re.compile(r"['\"](?P<key>[^'\"]+)['\"]\s*:\s*(?:Decimal\(')?(?P<val>[^'\"},]+)(?:\')?")
+        for item_match in re.finditer(r"\{([^{}]+)\}", raw_data_str):
+            row_dict = {
+                m.group('key').lower(): m.group('val').strip().strip("'").strip('"')
+                for m in kv_pattern.finditer(item_match.group(1))
+            }
+            if row_dict:
+                rows_data.append(row_dict)
+    return rows_data
+
+
+def _extract_row_primary_metric(row: Dict[str, Any]) -> float:
+    """按金额优先于计数的权重提取单行最优数值指标。"""
+    best_val = 0.0
+    best_score = 0
+    for k, v in row.items():
+        k_lower = k.lower()
+        if any(id_k in k_lower for id_k in ["no", "id", "code", "certno", "tel", "phone"]):
+            continue
+        try:
+            curr_val = float(str(v).replace(",", ""))
+        except (ValueError, TypeError):
+            continue
+        score = 30 if any(ak in k_lower for ak in _AMOUNT_KEYS) else (15 if any(ck in k_lower for ck in _COUNT_KEYS) else 0)
+        if score > best_score:
+            best_score, best_val = score, curr_val
+    return best_val
+
+
 def calculate_hard_metrics(raw_data_str: str) -> Tuple[float, int, List[float]]:
     """
     物理确定性指标严格计算，实现强校验。
@@ -40,78 +88,18 @@ def calculate_hard_metrics(raw_data_str: str) -> Tuple[float, int, List[float]]:
             raise DataExtractionError(f"严重状态机错误：上游传递了非结构化脏数据 ({sig})，拒绝生成 0 值幻觉。")
 
     try:
-        rows_data = []
-
-        # 1.1 尝试 JSON 直接解析
-        try:
-            clean_str = re.sub(r'[\x00-\x1f\x7f]', '', raw_data_str).strip()
-            if clean_str.startswith("[") or clean_str.startswith("{"):
-                parsed = json.loads(clean_str)
-                rows_data = parsed if isinstance(parsed, list) else [parsed]
-        except (ValueError, KeyError) as exc:
-            logger.debug(f"[HardMetricCalculator] JSON track fallback: {exc}")
-
-        # 1.2 尝试 ast.literal_eval 解析 (处理 Python 特有类型)
-        if not rows_data:
-            try:
-                parsed = ast.literal_eval(raw_data_str.strip())
-                rows_data = parsed if isinstance(parsed, list) else [parsed]
-            except (ValueError, SyntaxError) as exc:
-                logger.debug(f"[HardMetricCalculator] literal_eval track fallback: {exc}")
-
-        # 1.3 正则兜底 (处理 LLM 混入的杂质)
-        if not rows_data:
-            kv_pattern = re.compile(r"['\"](?P<key>[^'\"]+)['\"]\s*:\s*(?:Decimal\(')?(?P<val>[^'\"},]+)(?:\')?")
-            for item_match in re.finditer(r"\{([^{}]+)\}", raw_data_str):
-                row_str = item_match.group(1)
-                row_dict = {}
-                for kv_match in kv_pattern.finditer(row_str):
-                    key = kv_match.group('key').lower()
-                    val = kv_match.group('val').strip().strip("'").strip('"')
-                    row_dict[key] = val
-                if row_dict:
-                    rows_data.append(row_dict)
-
-        # 强校验门禁：如果数据流不为空但解析不到任何记录，触发熔断
+        rows_data = _parse_raw_metric_rows(raw_data_str)
         if not rows_data and raw_data_str.strip() not in ["[]", ""]:
             logger.error(f"[HardMetricCalculator] 解析失败。原始数据片段: {raw_data_str[:200]}...")
             raise DataExtractionError("无法从输入流中提取出结构化的记录载荷。")
 
-        evidence_items = []
-        total_sum = 0.0
-
-        for row in rows_data:
-            best_val = 0.0
-            best_score = 0
-            for k, v in row.items():
-                k_lower = k.lower()
-                # 排除掉明显的标识符字段
-                if any(id_k in k_lower for id_k in ["no", "id", "code", "certno", "tel", "phone"]):
-                    continue
-
-                try:
-                    curr_val = float(str(v).replace(",", ""))
-                    score = 0
-                    if any(ak in k_lower for ak in _AMOUNT_KEYS):
-                        score = 30
-                    elif any(ck in k_lower for ck in _COUNT_KEYS):
-                        score = 15
-
-                    if score > best_score:
-                        best_score, best_val = score, curr_val
-                except (ValueError, TypeError):
-                    continue
-
-            total_sum += best_val
-            if best_val > 0:
-                evidence_items.append(best_val)
-
-        evidence_items = sorted(list(set(evidence_items)), reverse=True)
+        row_values = [_extract_row_primary_metric(row) for row in rows_data]
+        total_sum = sum(row_values)
+        evidence_items = sorted({val for val in row_values if val > 0}, reverse=True)
         logger.info(f"[HardMetricCalculator] 物理取证严格校验通过: SUM={total_sum:.2f}, COUNT={len(rows_data)}")
         return round(total_sum, 2), len(rows_data), evidence_items
-
-    except DataExtractionError as de:
-        raise de
+    except DataExtractionError:
+        raise
     except Exception as e:
         logger.error(f"[HardMetricCalculator] 致命解析错误: {e}")
         raise DataExtractionError(f"数据解析层崩溃: {e}")

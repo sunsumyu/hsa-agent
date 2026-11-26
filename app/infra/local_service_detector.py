@@ -42,7 +42,7 @@ class LocalServiceDetector:
                         os.environ[f"LOCAL_{name.upper()}_URL"] = url
                         if not os.getenv(key_env):
                             os.environ[key_env] = "sk-local-not-needed"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[LocalServiceDetector] Local runtime {name} ({url}) not reachable: {exc}")
 
         return new_providers

@@ -1,4 +1,4 @@
-﻿from app.multi_agent.contracts import (
+from app.multi_agent.contracts import (
     ExecutionTier,
     GraphClueArtifact,
     OrchestrationPlan,
