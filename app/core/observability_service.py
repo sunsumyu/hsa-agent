@@ -12,11 +12,8 @@ app/core/observability_service.py
 """
 
 import os
-import sys
 import time
 import socket
-import random
-import re
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
 from loguru import logger
@@ -236,8 +233,8 @@ class ObservabilityService:
         try:
             from app.core.pipeline_tracker import pipeline_tracker
             pipeline_tracker.on_node_start(node_name, state)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[Observability] pipeline_tracker start skipped: {exc}")
 
         scope_meta = {
             "langgraph_node": node_name,
@@ -261,12 +258,12 @@ class ObservabilityService:
             try:
                 self._tracer_provider.force_flush(2000)
                 self._tracer_provider.shutdown()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[Observability] tracer shutdown skipped: {exc}")
         if self._phoenix_session:
             try:
                 import phoenix as px
                 px.close_app()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[Observability] phoenix close skipped: {exc}")
         logger.info(">>> [Observability] 可观测服务已优雅安全下线")

@@ -97,3 +97,22 @@ def test_post_execution_gate_reflection_eval(monkeypatch):
     )
     assert res.passed is False
     assert "建议放宽阈值" in res.error_feedback
+
+
+@pytest.mark.asyncio
+async def test_coder_agent_max_retries_resolves_core_sql_without_name_error():
+    from app.agents.coder_agent import AuditCoderAgent
+
+    agent = AuditCoderAgent(max_retries=1)
+    state = {
+        "session_id": "sess-max-retry",
+        "retry_count": 1,
+        "sql_validated": True,
+        "raw_data": '[{"amt": 100}]',
+        "sql_query": "",
+        "sql_history": ["SELECT sum(amt) FROM fqz_fymx_test"],
+    }
+    res = await agent.execute(state, config={})
+    assert res["sql_validated"] is True
+    assert res["sql_query"] == "SELECT sum(amt) FROM fqz_fymx_test"
+    assert res["error_log"] is None

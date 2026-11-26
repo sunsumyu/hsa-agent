@@ -90,159 +90,135 @@ class _LangGraphEventTranslator:
         self._session_id = session_id
         self._is_sse = is_sse
 
+    def _emit_root_run_envelope(self, event: dict, name: str, lg_node: str, kind: str, state: _StreamRenderState) -> Iterator[str]:
+        logger.debug(f">>> [STREAM] kind={kind} | name={name} | lg_node={lg_node}")
+        if kind != "on_chain_start" or state.root_run_id:
+            return
+        state.root_run_id = event.get("run_id")
+        if not state.root_run_id:
+            return
+        if self._is_sse:
+            yield SSEEvent(
+                event=SSEEventType.ENGINE,
+                data={"root_run_id": str(state.root_run_id), "session_id": self._session_id},
+            ).to_sse_packet()
+        else:
+            yield render_meta_envelope(state.root_run_id, self._session_id)
+
+    def _close_thought_if_needed(self, state: _StreamRenderState) -> Iterator[str]:
+        if state.in_thought:
+            if not self._is_sse:
+                yield "\n:::\n\n"
+            state.in_thought = False
+
+    def _handle_chat_model_stream(self, event: dict, name: str, lg_node: str, state: _StreamRenderState) -> Iterator[str]:
+        text_to_append = extract_stream_chunk_text(event["data"]["chunk"].content)
+        if not text_to_append:
+            return
+        for chunk in state.interceptor.process_chunk(text_to_append):
+            if not chunk:
+                continue
+            filtered_content = sanitize(chunk)
+            if not filtered_content:
+                continue
+            if state.active_node == "REPORTER":
+                yield from self._close_thought_if_needed(state)
+                state.reporter_stream_buffer += filtered_content
+                continue
+            if not state.in_thought:
+                if not self._is_sse:
+                    yield f"\n:::thought\n**【{lg_node or name}】推演日志:**\n"
+                state.in_thought = True
+            if self._is_sse:
+                yield SSEEvent(event=SSEEventType.THOUGHT, data={"node": lg_node or name, "text": filtered_content}).to_sse_packet()
+            else:
+                yield filtered_content
+
+    def _handle_chain_start(self, name: str, lg_node: str, state: _StreamRenderState) -> Iterator[str]:
+        check_name = (lg_node or name).upper()
+        if check_name not in ("DATA_EXPERT", "AUDITOR", "FINANCIAL_EXPERT", "MULTI_AGENT_HUB", "REPORTER", "SOLO_EXPERT"):
+            return
+        state.active_node = "REPORTER" if check_name == "REPORTER" else "EXPERT"
+        if state.active_node == "REPORTER":
+            yield from self._close_thought_if_needed(state)
+        if self._is_sse:
+            yield SSEEvent(
+                event=SSEEventType.STATUS,
+                data={"node": check_name, "name": name, "display_name": f"正在激活 [{check_name}] 进行推演..."},
+            ).to_sse_packet()
+        else:
+            yield from emit_node_status(check_name, name)
+
+    def _handle_tool_event(self, kind: str, event: dict, state: _StreamRenderState) -> Iterator[str]:
+        tool_name = event["name"]
+        yield from self._close_thought_if_needed(state)
+        if kind == "on_tool_start":
+            inputs_data = event["data"]["input"] or {}
+            logger.info(f"审计工具执行: {tool_name} -> {inputs_data}")
+            if self._is_sse:
+                yield SSEEvent(event=SSEEventType.ACTION, data={"tool": tool_name, "inputs": inputs_data}).to_sse_packet()
+            else:
+                yield from emit_tool_start_events(tool_name, inputs_data)
+            return
+        output = event["data"].get("output", "")
+        if self._is_sse:
+            yield SSEEvent(event=SSEEventType.ACTION, data={"tool": tool_name, "stage": "end", "output": str(output)[:300]}).to_sse_packet()
+        else:
+            trace_pkt = format_tool_trace_packet(tool_name, output)
+            if trace_pkt:
+                yield trace_pkt
+
+    def _handle_chat_model_end(self, event: dict, name: str, lg_node: str, state: _StreamRenderState) -> Iterator[str]:
+        yield from self._close_thought_if_needed(state)
+        output = (event.get("data", {}) or {}).get("output")
+        if state.active_node == "REPORTER" and output and not state.reporter_final_emitted:
+            final_text = getattr(output, "content", "")
+            if final_text and len(str(final_text)) > len(state.reporter_stream_buffer):
+                state.reporter_stream_buffer = sanitize(str(final_text))
+        usage = getattr(output, "usage_metadata", {}) if output else {}
+        if self._is_sse:
+            if usage:
+                yield SSEEvent(event=SSEEventType.RESOURCE, data={"role": lg_node or name, "usage": usage}).to_sse_packet()
+        else:
+            res_pkt = format_resource_telemetry(usage, lg_node or name)
+            if res_pkt:
+                yield res_pkt
+
+    def _handle_chain_end(self, event: dict, lg_node: str, state: _StreamRenderState) -> Iterator[str]:
+        output = (event.get("data", {}) or {}).get("output", {}) or {}
+        if isinstance(output, dict) and isinstance(output.get("internal_steps"), list):
+            state.internal_thoughts.extend([str(s) for s in output["internal_steps"]])
+        if lg_node != "REPORTER" or not isinstance(output, dict) or not output.get("messages"):
+            return
+        last_msg = output["messages"][-1]
+        if not hasattr(last_msg, "content") or state.reporter_final_emitted:
+            return
+        static_content = sanitize(str(last_msg.content))
+        if not static_content:
+            return
+        state.ai_response_content = static_content
+        state.reporter_final_emitted = True
+        state.reporter_stream_buffer = ""
+        yield SSEEvent(event=SSEEventType.MESSAGE, data=static_content).to_sse_packet() if self._is_sse else static_content
+
     def translate(self, event: dict, state: _StreamRenderState) -> Iterator[str]:
         """将单个 astream_events 事件翻译为 0..N 个协议帧 (同步纯转换, 无 IO)"""
         kind = event["event"]
         name = str(event.get("name", ""))
-        metadata = event.get("metadata", {})
-        lg_node = metadata.get("langgraph_node", "")
+        lg_node = event.get("metadata", {}).get("langgraph_node", "")
 
-        if kind in ["on_chain_start", "on_chat_model_start"]:
-            logger.debug(f">>> [STREAM] kind={kind} | name={name} | lg_node={lg_node}")
-            if kind == "on_chain_start" and not state.root_run_id:
-                state.root_run_id = event.get("run_id")
-                if state.root_run_id:
-                    if self._is_sse:
-                        yield SSEEvent(
-                            event=SSEEventType.ENGINE,
-                            data={"root_run_id": str(state.root_run_id), "session_id": self._session_id}
-                        ).to_sse_packet()
-                    else:
-                        yield render_meta_envelope(state.root_run_id, self._session_id)
-
+        if kind in ("on_chain_start", "on_chat_model_start"):
+            yield from self._emit_root_run_envelope(event, name, lg_node, kind, state)
         if kind == "on_chat_model_stream":
-            content = event["data"]["chunk"].content
-            text_to_append = extract_stream_chunk_text(content)
-            if not text_to_append:
-                return
-            interceptor_chunks = state.interceptor.process_chunk(text_to_append)
-            for chunk in interceptor_chunks:
-                if chunk:
-                    filtered_content = sanitize(chunk)
-                    if filtered_content:
-                        if state.active_node == "REPORTER":
-                            if state.in_thought:
-                                if not self._is_sse:
-                                    yield "\n:::\n\n"
-                                state.in_thought = False
-                            state.reporter_stream_buffer += filtered_content
-                        else:
-                            if not state.in_thought:
-                                if not self._is_sse:
-                                    yield f"\n:::thought\n**【{lg_node or name}】推演日志:**\n"
-                                state.in_thought = True
-                            if self._is_sse:
-                                yield SSEEvent(
-                                    event=SSEEventType.THOUGHT,
-                                    data={"node": lg_node or name, "text": filtered_content}
-                                ).to_sse_packet()
-                            else:
-                                yield filtered_content
-
+            yield from self._handle_chat_model_stream(event, name, lg_node, state)
         elif kind == "on_chain_start":
-            check_name = (lg_node or name).upper()
-            if check_name in (
-                "DATA_EXPERT",
-                "AUDITOR",
-                "FINANCIAL_EXPERT",
-                "MULTI_AGENT_HUB",
-                "REPORTER",
-                "SOLO_EXPERT",
-            ):
-                state.active_node = "REPORTER" if check_name == "REPORTER" else "EXPERT"
-                if state.active_node == "REPORTER" and state.in_thought:
-                    if not self._is_sse:
-                        yield "\n:::\n\n"
-                    state.in_thought = False
-                if self._is_sse:
-                    yield SSEEvent(
-                        event=SSEEventType.STATUS,
-                        data={"node": check_name, "name": name, "display_name": f"正在激活 [{check_name}] 进行推演..."}
-                    ).to_sse_packet()
-                else:
-                    for packet in emit_node_status(check_name, name):
-                        yield packet
-
-        elif kind == "on_tool_start":
-            tool_name = event["name"]
-            inputs_data = event["data"]["input"] or {}
-            logger.info(f"审计工具执行: {tool_name} -> {inputs_data}")
-            if state.in_thought:
-                if not self._is_sse:
-                    yield "\n:::\n\n"
-                state.in_thought = False
-            if self._is_sse:
-                yield SSEEvent(
-                    event=SSEEventType.ACTION,
-                    data={"tool": tool_name, "inputs": inputs_data}
-                ).to_sse_packet()
-            else:
-                for packet in emit_tool_start_events(tool_name, inputs_data):
-                    yield packet
-
-        elif kind == "on_tool_end":
-            tool_name = event["name"]
-            output = event["data"].get("output", "")
-            if state.in_thought:
-                if not self._is_sse:
-                    yield "\n:::\n\n"
-                state.in_thought = False
-            if self._is_sse:
-                yield SSEEvent(
-                    event=SSEEventType.ACTION,
-                    data={"tool": tool_name, "stage": "end", "output": str(output)[:300]}
-                ).to_sse_packet()
-            else:
-                trace_pkt = format_tool_trace_packet(tool_name, output)
-                if trace_pkt:
-                    yield trace_pkt
-
+            yield from self._handle_chain_start(name, lg_node, state)
+        elif kind in ("on_tool_start", "on_tool_end"):
+            yield from self._handle_tool_event(kind, event, state)
         elif kind == "on_chat_model_end":
-            if state.in_thought:
-                if not self._is_sse:
-                    yield "\n:::\n\n"
-                state.in_thought = False
-            data = event.get("data", {}) or {}
-            output = data.get("output")
-
-            if state.active_node == "REPORTER" and output and not state.reporter_final_emitted:
-                final_text = getattr(output, "content", "")
-                if final_text and len(str(final_text)) > len(state.reporter_stream_buffer):
-                    state.reporter_stream_buffer = sanitize(str(final_text))
-
-            usage = getattr(output, "usage_metadata", {}) if output else {}
-            if self._is_sse:
-                if usage:
-                    yield SSEEvent(
-                        event=SSEEventType.RESOURCE,
-                        data={"role": lg_node or name, "usage": usage}
-                    ).to_sse_packet()
-            else:
-                res_pkt = format_resource_telemetry(usage, lg_node or name)
-                if res_pkt:
-                    yield res_pkt
-
+            yield from self._handle_chat_model_end(event, name, lg_node, state)
         elif kind == "on_chain_end":
-            data = event.get("data", {}) or {}
-            output = data.get("output", {}) or {}
-            if isinstance(output, dict) and "internal_steps" in output:
-                steps = output["internal_steps"]
-                if isinstance(steps, list):
-                    state.internal_thoughts.extend([str(s) for s in steps])
-
-            if lg_node == "REPORTER":
-                if isinstance(output, dict) and output.get("messages"):
-                    last_msg = output["messages"][-1]
-                    if hasattr(last_msg, "content") and not state.reporter_final_emitted:
-                        static_content = sanitize(str(last_msg.content))
-                        if static_content:
-                            state.ai_response_content = static_content
-                            state.reporter_final_emitted = True
-                            state.reporter_stream_buffer = ""
-                            if self._is_sse:
-                                yield SSEEvent(event=SSEEventType.MESSAGE, data=static_content).to_sse_packet()
-                            else:
-                                yield static_content
+            yield from self._handle_chain_end(event, lg_node, state)
 
 
 class ChatStreamCoordinator:
