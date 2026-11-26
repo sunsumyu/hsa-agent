@@ -45,6 +45,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from loguru import logger
+from tools.dev_toolkit_parsers import (
+    _add_db_parsers,
+    _add_graph_parsers,
+    _add_log_parsers,
+    _add_model_parsers,
+)
+
 
 # ---------------------------------------------------------------------------
 # 1. 数据库模块 (ClickHouse / MySQL)
@@ -111,8 +118,8 @@ def describe_db_table(table_name: str, database: str = "default") -> List[Dict[s
         cols = client.query(sql)
         if cols:
             return cols
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"[DB] system.columns 查询失败，降级 DESCRIBE TABLE: {exc}")
     # 降级使用 DESCRIBE TABLE
     return client.query(f"DESCRIBE TABLE {database}.{table_name}")
 
@@ -363,144 +370,89 @@ def _print_table(rows: List[Dict[str, Any]], max_rows: int = 50):
 # 6. CLI 命令行分发入口
 # ---------------------------------------------------------------------------
 
+def _print_rows(rows: List[Dict[str, Any]], as_json: bool) -> None:
+    if as_json:
+        _print_json(rows)
+    else:
+        _print_table(rows)
+
+
+def _handle_db(args, parser) -> None:
+    action = args.action
+    if action == "health":
+        _print_json(check_db_health())
+    elif action == "tables":
+        _print_table(list_db_tables(args.db))
+    elif action == "desc":
+        _print_table(describe_db_table(args.table, args.db))
+    elif action == "count":
+        cnt = count_db_table(args.table, args.where, args.db)
+        print(f"表 [{args.db}.{args.table}] 符合条件的行数: {cnt}")
+    elif action == "sample":
+        cols = [c.strip() for c in args.cols.split(",")] if args.cols else None
+        _print_rows(sample_db_table(args.table, args.limit, cols, args.where, args.db), args.json)
+    elif action == "query":
+        _print_rows(execute_sql(args.sql, args.limit), args.json)
+    else:
+        parser.print_help()
+
+
+def _handle_model(args, parser) -> None:
+    if args.action == "list":
+        _print_table(list_available_models())
+    elif args.action == "test":
+        _print_json(test_model_call(args.model_id, args.prompt))
+    elif args.action == "test-tools":
+        _print_json(test_tool_calling(args.model_id))
+    else:
+        parser.print_help()
+
+
+def _handle_graph(args, parser) -> None:
+    if args.action == "health":
+        _print_json(check_graph_health())
+    elif args.action == "stats":
+        _print_json(get_graph_stats())
+    elif args.action == "query":
+        _print_json(query_graph(args.cypher, args.limit))
+    else:
+        parser.print_help()
+
+
+def _handle_log(args, parser) -> None:
+    if args.action == "recent":
+        for line in get_recent_logs(args.lines):
+            print(line, end="")
+    elif args.action == "errors":
+        matches = search_log_errors(args.keyword)
+        if not matches:
+            print("近期日志中未发现明显报错。")
+        for m in matches:
+            print(m)
+    else:
+        parser.print_help()
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="dev_toolkit",
         description="Argus-Agent 全局基础设施调试与数据诊断统一工具集"
     )
     subparsers = parser.add_subparsers(dest="subcommand", help="子功能模块")
-
-    # --- db 子命令 ---
-    db_parser = subparsers.add_parser("db", help="ClickHouse 数据库诊断与数据查询")
-    db_sub = db_parser.add_subparsers(dest="action", help="数据库操作")
-    
-    db_sub.add_parser("health", help="检查 ClickHouse 健康状态")
-    
-    tables_p = db_sub.add_parser("tables", help="列出所有数据库表")
-    tables_p.add_argument("--db", default="default", help="数据库名称 (默认 default)")
-    
-    desc_p = db_sub.add_parser("desc", help="查看表结构与字段类型")
-    desc_p.add_argument("table", help="表名")
-    desc_p.add_argument("--db", default="default", help="数据库名称")
-    
-    count_p = db_sub.add_parser("count", help="统计表数据行数")
-    count_p.add_argument("table", help="表名")
-    count_p.add_argument("--where", default=None, help="过滤条件")
-    count_p.add_argument("--db", default="default", help="数据库名称")
-    
-    sample_p = db_sub.add_parser("sample", help="对表数据进行采样打印")
-    sample_p.add_argument("table", help="表名")
-    sample_p.add_argument("-n", "--limit", type=int, default=5, help="采样条数")
-    sample_p.add_argument("--where", default=None, help="过滤条件")
-    sample_p.add_argument("--cols", default=None, help="指定字段列表，英文逗号分隔")
-    sample_p.add_argument("--json", action="store_true", help="以 JSON 格式输出")
-    sample_p.add_argument("--db", default="default", help="数据库名称")
-
-    query_p = db_sub.add_parser("query", help="执行只读 SQL 查询")
-    query_p.add_argument("sql", help="SQL 语句")
-    query_p.add_argument("-n", "--limit", type=int, default=100, help="限制返回行数")
-    query_p.add_argument("--json", action="store_true", help="以 JSON 格式输出")
-
-    # --- model 子命令 ---
-    model_parser = subparsers.add_parser("model", help="大模型提供商与算力池探活")
-    model_sub = model_parser.add_subparsers(dest="action", help="模型操作")
-    
-    model_sub.add_parser("list", help="列出所有已配置的大模型")
-    
-    mtest_p = model_sub.add_parser("test", help="测试模型连通性与单轮推理")
-    mtest_p.add_argument("model_id", help="模型 ID")
-    mtest_p.add_argument("-p", "--prompt", default="请回复: OK", help="自定义测试 Prompt")
-    
-    mtool_p = model_sub.add_parser("test-tools", help="测试模型 Tool Calling 函数调用能力")
-    mtool_p.add_argument("model_id", help="模型 ID")
-
-    # --- graph 子命令 ---
-    graph_parser = subparsers.add_parser("graph", help="Neo4j 知识图谱诊断")
-    graph_sub = graph_parser.add_subparsers(dest="action", help="图数据库操作")
-    
-    graph_sub.add_parser("health", help="检查 Neo4j 连通性")
-    graph_sub.add_parser("stats", help="统计图谱节点标签与关系类型")
-    
-    gquery_p = graph_sub.add_parser("query", help="执行 Cypher 查询")
-    gquery_p.add_argument("cypher", help="Cypher 查询语句")
-    gquery_p.add_argument("-n", "--limit", type=int, default=20, help="限制返回数量")
-
-    # --- log 子命令 ---
-    log_parser = subparsers.add_parser("log", help="运行日志检索与报错定位")
-    log_sub = log_parser.add_subparsers(dest="action", help="日志操作")
-    
-    lrec_p = log_sub.add_parser("recent", help="查看最新日志内容")
-    lrec_p.add_argument("-n", "--lines", type=int, default=50, help="行数")
-    
-    lerr_p = log_sub.add_parser("errors", help="检索最近的 ERROR / 报错")
-    lerr_p.add_argument("-k", "--keyword", default=None, help="关键字过滤")
+    handlers = {
+        "db": (_add_db_parsers(subparsers), _handle_db),
+        "model": (_add_model_parsers(subparsers), _handle_model),
+        "graph": (_add_graph_parsers(subparsers), _handle_graph),
+        "log": (_add_log_parsers(subparsers), _handle_log),
+    }
 
     args = parser.parse_args()
     if not args.subcommand:
         parser.print_help()
         return
+    sub_parser, handler = handlers[args.subcommand]
+    handler(args, sub_parser)
 
-    # 分发执行
-    if args.subcommand == "db":
-        if args.action == "health":
-            _print_json(check_db_health())
-        elif args.action == "tables":
-            _print_table(list_db_tables(args.db))
-        elif args.action == "desc":
-            _print_table(describe_db_table(args.table, args.db))
-        elif args.action == "count":
-            cnt = count_db_table(args.table, args.where, args.db)
-            print(f"表 [{args.db}.{args.table}] 符合条件的行数: {cnt}")
-        elif args.action == "sample":
-            cols = [c.strip() for c in args.cols.split(",")] if args.cols else None
-            rows = sample_db_table(args.table, args.limit, cols, args.where, args.db)
-            if args.json:
-                _print_json(rows)
-            else:
-                _print_table(rows)
-        elif args.action == "query":
-            rows = execute_sql(args.sql, args.limit)
-            if args.json:
-                _print_json(rows)
-            else:
-                _print_table(rows)
-        else:
-            db_parser.print_help()
-
-    elif args.subcommand == "model":
-        if args.action == "list":
-            _print_table(list_available_models())
-        elif args.action == "test":
-            _print_json(test_model_call(args.model_id, args.prompt))
-        elif args.action == "test-tools":
-            _print_json(test_tool_calling(args.model_id))
-        else:
-            model_parser.print_help()
-
-    elif args.subcommand == "graph":
-        if args.action == "health":
-            _print_json(check_graph_health())
-        elif args.action == "stats":
-            _print_json(get_graph_stats())
-        elif args.action == "query":
-            _print_json(query_graph(args.cypher, args.limit))
-        else:
-            graph_parser.print_help()
-
-    elif args.subcommand == "log":
-        if args.action == "recent":
-            lines = get_recent_logs(args.lines)
-            for l in lines:
-                print(l, end="")
-        elif args.action == "errors":
-            matches = search_log_errors(args.keyword)
-            if not matches:
-                print("近期日志中未发现明显报错。")
-            else:
-                for m in matches:
-                    print(m)
-        else:
-            log_parser.print_help()
 
 if __name__ == "__main__":
     main()
