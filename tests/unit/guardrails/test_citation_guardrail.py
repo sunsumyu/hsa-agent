@@ -164,3 +164,44 @@ def test_blocks_bare_doc_ref_when_unverified_and_preserves_grounded_ones():
     assert res_ok.passed is True
     assert res_ok.blocked_citations == []
     assert "rag_doc01" in res_ok.verified_ids
+
+
+def test_numeric_faithfulness_flags_distorted_penalty_multiplier_and_avoids_false_positives():
+    ledger = [
+        {
+            "citation_id": "law_38",
+            "source_type": "law_rag",
+            "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+            "law_title": "医疗保障基金使用监督管理条例",
+            "article_num": "第三十八条",
+            "snippet": "第三十八条 造成医保基金损失的，处1倍以上2倍以下罚款。",
+        },
+        {
+            "citation_id": "law_15",
+            "source_type": "law_rag",
+            "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+            "law_title": "医疗保障基金使用监督管理条例",
+            "article_num": "第十五条",
+            "snippet": "第十五条 定点医药机构不得分解住院、挂床住院。",
+        },
+    ]
+
+    ok_text = "依据 [CITE:law_38] 处1倍以上2倍以下罚款，也可依法处二倍罚款。"
+    res_ok = enforce_citation_grounding(ok_text, ledger, strict=True)
+    assert res_ok.passed is True
+    assert res_ok.faithfulness_warnings == []
+
+    bad_cite = "依据 [CITE:law_38] 应处5倍罚款。"
+    res_bad_cite = enforce_citation_grounding(bad_cite, ledger, strict=True)
+    assert res_bad_cite.passed is False
+    assert len(res_bad_cite.faithfulness_warnings) == 1
+
+    bad_freeform = "依据《医疗保障基金使用监督管理条例》第三十八条处五倍罚款。"
+    res_bad_free = enforce_citation_grounding(bad_freeform, ledger, strict=True)
+    assert res_bad_free.passed is False
+    assert len(res_bad_free.faithfulness_warnings) == 1
+
+    no_mult_snippet = "依据 [CITE:law_15] 排查，发现该科室费用增长3倍。"
+    res_no_fp = enforce_citation_grounding(no_mult_snippet, ledger, strict=True)
+    assert res_no_fp.passed is True
+    assert res_no_fp.faithfulness_warnings == []

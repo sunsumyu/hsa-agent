@@ -89,8 +89,8 @@ class RawDataSanitizer:
             if cnt_val is not None:
                 try:
                     total_records = int(cnt_val)
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(f"[RawDataSanitizer] scan count cast skipped: {exc}")
             if min_val:
                 min_time = str(min_val).split(".")[0].split("T")[0].split(" ")[0]
             if max_val:
@@ -152,8 +152,8 @@ class RawDataSanitizer:
                     elif isinstance(parsed, dict):
                         raw_data_list.append(parsed)
                     continue
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    logger.debug(f"[RawDataSanitizer] Track 1 JSON decode fallback: {exc}")
                 # ── 第2轨：Python 字面量解析（单引号 / 尾逗号 / 已归一化的 datetime repr）──
                 try:
                     parsed = ast.literal_eval(chunk)
@@ -162,8 +162,8 @@ class RawDataSanitizer:
                     elif isinstance(parsed, dict):
                         raw_data_list.append(parsed)
                     continue
-                except Exception:
-                    pass
+                except (ValueError, SyntaxError, TypeError) as exc:
+                    logger.debug(f"[RawDataSanitizer] Track 2 literal_eval fallback: {exc}")
                 # ── 第3轨：防御性自愈，逐个抠取完备对象，防止全量清零 ──
                 # 损坏对象按值跳过而非编造（审计语义：缺失可复核，编造即污染对账），但必须留痕
                 recovered = False

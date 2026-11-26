@@ -229,3 +229,30 @@ def test_handle_synthesis_bypass_enforces_citation_grounding():
     assert "《医疗保障基金使用监督管理条例》第十五条" in msg
     assert "虚假医保特别法" not in msg
     assert "[已拦截未核验法规引用]" in msg
+
+
+def test_renderer_flags_distorted_penalty_multiplier_faithfulness_warning():
+    renderer = AuditReportRenderer()
+    vector_ledger = [
+        {
+            "citation_id": "law_38aabbcc",
+            "source_type": "law_rag",
+            "source_doc": "行政法规/医疗保障基金使用监督管理条例.pdf",
+            "page_num": 12,
+            "law_title": "医疗保障基金使用监督管理条例",
+            "article_num": "第三十八条",
+            "snippet": "第三十八条 造成医保基金损失的，处1倍以上2倍以下罚款。",
+            "content_hash": "aabbcc112233",
+        }
+    ]
+    report = renderer.render(
+        user_question="排查违规定额结算",
+        llm_conclusion="经核查，依据 [CITE:law_38aabbcc] 应处5倍罚款。",
+        raw_data=[{"psn_no": "P1", "medfee_sumamt": 1200.0}],
+        sql_query="SELECT psn_no, medfee_sumamt FROM fqz_gz_jzsj_all_ql",
+        total_amount=1200.0,
+        finding_count=1,
+        audit_metadata={"trace_id": "TR-FAITH", "retrieved_citations": vector_ledger},
+    )
+    assert "[法条数值忠实度复核提示]" in report.markdown
+    assert len(report.audit_metadata["citation_faithfulness_warnings"]) == 1

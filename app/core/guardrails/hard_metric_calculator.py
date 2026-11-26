@@ -7,8 +7,6 @@ fusing, and fact-check grounding pinning behind simple, cohesive interfaces.
 import ast
 import json
 import re
-import datetime
-from decimal import Decimal
 from typing import List, Dict, Any, Tuple, Optional
 from loguru import logger
 
@@ -50,17 +48,16 @@ def calculate_hard_metrics(raw_data_str: str) -> Tuple[float, int, List[float]]:
             if clean_str.startswith("[") or clean_str.startswith("{"):
                 parsed = json.loads(clean_str)
                 rows_data = parsed if isinstance(parsed, list) else [parsed]
-        except (ValueError, KeyError):
-            pass
+        except (ValueError, KeyError) as exc:
+            logger.debug(f"[HardMetricCalculator] JSON track fallback: {exc}")
 
         # 1.2 尝试 ast.literal_eval 解析 (处理 Python 特有类型)
         if not rows_data:
             try:
-                eval_context = {"datetime": datetime, "date": datetime.date, "Decimal": Decimal}
                 parsed = ast.literal_eval(raw_data_str.strip())
                 rows_data = parsed if isinstance(parsed, list) else [parsed]
-            except (ValueError, SyntaxError):
-                pass
+            except (ValueError, SyntaxError) as exc:
+                logger.debug(f"[HardMetricCalculator] literal_eval track fallback: {exc}")
 
         # 1.3 正则兜底 (处理 LLM 混入的杂质)
         if not rows_data:

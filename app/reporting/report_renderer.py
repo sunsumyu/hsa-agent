@@ -97,6 +97,9 @@ def _apply_citation_guardrail(
     static_records = [r.model_dump(mode="json") for r in build_policy_registry_citations(policy_basis or "")]
     full_ledger = merge_citation_ledgers(retrieved, static_records or None)
     guard_res = enforce_citation_grounding(llm_conclusion, full_ledger, strict=True)
+    conclusion_out = guard_res.sanitized_text
+    if guard_res.faithfulness_warnings:
+        conclusion_out += "\n\n> ⚠️ **[法条数值忠实度复核提示]**：" + "；".join(guard_res.faithfulness_warnings)
 
     dynamic_hits = [r for r in full_ledger if r.get("source_type") in {"law_rag", "vector_rag"}]
     parts = [_format_dynamic_policy_tag(r) for r in dynamic_hits]
@@ -108,9 +111,10 @@ def _apply_citation_guardrail(
         **dict(audit_metadata or {}),
         "verified_citation_count": len(guard_res.verified_ids),
         "blocked_citation_count": len(guard_res.blocked_citations),
+        "citation_faithfulness_warnings": list(guard_res.faithfulness_warnings),
         "retrieved_citations": full_ledger,
     }
-    return tagged_policy, guard_res.sanitized_text, updated_meta
+    return tagged_policy, conclusion_out, updated_meta
 
 
 @dataclass

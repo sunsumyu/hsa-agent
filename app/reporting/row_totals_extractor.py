@@ -6,6 +6,7 @@ behind a unified, clean interface:
 `extract_db_totals(db_rows, sql=None, gt_count=0, gt_sum=0.0) -> Tuple[int, float]`
 """
 from typing import List, Dict, Any, Optional, Tuple
+from loguru import logger
 
 # 严格聚合别名全量白名单 (必须是明确的汇总/行数别名)
 STRICT_AGGREGATE_ALIASES = frozenset({
@@ -40,8 +41,8 @@ def detect_count_column(
                         if any(isinstance(node, exp.Count) for node in s.walk()):
                             count_col = alias
                             break
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[RowTotalsExtractor] AST count projection parse skipped: {exc}")
 
     # 1. 严格白名单别名匹配
     if not count_col:
@@ -66,8 +67,8 @@ def detect_count_column(
                             break
                         elif count_col is None:
                             count_col = col
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(f"[RowTotalsExtractor] Numeric conversion skipped for col={col}: {exc}")
 
     # 3. 单行汇总自愈：若数值精确等于 gt_count，直接锁定
     if not count_col and gt_count > 0:
@@ -77,8 +78,8 @@ def detect_count_column(
                     if int(val) == gt_count:
                         count_col = col
                         break
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(f"[RowTotalsExtractor] Numeric conversion skipped for col={col}: {exc}")
 
     return count_col
 
@@ -104,8 +105,8 @@ def detect_amount_column(
                         if any(isinstance(node, exp.Sum) for node in s.walk()):
                             amount_col = alias
                             break
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[RowTotalsExtractor] AST count projection parse skipped: {exc}")
 
     # 1. 字段名特征匹配
     if not amount_col:
@@ -119,8 +120,8 @@ def detect_amount_column(
                         float(first_row[col])
                         amount_col = col
                         break
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(f"[RowTotalsExtractor] Numeric conversion skipped for col={col}: {exc}")
 
     return amount_col
 
@@ -189,7 +190,7 @@ def extract_db_totals(
                     det_count = gt_count
                     det_sum = gt_sum
                     break
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as exc:
+                logger.debug(f"[RowTotalsExtractor] Reconciliation cast skipped for col={ac}: {exc}")
 
     return det_count, round(det_sum, 2)

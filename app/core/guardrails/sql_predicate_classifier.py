@@ -5,6 +5,7 @@ expression flattening, literal extraction, and comparable type parsing behind a 
 """
 import re
 from typing import List, Optional, Tuple, Any
+from loguru import logger
 from sqlglot import exp
 
 
@@ -47,8 +48,8 @@ def parse_comparable_value(val_obj: Any) -> Optional[float]:
     # 1. 直接 float 转换
     try:
         return float(val_obj)
-    except (ValueError, TypeError):
-        pass
+    except (ValueError, TypeError) as exc:
+        logger.debug(f"[SQLPredicateClassifier] Float cast skipped for {val_obj!r}: {exc}")
 
     # 2. ISO 日期 / 时间戳解析
     if isinstance(val_obj, str):
@@ -62,8 +63,8 @@ def parse_comparable_value(val_obj: Any) -> Optional[float]:
                 time_part = match.group(2) or "00:00:00"
                 dt = datetime.strptime(f"{date_part} {time_part}", "%Y-%m-%d %H:%M:%S")
                 return dt.timestamp()
-            except Exception:
-                pass
+            except (ValueError, OverflowError, OSError) as exc:
+                logger.debug(f"[SQLPredicateClassifier] Date parse skipped for {clean!r}: {exc}")
     return None
 
 
