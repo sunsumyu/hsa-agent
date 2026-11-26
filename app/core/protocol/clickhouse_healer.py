@@ -16,7 +16,7 @@ app/core/protocol/clickhouse_healer.py
 
 from __future__ import annotations
 import re
-from typing import Optional
+from typing import List, Optional
 import sqlglot
 from sqlglot import exp
 from loguru import logger
@@ -49,8 +49,8 @@ class ClickHouseDialectHealer:
             cand = cls._fix_shadowing_aliases(cand)
             cand = cls._quote_non_ascii_identifiers(cand)
             return cand
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[ClickHouseDialectHealer] Initial AST heal fallback: {exc}")
 
         # 容错修复单引号不成对后再次重试
         cand = cls._repair_unpaired_quotes(cand)
@@ -61,20 +61,13 @@ class ClickHouseDialectHealer:
                 cand = parsed.sql(dialect="clickhouse")
             cand = cls._fix_shadowing_aliases(cand)
             cand = cls._quote_non_ascii_identifiers(cand)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"[ClickHouseDialectHealer] Retry AST heal fallback: {exc}")
 
         return cand
 
     @classmethod
-    def heal_expression(cls, expression: exp.Expression) -> exp.Expression:
-        """
-        AST 级别自愈：直接对已解析的 sqlglot Expression 进行 ClickHouse 方言转换。
-        """
-        if expression is None:
-            return expression
-
-        # 1. 修复日期字段 = 'YYYY' 陷阱 -> toYear(toDateTime(col)) = YYYY
+    def _rewrite_date_year_equalities(cls, expression: exp.Expression) -> None:
         for eq in expression.find_all(exp.EQ):
             left, right = eq.left, eq.right
             if isinstance(left, exp.Column) and left.name.lower() in cls._DATE_FIELDS:
@@ -85,112 +78,102 @@ class ClickHouseDialectHealer:
                             read="clickhouse",
                         )
                         eq.replace(new_eq)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug(f"[ClickHouseDialectHealer] Date year rewrite skipped: {exc}")
 
-        # 2. 遍历 AST 进行方言函数节点平滑重写
+    @classmethod
+    def _collect_func_args(cls, node: exp.Expression, include_this_first: bool = False) -> List[exp.Expression]:
+        if include_this_first:
+            args = [node.this] if hasattr(node, "this") and node.this is not None else []
+            if hasattr(node, "expressions") and node.expressions:
+                args.extend([e for e in node.expressions if e is not None])
+            elif hasattr(node, "expression") and node.expression is not None:
+                args.append(node.expression)
+            return args
+        raw = (
+            list(node.expressions)
+            if hasattr(node, "expressions") and node.expressions
+            else [getattr(node, "this", None), getattr(node, "expression", None)]
+        )
+        return [a for a in raw if a is not None]
+
+    @classmethod
+    def _rewrite_binary_dialect_func(cls, node: exp.Expression, func_name: str) -> bool:
+        if func_name in ("DATEDIFF", "DATE_DIFF"):
+            args = cls._collect_func_args(node)
+            if len(args) == 2:
+                new_node = exp.Anonymous(
+                    this="dateDiff",
+                    expressions=[exp.Literal.string("day"), args[1].copy(), args[0].copy()],
+                )
+                node.replace(new_node)
+                logger.debug(f"[AST自愈] 重写 DATEDIFF 为 dateDiff: {new_node.sql(dialect='clickhouse')}")
+                return True
+        elif func_name in ("IFNULL", "COALESCE"):
+            args = cls._collect_func_args(node, include_this_first=True)
+            if len(args) == 2:
+                node.replace(exp.Anonymous(this="ifNull", expressions=[args[0].copy(), args[1].copy()]))
+                logger.debug("[AST自愈] 重写 IFNULL 为 ifNull")
+                return True
+        elif func_name in ("DATE_FORMAT", "DATEFORMAT"):
+            args = cls._collect_func_args(node)
+            if len(args) == 2:
+                a1, a2 = args[0].sql(dialect="clickhouse"), args[1].sql(dialect="clickhouse")
+                node.replace(sqlglot.parse_one(f"formatDateTime({a1}, {a2})", read="clickhouse"))
+                logger.debug("[AST自愈] 重写 DATE_FORMAT 为 formatDateTime")
+                return True
+        return False
+
+    @classmethod
+    def _rewrite_unary_dialect_func(cls, node: exp.Expression, func_name: str) -> bool:
+        unary_map = {"YEAR": "toYear", "MONTH": "toMonth"}
+        if func_name in unary_map:
+            arg_node = getattr(node, "this", None) or (
+                node.expressions[0] if hasattr(node, "expressions") and node.expressions else None
+            )
+            if arg_node:
+                target = unary_map[func_name]
+                node.replace(sqlglot.parse_one(f"{target}({arg_node.sql(dialect='clickhouse')})", read="clickhouse"))
+                logger.debug(f"[AST自愈] 重写 {func_name} 为 {target}")
+                return True
+        if func_name in ("CURDATE", "CURRENTDATE", "CURRENT_DATE"):
+            node.replace(sqlglot.parse_one("today()", read="clickhouse"))
+            logger.debug("[AST自愈] 重写 CURDATE 为 today()")
+            return True
+        if func_name in ("GROUP_CONCAT", "GROUPCONCAT"):
+            col_node = getattr(node, "this", None) or (
+                node.expressions[0] if hasattr(node, "expressions") and node.expressions else None
+            )
+            sep_node = node.args.get("separator") if hasattr(node, "args") else None
+            if not sep_node and hasattr(node, "expressions") and len(node.expressions) > 1:
+                sep_node = node.expressions[1]
+            sep = sep_node.sql(dialect="clickhouse") if sep_node else "',' "
+            if col_node:
+                col = col_node.sql(dialect="clickhouse")
+                node.replace(sqlglot.parse_one(f"arrayStringConcat(groupUniqArray({col}), {sep})", read="clickhouse"))
+                logger.debug("[AST自愈] 重写 GROUP_CONCAT 为 arrayStringConcat")
+                return True
+        return False
+
+    @classmethod
+    def heal_expression(cls, expression: exp.Expression) -> exp.Expression:
+        """
+        AST 级别自愈：直接对已解析的 sqlglot Expression 进行 ClickHouse 方言转换。
+        """
+        if expression is None:
+            return expression
+
+        cls._rewrite_date_year_equalities(expression)
         for node in expression.walk():
-            if isinstance(node, (exp.Func, exp.Anonymous)):
-                func_name = (
-                    getattr(node, "name", "")
-                    or getattr(node, "key", "")
-                    or node.__class__.__name__
-                ).upper()
-
-                # 2.1 MySQL DATEDIFF -> ClickHouse dateDiff('day', B, A)
-                if func_name in ("DATEDIFF", "DATE_DIFF"):
-                    args = (
-                        list(node.expressions)
-                        if hasattr(node, "expressions") and node.expressions
-                        else [getattr(node, "this", None), getattr(node, "expression", None)]
-                    )
-                    args = [a for a in args if a is not None]
-                    if len(args) == 2:
-                        arg1, arg2 = args[0], args[1]
-                        new_node = exp.Anonymous(
-                            this="dateDiff",
-                            expressions=[exp.Literal.string("day"), arg2.copy(), arg1.copy()]
-                        )
-                        node.replace(new_node)
-                        logger.debug(f"[AST自愈] 重写 DATEDIFF 为 dateDiff: {new_node.sql(dialect='clickhouse')}")
-
-                # 2.2 MySQL IFNULL -> ClickHouse ifNull(A, B)
-                elif func_name in ("IFNULL", "COALESCE"):
-                    args = [getattr(node, "this", None)] if hasattr(node, "this") and node.this is not None else []
-                    if hasattr(node, "expressions") and node.expressions:
-                        args.extend([e for e in node.expressions if e is not None])
-                    elif hasattr(node, "expression") and node.expression is not None:
-                        args.append(node.expression)
-                    if len(args) == 2:
-                        arg1, arg2 = args[0], args[1]
-                        new_node = exp.Anonymous(
-                            this="ifNull",
-                            expressions=[arg1.copy(), arg2.copy()]
-                        )
-                        node.replace(new_node)
-                        logger.debug("[AST自愈] 重写 IFNULL 为 ifNull")
-
-                # 2.3 MySQL YEAR -> ClickHouse toYear(A)
-                elif func_name == "YEAR":
-                    arg_node = getattr(node, "this", None) or (
-                        node.expressions[0] if hasattr(node, "expressions") and node.expressions else None
-                    )
-                    if arg_node:
-                        new_node = sqlglot.parse_one(
-                            f"toYear({arg_node.sql(dialect='clickhouse')})", read="clickhouse"
-                        )
-                        node.replace(new_node)
-                        logger.debug("[AST自愈] 重写 YEAR 为 toYear")
-
-                # 2.4 MySQL MONTH -> ClickHouse toMonth(A)
-                elif func_name == "MONTH":
-                    arg_node = getattr(node, "this", None) or (
-                        node.expressions[0] if hasattr(node, "expressions") and node.expressions else None
-                    )
-                    if arg_node:
-                        new_node = sqlglot.parse_one(
-                            f"toMonth({arg_node.sql(dialect='clickhouse')})", read="clickhouse"
-                        )
-                        node.replace(new_node)
-                        logger.debug("[AST自愈] 重写 MONTH 为 toMonth")
-
-                # 2.5 MySQL CURDATE -> ClickHouse today()
-                elif func_name in ("CURDATE", "CURRENTDATE", "CURRENT_DATE"):
-                    new_node = sqlglot.parse_one("today()", read="clickhouse")
-                    node.replace(new_node)
-                    logger.debug("[AST自愈] 重写 CURDATE 为 today()")
-
-                # 2.6 MySQL GROUP_CONCAT -> ClickHouse arrayStringConcat(groupUniqArray(col), sep)
-                elif func_name in ("GROUP_CONCAT", "GROUPCONCAT"):
-                    col_node = getattr(node, "this", None) or (
-                        node.expressions[0] if hasattr(node, "expressions") and node.expressions else None
-                    )
-                    sep_node = node.args.get("separator") if hasattr(node, "args") else None
-                    if not sep_node and hasattr(node, "expressions") and len(node.expressions) > 1:
-                        sep_node = node.expressions[1]
-                    sep = sep_node.sql(dialect="clickhouse") if sep_node else "',' "
-                    if col_node:
-                        col = col_node.sql(dialect="clickhouse")
-                        new_node = sqlglot.parse_one(
-                            f"arrayStringConcat(groupUniqArray({col}), {sep})", read="clickhouse"
-                        )
-                        node.replace(new_node)
-                        logger.debug("[AST自愈] 重写 GROUP_CONCAT 为 arrayStringConcat")
-
-                # 2.7 MySQL DATE_FORMAT -> ClickHouse formatDateTime
-                elif func_name in ("DATE_FORMAT", "DATEFORMAT"):
-                    args = (
-                        list(node.expressions)
-                        if hasattr(node, "expressions") and node.expressions
-                        else [getattr(node, "this", None), getattr(node, "expression", None)]
-                    )
-                    args = [a for a in args if a is not None]
-                    if len(args) == 2:
-                        arg1, arg2 = args[0].sql(dialect="clickhouse"), args[1].sql(dialect="clickhouse")
-                        new_node = sqlglot.parse_one(f"formatDateTime({arg1}, {arg2})", read="clickhouse")
-                        node.replace(new_node)
-                        logger.debug("[AST自愈] 重写 DATE_FORMAT 为 formatDateTime")
-
+            if not isinstance(node, (exp.Func, exp.Anonymous)):
+                continue
+            func_name = (
+                getattr(node, "name", "")
+                or getattr(node, "key", "")
+                or node.__class__.__name__
+            ).upper()
+            if not cls._rewrite_binary_dialect_func(node, func_name):
+                cls._rewrite_unary_dialect_func(node, func_name)
         return expression
 
     # ──────────────────────────────────────────────────────────────

@@ -251,8 +251,8 @@ class MemoryConflictArbiter:
                 if end_date < now:
                     # 历史时段已自然届满失效
                     return "TEMPORAL_VALIDITY", "TIME_BOUNDED_EXEMPTION", "EXPIRED"
-            except Exception:
-                pass
+            except ValueError as exc:
+                logger.debug(f"[MemoryConflictArbiter] validity end date parse skipped: {exc}")
 
         # 1. 实体识别 (Entity)
         entity = "GLOBAL"
@@ -323,15 +323,15 @@ class MemoryConflictArbiter:
         if date_match:
             try:
                 return datetime.datetime.strptime(date_match.group(1), "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                pass
+            except ValueError as exc:
+                logger.debug(f"[MemoryConflictArbiter] full timestamp parse skipped: {exc}")
         
         date_short_match = re.search(r'(\d{4}-\d{2}-\d{2})', text)
         if date_short_match:
             try:
                 return datetime.datetime.strptime(date_short_match.group(1), "%Y-%m-%d")
-            except Exception:
-                pass
+            except ValueError as exc:
+                logger.debug(f"[MemoryConflictArbiter] short date parse skipped: {exc}")
 
         return fallback_time
 
