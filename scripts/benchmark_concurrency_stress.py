@@ -30,23 +30,23 @@ def test_component_concurrency_stress():
     print("[基准压测 1] 底层驱动与度量高并发竞争压力测试 (50 线程并发)")
     print("="*60)
 
-    # 1. 压测 CharsetProxy 互斥与无重叠
-    class MockDbClient:
+    # 1. 压测 Native 驱动 CharsetProxy 互斥与无重叠
+    class MockNativeDbClient:
         def __init__(self):
             self.overlap = 0
             self.current = 0
             self.total = 0
 
-        def query(self, sql):
+        def execute(self, sql, with_column_types=False):
             self.current += 1
             if self.current > self.overlap:
                 self.overlap = self.current
             time.sleep(0.005)  # 5ms 数据库查询耗时
             self.current -= 1
             self.total += 1
-            return [{"id": 1}]
+            return [(1,)], [("id", "Int32")]
 
-    mock_db = MockDbClient()
+    mock_db = MockNativeDbClient()
     proxy = CharsetProxy(mock_db)
 
     start = time.perf_counter()
@@ -117,37 +117,33 @@ def test_task_pool_concurrency_stress():
     print("  [压测 2 通过] TaskPool 在 50 线程并发审批竞争下维持原子状态机，无死锁或数据冲突！")
 
 
+@contextmanager
+def _mock_dist_lock(self, key, timeout=120):
+    import threading
+
+    if not hasattr(self, "_stress_locks"):
+        self._stress_locks = set()
+        self._stress_lock_obj = threading.Lock()
+
+    with self._stress_lock_obj:
+        if key in self._stress_locks:
+            yield False
+            return
+        self._stress_locks.add(key)
+
+    try:
+        yield True
+    finally:
+        with self._stress_lock_obj:
+            self._stress_locks.discard(key)
+
+
 async def test_api_session_burst_stress():
     print("\n" + "="*60)
     print("[基准压测 3] API 会话级瞬时突发 (Burst) 防重防冲刷压测 (20 并发协程)")
     print("="*60)
 
     coordinator = ChatStreamCoordinator()
-
-    # 模拟真实锁池：同一 session_id 只有一个持有者
-    active_locks = set()
-    lock_mutex = asyncio.Lock()
-
-    @contextmanager
-    def mock_dist_lock(self, key, timeout=120):
-        # 简单模拟带互斥语义的锁
-        import threading
-        if not hasattr(self, "_stress_locks"):
-            self._stress_locks = set()
-            self._stress_lock_obj = threading.Lock()
-        
-        with self._stress_lock_obj:
-            if key in self._stress_locks:
-                yield False
-                return
-            self._stress_locks.add(key)
-        
-        try:
-            yield True
-        finally:
-            with self._stress_lock_obj:
-                self._stress_locks.discard(key)
-
     req = MagicMock()
     req.app.state.saver = None
     bg_tasks = MagicMock()
@@ -168,29 +164,28 @@ async def test_api_session_burst_stress():
         try:
             async for chunk in gen:
                 chunks.append(chunk)
-                # 模拟推演首包耗时，保持锁持有
                 if passed_count == 0 and "[[[ENGINE" in chunk:
                     await asyncio.sleep(0.05)
         except Exception as exc:
             print(f"[WARN] client #{client_id} stream aborted: {exc}")
 
-        full_resp = "".join(chunks)
-        if "请勿重复提交" in full_resp:
+        if "请勿重复提交" in "".join(chunks):
             intercepted_count += 1
         else:
             passed_count += 1
 
-    with patch("app.infra.redis_client.RedisClient.dist_lock", mock_dist_lock):
-        with patch("app.api.chat_stream_coordinator.get_graph_executor") as mock_exec:
-            mock_graph = MagicMock()
-            async def fake_stream(*args, **kwargs):
-                yield {"event": "on_chat_model_stream", "name": "r", "metadata": {}, "data": {"chunk": MagicMock(content="模拟推演结果")}}
-            mock_graph.astream_events = fake_stream
-            mock_graph.aget_state = MagicMock(return_value=MagicMock(next=None))
-            mock_exec.return_value = (mock_graph, "stress_model")
+    with patch("app.infra.redis_client.RedisClient.dist_lock", _mock_dist_lock), \
+         patch("app.api.chat_stream_coordinator.get_graph_executor") as mock_exec:
+        mock_graph = MagicMock()
 
-            # 20 个请求同时迸发打入同一 session_id
-            await asyncio.gather(*[single_client_call(i) for i in range(20)])
+        async def fake_stream(*args, **kwargs):
+            yield {"event": "on_chat_model_stream", "name": "r", "metadata": {}, "data": {"chunk": MagicMock(content="模拟推演结果")}}
+
+        mock_graph.astream_events = fake_stream
+        mock_graph.aget_state = MagicMock(return_value=MagicMock(next=None))
+        mock_exec.return_value = (mock_graph, "stress_model")
+
+        await asyncio.gather(*[single_client_call(i) for i in range(20)])
 
     print(f"  - 突发总请求数: 20")
     print(f"  - 成功通行进入推演: {passed_count} 笔 (期望严格等于 1)")
