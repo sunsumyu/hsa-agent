@@ -7,7 +7,6 @@ domains/legal/agents/consultation_advisor.py
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Tuple
 from domains.legal.agents.llm_client import ainvoke_legal_text
 
@@ -24,37 +23,40 @@ _CONSULTATION_SYSTEM_PROMPT = """你是一名中国顶尖律所资深民商事�
 5. 【分期还款和解协议核心红线条款】（加速到期、违约追加保证人等）。"""
 
 
-class ConsultationAdvisor:
-    """诉前协商咨询与纠纷调解顾问引擎"""
+_CONSULTATION_SCENARIOS: Tuple[Tuple[Tuple[str, ...], str, str, str], ...] = (
+    (
+        ("借", "欠", "借条", "借贷", "借款", "还款", "利息", "欠钱", "还钱", "债务"),
+        "民间借贷 / 个人欠款清收",
+        "借条原件、银行/微信转账回单、催款聊天记录",
+        "核实对方真实偿债能力与财产线索，以'核对账目明细'为由让对方在微信中明确承认欠款本息数额与延期承诺，完成诉讼时效中断与债务自认固定。",
+    ),
+    (
+        ("租房", "房东", "租客", "押金", "退租", "水管"),
+        "房屋租赁退租与押金返还纠纷",
+        "租赁合同、押金收条、房屋交接清点照片/视频、退租水电气结清凭据",
+        "拍照固定房屋完好交接现状与水电气表底数，通过微信书面发出《房屋交接及押金退还确认单》，限期3日内核对退还。",
+    ),
+    (
+        ("工资", "离职", "辞退", "开除", "加班", "赔偿金", "裁员"),
+        "劳动仲裁前劳资谈判与离职补偿",
+        "劳动合同、工资流水、考勤打卡记录、钉钉/企微工作安排记录、违法解除通知书",
+        "保持常态履职，切勿旷工；全程录音并书面固定用人单位单方解除意图，测算经济补偿金（N或2N+1）及未结工资加班费底牌。",
+    ),
+    (
+        ("货款", "买卖", "不结账", "拖欠", "供货", "产品瑕疵"),
+        "商事买卖合同货款催收",
+        "采购合同/订单、送货单/签收回执原件、增值税对账单、催款邮件/微信记录",
+        "利用季度/年末对账契机，促使对方在《债权债务对账确认函》上加盖公章或财务章，锁定最终欠款数额与付款截止日。",
+    ),
+)
 
-    def advise_fallback(self, prompt: str) -> str:
-        is_debt = any(kw in prompt for kw in ["借", "欠", "借条", "借贷", "借款", "还款", "利息", "欠钱", "还钱", "债务"])
-        is_lease = any(kw in prompt for kw in ["租房", "房东", "租客", "押金", "退租", "水管"])
-        is_labor = any(kw in prompt for kw in ["工资", "离职", "辞退", "开除", "加班", "赔偿金", "裁员"])
-        is_sales = any(kw in prompt for kw in ["货款", "买卖", "不结账", "拖欠", "供货", "产品瑕疵"])
+_DEFAULT_CONSULTATION_SCENARIO = (
+    "民商事合同履约与违约维权",
+    "合同正本、履约通知、支付凭证、违约事实客观留痕",
+    "全面梳理双方履行节点，固定对方违约具体时间点与事实依据，发出正式履约催告。",
+)
 
-        if is_debt:
-            focus_title = "民间借贷 / 个人欠款清收"
-            key_evidence = "借条原件、银行/微信转账回单、催款聊天记录"
-            step1_action = "核实对方真实偿债能力与财产线索，以'核对账目明细'为由让对方在微信中明确承认欠款本息数额与延期承诺，完成诉讼时效中断与债务自认固定。"
-        elif is_lease:
-            focus_title = "房屋租赁退租与押金返还纠纷"
-            key_evidence = "租赁合同、押金收条、房屋交接清点照片/视频、退租水电气结清凭据"
-            step1_action = "拍照固定房屋完好交接现状与水电气表底数，通过微信书面发出《房屋交接及押金退还确认单》，限期3日内核对退还。"
-        elif is_labor:
-            focus_title = "劳动仲裁前劳资谈判与离职补偿"
-            key_evidence = "劳动合同、工资流水、考勤打卡记录、钉钉/企微工作安排记录、违法解除通知书"
-            step1_action = "保持常态履职，切勿旷工；全程录音并书面固定用人单位单方解除意图，测算经济补偿金（N或2N+1）及未结工资加班费底牌。"
-        elif is_sales:
-            focus_title = "商事买卖合同货款催收"
-            key_evidence = "采购合同/订单、送货单/签收回执原件、增值税对账单、催款邮件/微信记录"
-            step1_action = "利用季度/年末对账契机，促使对方在《债权债务对账确认函》上加盖公章或财务章，锁定最终欠款数额与付款截止日。"
-        else:
-            focus_title = "民商事合同履约与违约维权"
-            key_evidence = "合同正本、履约通知、支付凭证、违约事实客观留痕"
-            step1_action = "全面梳理双方履行节点，固定对方违约具体时间点与事实依据，发出正式履约催告。"
-
-        return f"""## 💬 【诉前协商与调解方案】
+_CONSULTATION_FALLBACK_TEMPLATE = """## 💬 【诉前协商与调解方案】
 
 > **纠纷归类**: `{focus_title}` · **核心目标**: 以打促和 · 留痕取证 · 零成本赋予执行力
 
@@ -111,6 +113,26 @@ XX：
 1. **加速到期条款**: “若借款人/债务人未能在任何一期约定期限内足额清偿当期款项的，出借人有权宣布全部剩余债务立即到期，并就全部未受偿本息向法院申请强制执行或提起诉讼。”
 2. **维权费用自愿承担**: “债务人承诺，因其违约导致债权人维权所发生的一切诉讼费、律师费、保全保函费、公证费，均由债务人全额赔偿。”
 3. **增加保证人或抵质押物**: 如对方要求较长分期，必须要求其配偶、父母或关联公司作为**连带责任保证人**在协议上共同签字。"""
+
+
+def _resolve_consultation_scenario(prompt: str) -> Tuple[str, str, str]:
+    """根据咨询描述匹配纠纷归类、核心凭证与首轮谈判话术动作。"""
+    for kws, focus_title, key_evidence, step1_action in _CONSULTATION_SCENARIOS:
+        if any(kw in prompt for kw in kws):
+            return focus_title, key_evidence, step1_action
+    return _DEFAULT_CONSULTATION_SCENARIO
+
+
+class ConsultationAdvisor:
+    """诉前协商咨询与纠纷调解顾问引擎"""
+
+    def advise_fallback(self, prompt: str) -> str:
+        focus_title, key_evidence, step1_action = _resolve_consultation_scenario(prompt)
+        return _CONSULTATION_FALLBACK_TEMPLATE.format(
+            focus_title=focus_title,
+            key_evidence=key_evidence,
+            step1_action=step1_action,
+        )
 
     async def aadvise(self, prompt: str) -> Tuple[str, Dict[str, Any]]:
         user_prompt = f"请针对以下纠纷咨询提供专业的诉前协商与调解方案：\n\n```text\n{prompt}\n```"

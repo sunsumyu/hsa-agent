@@ -58,97 +58,110 @@ def _has_keyword_affirmatively(text: str, keywords: Tuple[str, ...]) -> bool:
     return any((kw in text) and not _is_negated(text, kw) for kw in keywords)
 
 
+_EVIDENCE_EXTRACTION_RULES: Tuple[Dict[str, Any], ...] = (
+    {
+        "kws": ("转账", "流水", "回单", "汇款"),
+        "missing_kws": ("转账", "流水", "回单", "现金交付"),
+        "missing_msg": "银行转账流水 / 收款收据原件（当前缺乏资金实际交付凭证）",
+        "title_unsubmitted": "银行转账凭单（陈述提及）",
+        "title_submitted": "银行转账凭单",
+        "evidence_type": "电子数据",
+        "summary": "待核验出借人/付款方资金交付流水事实",
+    },
+    {
+        "kws": ("借条", "欠条", "借款协议", "买卖合同", "合同"),
+        "missing_kws": ("借条", "欠条", "协议", "合同"),
+        "missing_msg": "借条 / 书面合同原件",
+        "title_unsubmitted": "借据/合同文本（陈述提及）",
+        "title_submitted": "借据/合同原件",
+        "evidence_type": "书证",
+        "summary": "待核验双方合意及权利义务条款",
+    },
+    {
+        "kws": ("微信", "聊天记录", "催款"),
+        "missing_kws": (),
+        "missing_msg": "",
+        "title_unsubmitted": "微信催款及债务确认记录",
+        "title_submitted": "微信催款及债务确认记录",
+        "evidence_type": "电子数据",
+        "summary": "当事人沟通记录（证明还款催告与诉讼时效中断）",
+    },
+    {
+        "kws": ("送货", "签收", "收货单", "入库单"),
+        "missing_kws": (),
+        "missing_msg": "",
+        "title_unsubmitted": "物资送货签收单",
+        "title_submitted": "物资送货签收单",
+        "evidence_type": "书证",
+        "summary": "买卖合同履行（货物送达及收货方盖章签收）",
+    },
+    {
+        "kws": ("事故认定", "交警认定", "医疗费发票", "伤残鉴定", "交强险", "保单"),
+        "missing_kws": (),
+        "missing_msg": "",
+        "title_unsubmitted": "交通事故责任认定书及医疗损害鉴定材料",
+        "title_submitted": "交通事故责任认定书及医疗损害鉴定材料",
+        "evidence_type": "书证",
+        "summary": "证明侵权事实、交警责任划分比例、保险承保情况及人身损害诊疗支出",
+    },
+    {
+        "kws": ("租赁合同", "租房合同", "押金收据", "押金收条", "退租交接", "房屋交接", "钥匙移交"),
+        "missing_kws": (),
+        "missing_msg": "",
+        "title_unsubmitted": "房屋租赁合同及退租交接凭据",
+        "title_submitted": "房屋租赁合同及退租交接凭据",
+        "evidence_type": "书证",
+        "summary": "证明租赁关系成立、押金交付、租期解除通知及房屋实际腾退交付状态",
+    },
+    {
+        "kws": ("竣工验收", "工程结算", "工程价款审核", "实际施工人", "挂靠"),
+        "missing_kws": (),
+        "missing_msg": "",
+        "title_unsubmitted": "建设工程施工与竣工结算审核资料",
+        "title_submitted": "建设工程施工与竣工结算审核资料",
+        "evidence_type": "书证",
+        "summary": "证明建设工程五方验收合格、审定工程总造价及发承包人欠款数额",
+    },
+    {
+        "kws": ("代发工资", "工资流水", "钉钉打卡", "考勤记录", "解除通知", "离职证明", "移出工作群"),
+        "missing_kws": (),
+        "missing_msg": "",
+        "title_unsubmitted": "劳动关系存续与单方解除用工凭证",
+        "title_submitted": "劳动关系存续与单方解除用工凭证",
+        "evidence_type": "电子数据",
+        "summary": "证明事实劳动关系用工事实、发放工资标准及单方违法辞退事实",
+    },
+)
+
+
+def _evaluate_evidence_rules(
+    text: str, is_submitted: bool
+) -> Tuple[List[EvidenceItem], List[str]]:
+    """按声明式规则列表提取肯定陈述证据及缺失项。"""
+    sub_status = "已提交原件/核验" if is_submitted else "仅口头陈述提及（待提交）"
+    auth_level = "中" if is_submitted else "存疑"
+    evidence_list: List[EvidenceItem] = []
+    missing_list: List[str] = []
+
+    for rule in _EVIDENCE_EXTRACTION_RULES:
+        if _has_keyword_affirmatively(text, rule["kws"]):
+            evidence_list.append(EvidenceItem(
+                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
+                title=rule["title_submitted"] if is_submitted else rule["title_unsubmitted"],
+                evidence_type=rule["evidence_type"],
+                content_summary=rule["summary"],
+                authenticity_level=auth_level,
+                submission_status=sub_status,
+            ))
+        elif rule["missing_kws"] and any(k in text for k in rule["missing_kws"]):
+            missing_list.append(rule["missing_msg"])
+    return evidence_list, missing_list
+
+
 class FactExtractor:
     def extract_with_missing(self, text: str) -> Tuple[List[CaseFact], List[EvidenceItem], List[str]]:
-        evidence_list: List[EvidenceItem] = []
-        missing_list: List[str] = []
         is_submitted = any(h in text for h in _SUBMITTED_HINTS)
-        sub_status = "已提交原件/核验" if is_submitted else "仅口头陈述提及（待提交）"
-        auth_level = "中" if is_submitted else "存疑"
-
-        if _has_keyword_affirmatively(text, ("转账", "流水", "回单", "汇款")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="银行转账凭单（陈述提及）" if not is_submitted else "银行转账凭单",
-                evidence_type="电子数据",
-                content_summary="待核验出借人/付款方资金交付流水事实",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-        elif any(k in text for k in ("转账", "流水", "回单", "现金交付")):
-            missing_list.append("银行转账流水 / 收款收据原件（当前缺乏资金实际交付凭证）")
-
-        if _has_keyword_affirmatively(text, ("借条", "欠条", "借款协议", "买卖合同", "合同")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="借据/合同文本（陈述提及）" if not is_submitted else "借据/合同原件",
-                evidence_type="书证",
-                content_summary="待核验双方合意及权利义务条款",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-        elif any(k in text for k in ("借条", "欠条", "协议", "合同")):
-            missing_list.append("借条 / 书面合同原件")
-
-        if _has_keyword_affirmatively(text, ("微信", "聊天记录", "催款")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="微信催款及债务确认记录",
-                evidence_type="电子数据",
-                content_summary="当事人沟通记录（证明还款催告与诉讼时效中断）",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-
-        if _has_keyword_affirmatively(text, ("送货", "签收", "收货单", "入库单")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="物资送货签收单",
-                evidence_type="书证",
-                content_summary="买卖合同履行（货物送达及收货方盖章签收）",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-
-        if _has_keyword_affirmatively(text, ("事故认定", "交警认定", "医疗费发票", "伤残鉴定", "交强险", "保单")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="交通事故责任认定书及医疗损害鉴定材料",
-                evidence_type="书证",
-                content_summary="证明侵权事实、交警责任划分比例、保险承保情况及人身损害诊疗支出",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-
-        if _has_keyword_affirmatively(text, ("租赁合同", "租房合同", "押金收据", "押金收条", "退租交接", "房屋交接", "钥匙移交")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="房屋租赁合同及退租交接凭据",
-                evidence_type="书证",
-                content_summary="证明租赁关系成立、押金交付、租期解除通知及房屋实际腾退交付状态",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-
-        if _has_keyword_affirmatively(text, ("竣工验收", "工程结算", "工程价款审核", "实际施工人", "挂靠")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="建设工程施工与竣工结算审核资料",
-                evidence_type="书证",
-                content_summary="证明建设工程五方验收合格、审定工程总造价及发承包人欠款数额",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
-
-        if _has_keyword_affirmatively(text, ("代发工资", "工资流水", "钉钉打卡", "考勤记录", "解除通知", "离职证明", "移出工作群")):
-            evidence_list.append(EvidenceItem(
-                evidence_id=f"EVD-{len(evidence_list)+1:02d}",
-                title="劳动关系存续与单方解除用工凭证",
-                evidence_type="电子数据",
-                content_summary="证明事实劳动关系用工事实、发放工资标准及单方违法辞退事实",
-                authenticity_level=auth_level,
-                submission_status=sub_status,
-            ))
+        evidence_list, missing_list = _evaluate_evidence_rules(text, is_submitted)
 
         if not is_submitted and evidence_list:
             missing_list.append("上述陈述提及凭证的扫描件/原件核验材料")

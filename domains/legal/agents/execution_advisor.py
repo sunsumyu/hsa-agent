@@ -8,7 +8,6 @@ domains/legal/agents/execution_advisor.py
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Tuple
 from domains.legal.agents.llm_client import ainvoke_legal_text
 
@@ -46,33 +45,34 @@ _EXECUTION_SYSTEM_PROMPT = """你是一名中国顶尖律所民商事强制执�
    - 《续行查封/冻结申请书》。"""
 
 
-class ExecutionAdvisor:
-    """强制执行实务与财产查控顾问引擎"""
+_EXECUTION_SCENARIOS: Tuple[Tuple[Tuple[str, ...], str, str, str], ...] = (
+    (
+        ("工程", "施工", "总包", "分包", "欠付工程款", "发包人"),
+        "建设工程款生效裁判强制执行 · 次债务人到期债权执行",
+        "重点申请法院向发包人（次债务人）发出《履行到期债务通知书》（《民事诉讼法解释》第501条）。发包人在收到通知后15日内未提异议又未履行的，法院可直接裁定强制执行发包人！同时查控施工现场大型机械设备及未结算工程进度款。",
+        "若总包单位系空壳挂靠且无资产，审查挂靠协议与工程款流水，追加实际收取管理费的资质出借企业及未实缴出资原股东为被执行人。",
+    ),
+    (
+        ("劳动", "仲裁", "工资", "裁员", "补偿金", "用人单位"),
+        "劳动争议生效裁决/调解强制执行 · 企业法人与股东穿透",
+        "第一时间申请法院总对总查控用人单位基本户、微信商户号流水，并申请对企业法定代表人采取限制高消费措施。企业失信限高直接瘫痪其招投标与银行信贷业务。",
+        "若公司恶意逃废债停业或注销，依据《最高人民法院关于民事执行中变更、追加当事人若干问题的规定》第20条/第21条，追加未经清算即注销的股东、或一人有限公司无法证明财产独立的原股东承担连带清偿责任。",
+    ),
+    (
+        ("公司", "股东", "注销", "空壳", "换壳", "实缴", "出资", "法定代表人"),
+        "企业债务执行困境 · 穿透追加未实缴股东与抽逃出资",
+        "调取被执行企业近三年银行对账流水，排查大额资金异常流向关联公司或法定代表人个人账户的隐匿行为，申请审计调查令排查抽逃出资。",
+        "依据《最高人民法院关于民事执行中变更、追加当事人若干问题的规定》第17条、第19条：被执行人作为企业法人，财产不足以清偿生效法律文书确定的债务，申请执行人申请追加未缴纳或未足额缴纳出资的股东、出资人或依公司法规定对该出资承担连带责任的发起人为被执行人，在尚未缴纳出资的范围内依法承担责任的，人民法院应予支持！",
+    ),
+)
 
-    def advise_fallback(self, prompt: str) -> str:
-        is_construction = any(kw in prompt for kw in ["工程", "施工", "总包", "分包", "欠付工程款", "发包人"])
-        is_labor = any(kw in prompt for kw in ["劳动", "仲裁", "工资", "裁员", "补偿金", "用人单位"])
-        is_company_debt = any(kw in prompt for kw in ["公司", "股东", "注销", "空壳", "换壳", "实缴", "出资", "法定代表人"])
-        is_private_debt = any(kw in prompt for kw in ["借款", "借条", "转账", "朋友", "个人借款", "利息"])
+_DEFAULT_EXECUTION_SCENARIO = (
+    "民间借贷/个人合同生效文书强制执行 · 全网查控与限高惩戒",
+    "申请总对总网络查控系统全面排查借款人名下全部银行卡、微信零钱通、支付宝余额宝、名下机动车登记、房产不动产登记及公积金账户；申请限制高消费令与列入失信被执行人黑名单。",
+    "若被执行人婚内借款且判决确认为夫妻共同债务的，申请追加配偶名下财产一并执行；若被执行人名下无财产但日常生活奢靡，固定其微信账单大额流水，向法院申请以涉嫌拒不执行判决、裁定罪移送公安机关刑事立案！",
+)
 
-        if is_construction:
-            scenario_title = "建设工程款生效裁判强制执行 · 次债务人到期债权执行"
-            asset_strategy = "重点申请法院向发包人（次债务人）发出《履行到期债务通知书》（《民事诉讼法解释》第501条）。发包人在收到通知后15日内未提异议又未履行的，法院可直接裁定强制执行发包人！同时查控施工现场大型机械设备及未结算工程进度款。"
-            pierce_strategy = "若总包单位系空壳挂靠且无资产，审查挂靠协议与工程款流水，追加实际收取管理费的资质出借企业及未实缴出资原股东为被执行人。"
-        elif is_labor:
-            scenario_title = "劳动争议生效裁决/调解强制执行 · 企业法人与股东穿透"
-            asset_strategy = "第一时间申请法院总对总查控用人单位基本户、微信商户号流水，并申请对企业法定代表人采取限制高消费措施。企业失信限高直接瘫痪其招投标与银行信贷业务。"
-            pierce_strategy = "若公司恶意逃废债停业或注销，依据《最高人民法院关于民事执行中变更、追加当事人若干问题的规定》第20条/第21条，追加未经清算即注销的股东、或一人有限公司无法证明财产独立的原股东承担连带清偿责任。"
-        elif is_company_debt:
-            scenario_title = "企业债务执行困境 · 穿透追加未实缴股东与抽逃出资"
-            asset_strategy = "调取被执行企业近三年银行对账流水，排查大额资金异常流向关联公司或法定代表人个人账户的隐匿行为，申请审计调查令排查抽逃出资。"
-            pierce_strategy = "依据《最高人民法院关于民事执行中变更、追加当事人若干问题的规定》第17条、第19条：被执行人作为企业法人，财产不足以清偿生效法律文书确定的债务，申请执行人申请追加未缴纳或未足额缴纳出资的股东、出资人或依公司法规定对该出资承担连带责任的发起人为被执行人，在尚未缴纳出资的范围内依法承担责任的，人民法院应予支持！"
-        else:
-            scenario_title = "民间借贷/个人合同生效文书强制执行 · 全网查控与限高惩戒"
-            asset_strategy = "申请总对总网络查控系统全面排查借款人名下全部银行卡、微信零钱通、支付宝余额宝、名下机动车登记、房产不动产登记及公积金账户；申请限制高消费令与列入失信被执行人黑名单。"
-            pierce_strategy = "若被执行人婚内借款且判决确认为夫妻共同债务的，申请追加配偶名下财产一并执行；若被执行人名下无财产但日常生活奢靡，固定其微信账单大额流水，向法院申请以涉嫌拒不执行判决、裁定罪移送公安机关刑事立案！"
-
-        return f"""## ⚡ 【强制执行实务与财产查控方案】
+_EXECUTION_FALLBACK_TEMPLATE = """## ⚡ 【强制执行实务与财产查控方案】
 
 > **执行专案场景**: `{scenario_title}` · **办案主旨**: 查控穿透 · 续冻防脱 · 限高惩戒 · 追加股东
 
@@ -147,6 +147,26 @@ class ExecutionAdvisor:
   - 📥 **《执行财产线索及调查令申请书》**: 申请法院开具律师调查令调取被执行人微信流水与银行卡交易明细；
   - 📥 **《续行查封/冻结申请书》**: 在1年/2年/3年期满前锁定查封顺位；
   - 📥 **《限制高消费及纳入失信被执行人名单申请书》**: 快速启动信用惩戒与高消费限制。"""
+
+
+def _resolve_execution_scenario(prompt: str) -> Tuple[str, str, str]:
+    """根据执行困境关键词匹配场景标题及查控穿透策略。"""
+    for kws, title, asset_strategy, pierce_strategy in _EXECUTION_SCENARIOS:
+        if any(kw in prompt for kw in kws):
+            return title, asset_strategy, pierce_strategy
+    return _DEFAULT_EXECUTION_SCENARIO
+
+
+class ExecutionAdvisor:
+    """强制执行实务与财产查控顾问引擎"""
+
+    def advise_fallback(self, prompt: str) -> str:
+        scenario_title, asset_strategy, pierce_strategy = _resolve_execution_scenario(prompt)
+        return _EXECUTION_FALLBACK_TEMPLATE.format(
+            scenario_title=scenario_title,
+            asset_strategy=asset_strategy,
+            pierce_strategy=pierce_strategy,
+        )
 
     async def aadvise(self, prompt: str) -> Tuple[str, Dict[str, Any]]:
         text, usage = await ainvoke_legal_text(

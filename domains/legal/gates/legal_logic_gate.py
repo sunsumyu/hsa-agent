@@ -1,4 +1,6 @@
+import re
 from typing import Dict, Any
+from loguru import logger
 from cores.gates.base_gate import BaseSymbolicGate, GateResult
 from domains.legal.gates.limitation_calculator import LimitationCalculator
 from domains.legal.gates.usury_evaluator import UsuryEvaluator
@@ -67,7 +69,6 @@ class LegalLogicGate(BaseSymbolicGate):
             )
 
         # 4. 利息上限门禁 (4倍 LPR 审查)
-        import re
         interest_match = re.search(r"年(?:利(?:率)?)?[:：\s]*(\d+(?:\.\d+)?)%", all_narratives)
         if interest_match:
             try:
@@ -79,7 +80,7 @@ class LegalLogicGate(BaseSymbolicGate):
                         reason=f"高额利息红线门禁拦截：{usury_res.clamping_notice} 建议调减利息诉求至法定4倍LPR以内。",
                         error_code="ERR_USURY_EXCEEDS_CEILING"
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"[LegalLogicGate] Interest rate parsing skipped: {exc}")
 
         return GateResult(passed=True)

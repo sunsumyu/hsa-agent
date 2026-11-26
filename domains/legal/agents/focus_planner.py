@@ -34,119 +34,128 @@ _PLANNER_SYSTEM_PROMPT = """你是一名资深民商事审判法官。请根据�
 }"""
 
 
+_STATIC_FOCUS_SPECS: Tuple[Dict[str, Any], ...] = (
+    {
+        "cause_kws": ("建设工程",),
+        "input_kws": ("施工", "工程款"),
+        "element_id": "project_completion",
+        "element_name": "工程竣工验收与工程款结算",
+        "statute_basis": "民法典第791条、第807条",
+        "issue_statement": "建设工程施工合同效力认定、实际施工人突破相对性追索及工程款结算依据是否充分",
+        "governing_statutes": ["最高人民法院关于审理建设工程施工合同纠纷案件适用法律问题的解释（一）第一条、第四十三条"],
+        "adjudication_tendency": "待结合竣工验收及签证资料认定",
+        "confidence_score": 0.65,
+    },
+    {
+        "cause_kws": ("劳动",),
+        "input_kws": ("二倍工资", "赔偿金", "辞退"),
+        "element_id": "employment_relationship",
+        "element_name": "劳动关系与违法解除赔偿",
+        "statute_basis": "劳动合同法第82条、第87条",
+        "issue_statement": "未订立书面劳动合同二倍工资差额起止期计算及解除劳动合同事由合法性审查",
+        "governing_statutes": ["中华人民共和国劳动合同法第十条、第四十七条、第八十七条"],
+        "adjudication_tendency": "待用人单位举证解除合法性",
+        "confidence_score": 0.7,
+    },
+    {
+        "cause_kws": ("交通事故",),
+        "input_kws": ("交强险", "交警", "相撞"),
+        "element_id": "insurance_compensation",
+        "element_name": "交强险先行全额赔偿与商业险责任比例划分",
+        "statute_basis": "民法典第1213条、交强险条例第21条",
+        "issue_statement": "机动车交通事故中承保交强险保险公司是否应在法定责任限额内先行足额赔偿（不分过错打折），以及超出部分按过错比例在商业三者险内分担",
+        "governing_statutes": [
+            "中华人民共和国民法典第一千二百零八条、第一千二百一十三条",
+            "最高人民法院指导案例第24号：荣宝英诉王阳、永诚财险案",
+        ],
+        "adjudication_tendency": "支持交强险限额内先行全额赔付，超出部分按主次责任分摊",
+        "confidence_score": 0.85,
+    },
+    {
+        "cause_kws": ("租赁",),
+        "input_kws": ("退租", "商铺", "租金"),
+        "element_id": "lease_termination_and_damages",
+        "element_name": "提前退租解约效力、押金冲抵及违约金合理性审查",
+        "statute_basis": "民法典第585条、第703条",
+        "issue_statement": "承租人提前退租解约效力认定、押金是否应当冲抵退还，以及出租人主张的违约金是否过分高于其实际空置期合理损失",
+        "governing_statutes": [
+            "中华人民共和国民法典第五百八十五条第二款、第七百零三条",
+            "最高人民法院关于审理城镇房屋租赁合同纠纷案件司法解释第六条",
+        ],
+        "adjudication_tendency": "待结合出租人减损义务及实际空置期损失依法酌减违约金",
+        "confidence_score": 0.75,
+    },
+)
+
+
+def _build_consensus_focus(cause_of_action: str) -> DisputeFocus:
+    """构建借贷/买卖合意类争议焦点。"""
+    is_loan = "借" in cause_of_action
+    slice_consensus = SyllogismSlice(
+        element_id="consensus",
+        element_name="借贷/交易合意",
+        statute_basis="民法典第667条" if is_loan else "民法典第595条",
+        is_satisfied=True,
+    )
+    return DisputeFocus(
+        focus_id="FOCUS-01",
+        issue_statement=(
+            "双方之间款项往来性质系民间借贷合意还是其他基础法律关系"
+            if is_loan
+            else "标的物交付、验收与货款/违约金支付要件是否成就"
+        ),
+        cause_of_action=cause_of_action,
+        governing_statutes=[
+            "最高人民法院关于审理民间借贷案件适用法律若干问题的规定第十六条"
+        ] if is_loan else ["民法典第577条、第585条"],
+        elements=[slice_consensus],
+        adjudication_tendency="待对抗举证认定",
+        confidence_score=0.6,
+    )
+
+
+def _build_default_focus(cause_of_action: str, schema: Any) -> DisputeFocus:
+    """未命中专项模板时构建通用兜底争议焦点。"""
+    statute_hint = (
+        f"{schema.governing_laws[0].name}{schema.governing_laws[0].article}"
+        if (schema and schema.governing_laws)
+        else "民法典合同编"
+    )
+    return DisputeFocus(
+        focus_id="FOCUS-DEFAULT",
+        issue_statement=f"{cause_of_action}成立要件与违约/还款责任认定",
+        cause_of_action=cause_of_action,
+        governing_statutes=[statute_hint],
+        elements=[],
+        adjudication_tendency="待综合认定",
+        confidence_score=0.5,
+    )
+
+
 class FocusPlanner:
     def plan(self, cause_of_action: str, user_input: str) -> List[DisputeFocus]:
         schema = statute_registry.get_cause_of_action(cause_of_action)
-        foci: List[DisputeFocus] = []
+        for spec in _STATIC_FOCUS_SPECS:
+            if any(k in cause_of_action for k in spec["cause_kws"]) or any(k in user_input for k in spec["input_kws"]):
+                elem = SyllogismSlice(
+                    element_id=spec["element_id"],
+                    element_name=spec["element_name"],
+                    statute_basis=spec["statute_basis"],
+                    is_satisfied=True,
+                )
+                return [DisputeFocus(
+                    focus_id="FOCUS-01",
+                    issue_statement=spec["issue_statement"],
+                    cause_of_action=cause_of_action,
+                    governing_statutes=list(spec["governing_statutes"]),
+                    elements=[elem],
+                    adjudication_tendency=spec["adjudication_tendency"],
+                    confidence_score=spec["confidence_score"],
+                )]
 
-        if "建设工程" in cause_of_action or "施工" in user_input or "工程款" in user_input:
-            slice_eng = SyllogismSlice(
-                element_id="project_completion",
-                element_name="工程竣工验收与工程款结算",
-                statute_basis="民法典第791条、第807条",
-                is_satisfied=True,
-            )
-            foci.append(DisputeFocus(
-                focus_id="FOCUS-01",
-                issue_statement="建设工程施工合同效力认定、实际施工人突破相对性追索及工程款结算依据是否充分",
-                cause_of_action=cause_of_action,
-                governing_statutes=["最高人民法院关于审理建设工程施工合同纠纷案件适用法律问题的解释（一）第一条、第四十三条"],
-                elements=[slice_eng],
-                adjudication_tendency="待结合竣工验收及签证资料认定",
-                confidence_score=0.65,
-            ))
-        elif "劳动" in cause_of_action or "二倍工资" in user_input or "赔偿金" in user_input or "辞退" in user_input:
-            slice_labor = SyllogismSlice(
-                element_id="employment_relationship",
-                element_name="劳动关系与违法解除赔偿",
-                statute_basis="劳动合同法第82条、第87条",
-                is_satisfied=True,
-            )
-            foci.append(DisputeFocus(
-                focus_id="FOCUS-01",
-                issue_statement="未订立书面劳动合同二倍工资差额起止期计算及解除劳动合同事由合法性审查",
-                cause_of_action=cause_of_action,
-                governing_statutes=["中华人民共和国劳动合同法第十条、第四十七条、第八十七条"],
-                elements=[slice_labor],
-                adjudication_tendency="待用人单位举证解除合法性",
-                confidence_score=0.7,
-            ))
-        elif "交通事故" in cause_of_action or "交强险" in user_input or "交警" in user_input or "相撞" in user_input:
-            slice_traffic = SyllogismSlice(
-                element_id="insurance_compensation",
-                element_name="交强险先行全额赔偿与商业险责任比例划分",
-                statute_basis="民法典第1213条、交强险条例第21条",
-                is_satisfied=True,
-            )
-            foci.append(DisputeFocus(
-                focus_id="FOCUS-01",
-                issue_statement="机动车交通事故中承保交强险保险公司是否应在法定责任限额内先行足额赔偿（不分过错打折），以及超出部分按过错比例在商业三者险内分担",
-                cause_of_action=cause_of_action,
-                governing_statutes=[
-                    "中华人民共和国民法典第一千二百零八条、第一千二百一十三条",
-                    "最高人民法院指导案例第24号：荣宝英诉王阳、永诚财险案",
-                ],
-                elements=[slice_traffic],
-                adjudication_tendency="支持交强险限额内先行全额赔付，超出部分按主次责任分摊",
-                confidence_score=0.85,
-            ))
-        elif "租赁" in cause_of_action or "退租" in user_input or "商铺" in user_input or "租金" in user_input:
-            slice_lease = SyllogismSlice(
-                element_id="lease_termination_and_damages",
-                element_name="提前退租解约效力、押金冲抵及违约金合理性审查",
-                statute_basis="民法典第585条、第703条",
-                is_satisfied=True,
-            )
-            foci.append(DisputeFocus(
-                focus_id="FOCUS-01",
-                issue_statement="承租人提前退租解约效力认定、押金是否应当冲抵退还，以及出租人主张的违约金是否过分高于其实际空置期合理损失",
-                cause_of_action=cause_of_action,
-                governing_statutes=[
-                    "中华人民共和国民法典第五百八十五条第二款、第七百零三条",
-                    "最高人民法院关于审理城镇房屋租赁合同纠纷案件司法解释第六条",
-                ],
-                elements=[slice_lease],
-                adjudication_tendency="待结合出租人减损义务及实际空置期损失依法酌减违约金",
-                confidence_score=0.75,
-            ))
-        elif "合意" in user_input or "借条" in user_input or "货款" in user_input or "投资" in user_input:
-            slice_consensus = SyllogismSlice(
-                element_id="consensus",
-                element_name="借贷/交易合意",
-                statute_basis="民法典第667条" if "借" in cause_of_action else "民法典第595条",
-                is_satisfied=True,
-            )
-            foci.append(DisputeFocus(
-                focus_id="FOCUS-01",
-                issue_statement="双方之间款项往来性质系民间借贷合意还是其他基础法律关系"
-                if "借" in cause_of_action
-                else "标的物交付、验收与货款/违约金支付要件是否成就",
-                cause_of_action=cause_of_action,
-                governing_statutes=[
-                    "最高人民法院关于审理民间借贷案件适用法律若干问题的规定第十六条"
-                ] if "借" in cause_of_action else ["民法典第577条、第585条"],
-                elements=[slice_consensus],
-                adjudication_tendency="待对抗举证认定",
-                confidence_score=0.6,
-            ))
-
-        if not foci:
-            statute_hint = (
-                f"{schema.governing_laws[0].name}{schema.governing_laws[0].article}"
-                if (schema and schema.governing_laws)
-                else "民法典合同编"
-            )
-            foci.append(DisputeFocus(
-                focus_id="FOCUS-DEFAULT",
-                issue_statement=f"{cause_of_action}成立要件与违约/还款责任认定",
-                cause_of_action=cause_of_action,
-                governing_statutes=[statute_hint],
-                elements=[],
-                adjudication_tendency="待综合认定",
-                confidence_score=0.5,
-            ))
-
-        return foci
+        if any(k in user_input for k in ("合意", "借条", "货款", "投资")):
+            return [_build_consensus_focus(cause_of_action)]
+        return [_build_default_focus(cause_of_action, schema)]
 
     async def aplan(
         self,
