@@ -8,15 +8,24 @@ and multi-tenant isolation.
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from langchain_core.messages import AIMessage, HumanMessage
 from loguru import logger
 
 from app.core.container import LazyProxy
 from app.core.context import tenant_context
+from app.core.memory.conversation_organizer import (
+    ConversationOrganizer,
+    OrganizedSession,
+    conversation_organizer,
+    extract_turns,
+)
 from app.core.memory.pii_scrubber import pii_scrubber
 from app.core.memory.session_title_generator import (
     SessionTitleGenerator,
@@ -57,6 +66,7 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "archived": bool(row["archived"]),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "parent_session_id": row["parent_session_id"] if "parent_session_id" in row.keys() else None,
     }
 
 
@@ -94,7 +104,23 @@ class SessionStore:
                     message_count INTEGER NOT NULL DEFAULT 0,
                     pinned INTEGER NOT NULL DEFAULT 0,
                     archived INTEGER NOT NULL DEFAULT 0,
+                    parent_session_id TEXT DEFAULT NULL,
                     created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()}
+            if "parent_session_id" not in cols:
+                conn.execute("ALTER TABLE chat_sessions ADD COLUMN parent_session_id TEXT DEFAULT NULL")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS session_organizers (
+                    session_id TEXT PRIMARY KEY,
+                    source_message_count INTEGER NOT NULL DEFAULT 0,
+                    mode TEXT NOT NULL DEFAULT 'heuristic',
+                    topics_json TEXT NOT NULL DEFAULT '[]',
+                    noise_turns_json TEXT NOT NULL DEFAULT '[]',
                     updated_at TEXT NOT NULL
                 )
                 """
@@ -273,8 +299,10 @@ class SessionStore:
                 "DELETE FROM chat_sessions WHERE session_id = ? AND tenant_id = ?",
                 (sid, tenant),
             )
-            conn.commit()
             deleted = cursor.rowcount > 0
+            if deleted:
+                conn.execute("DELETE FROM session_organizers WHERE session_id = ?", (sid,))
+            conn.commit()
         if deleted and history_mgr is not None:
             history_mgr.delete_history(sid)
         return deleted
@@ -317,6 +345,152 @@ class SessionStore:
         if self.update_title_from_llm(session_id, refined, force=force):
             return refined
         return None
+
+    def get_organized_topics(self, session_id: str, *, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Retrieve cached topic/noise organization for an existing tenant session."""
+        sid = _validate_session_id(session_id)
+        session = self.get_session(sid, tenant_id=tenant_id)
+        if session is None:
+            raise KeyError(sid)
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM session_organizers WHERE session_id = ?", (sid,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "session_id": sid,
+            "mode": row["mode"],
+            "source_message_count": int(row["source_message_count"]),
+            "is_stale": int(row["source_message_count"]) != session["message_count"],
+            "topics": json.loads(row["topics_json"]),
+            "noise_turns": json.loads(row["noise_turns_json"]),
+            "updated_at": row["updated_at"],
+        }
+
+    def save_organized_topics(
+        self,
+        session_id: str,
+        organized: OrganizedSession,
+        source_message_count: int,
+    ) -> Dict[str, Any]:
+        """Persist organized topic clusters and noise entries in SQLite cache."""
+        sid = _validate_session_id(session_id)
+        now = _utc_now_iso()
+        topics_payload = [t.model_dump() for t in organized.topics]
+        noise_payload = [n.model_dump() for n in organized.noise_turns]
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO session_organizers (
+                    session_id, source_message_count, mode, topics_json, noise_turns_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    source_message_count = excluded.source_message_count,
+                    mode = excluded.mode,
+                    topics_json = excluded.topics_json,
+                    noise_turns_json = excluded.noise_turns_json,
+                    updated_at = excluded.updated_at
+                """,
+                (sid, source_message_count, organized.mode, json.dumps(topics_payload, ensure_ascii=False), json.dumps(noise_payload, ensure_ascii=False), now),
+            )
+            conn.commit()
+        return {
+            "session_id": sid,
+            "mode": organized.mode,
+            "source_message_count": source_message_count,
+            "is_stale": False,
+            "topics": topics_payload,
+            "noise_turns": noise_payload,
+            "updated_at": now,
+        }
+
+    async def organize_session(
+        self,
+        session_id: str,
+        history_mgr,
+        *,
+        organizer: Optional[ConversationOrganizer] = None,
+        force: bool = False,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Organize session turns into topics and noise, using cache when fresh."""
+        sid = _validate_session_id(session_id)
+        session = self.get_session(sid, tenant_id=tenant_id)
+        if session is None:
+            raise KeyError(sid)
+        messages = history_mgr.get_history(sid, auto_recover=False)
+        turns = extract_turns(messages)
+        turns_payload = [t.model_dump() for t in turns]
+
+        if not force:
+            cached = self.get_organized_topics(sid, tenant_id=tenant_id)
+            if cached is not None and not cached["is_stale"]:
+                return {**cached, "turns": turns_payload}
+
+        org = organizer or conversation_organizer
+        organized = await org.organize(messages, domain=session["domain"])
+        saved = self.save_organized_topics(sid, organized, source_message_count=session["message_count"])
+        return {**saved, "turns": turns_payload}
+
+    def _create_split_child(
+        self,
+        parent_id: str,
+        tenant: str,
+        topic: Dict[str, Any],
+        turns: List[Any],
+        history_mgr,
+    ) -> Dict[str, Any]:
+        selected_turns = [turns[idx] for idx in topic["turn_indices"] if 0 <= idx < len(turns)]
+        child_msgs = []
+        for turn in selected_turns:
+            child_msgs.append(HumanMessage(content=turn.user_message))
+            child_msgs.append(AIMessage(content=turn.ai_message))
+        child_id = f"{parent_id}__{topic['topic_id']}_{uuid.uuid4().hex[:6]}"
+        history_mgr.save_messages(child_id, child_msgs)
+
+        last_user = selected_turns[-1].user_message if selected_turns else topic["title"]
+        preview = pii_scrubber.mask_sensitive_data(last_user).replace("\n", " ").strip()[:120]
+        now = _utc_now_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_sessions (
+                    session_id, tenant_id, domain, title, title_source,
+                    last_message_preview, message_count, pinned, archived, parent_session_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'llm', ?, ?, 0, 0, ?, ?, ?)
+                """,
+                (child_id, tenant, topic.get("domain") or "audit", topic["title"], preview, len(child_msgs), parent_id, now, now),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM chat_sessions WHERE session_id = ?", (child_id,)).fetchone()
+        return _row_to_dict(row)
+
+    def split_session_by_topics(
+        self,
+        session_id: str,
+        history_mgr,
+        *,
+        topic_ids: Optional[List[str]] = None,
+        archive_source: bool = False,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Materialize organized topics into independent sessions excluding noise."""
+        sid = _validate_session_id(session_id)
+        tenant = _resolve_tenant(tenant_id)
+        organized = self.get_organized_topics(sid, tenant_id=tenant)
+        if organized is None:
+            raise ValueError("请先执行对话主题整理后再拆分")
+        topics = organized["topics"]
+        if topic_ids is not None:
+            allowed = set(topic_ids)
+            topics = [t for t in topics if t["topic_id"] in allowed]
+        if not topics:
+            raise ValueError("未选择有效的待拆分主题")
+
+        turns = extract_turns(history_mgr.get_history(sid, auto_recover=False))
+        created = [self._create_split_child(sid, tenant, topic, turns, history_mgr) for topic in topics]
+        if archive_source:
+            self.update_session(sid, archived=True, tenant_id=tenant)
+        return {"source_session_id": sid, "archived_source": archive_source, "created_sessions": created}
 
 
 session_store = LazyProxy("session_store")

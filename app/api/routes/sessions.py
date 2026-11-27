@@ -7,7 +7,7 @@ cascade deletion, and manual/background title regeneration.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -25,6 +25,13 @@ class SessionUpdateDTO(BaseModel):
     title: Optional[str] = Field(default=None, description="Manual conversation title")
     pinned: Optional[bool] = Field(default=None, description="Pin conversation to top")
     archived: Optional[bool] = Field(default=None, description="Archive conversation")
+
+
+class SessionSplitDTO(BaseModel):
+    """Payload for splitting organized session topics into child sessions."""
+
+    topic_ids: Optional[List[str]] = Field(default=None, description="Topic IDs to split (all if omitted)")
+    archive_source: bool = Field(default=False, description="Archive source session after split")
 
 
 def _extract_checkpointer(request: Request):
@@ -115,3 +122,37 @@ async def regenerate_session_title(session_id: str, force: bool = Query(default=
     )
     updated = session_store.get_session(session_id)
     return ResponseEnvelope.success(data=updated)
+
+
+@router.post("/agent/sessions/{session_id}/organize")
+@router.post("/ins-fqz/agent/sessions/{session_id}/organize")
+async def organize_session_topics(session_id: str, force: bool = Query(default=False)):
+    """Organize session conversation into clean semantic topics and noise bucket."""
+    result = await session_store.organize_session(session_id, history_manager, force=force)
+    return ResponseEnvelope.success(data=result)
+
+
+@router.get("/agent/sessions/{session_id}/topics")
+@router.get("/ins-fqz/agent/sessions/{session_id}/topics")
+async def get_session_topics(session_id: str):
+    """Retrieve cached topic and noise classification for the specified session."""
+    result = session_store.get_organized_topics(session_id)
+    if result is None:
+        return ResponseEnvelope.success(data={"session_id": session_id, "organized": False, "topics": [], "noise_turns": []})
+    from app.core.memory.conversation_organizer import extract_turns
+
+    turns = [t.model_dump() for t in extract_turns(history_manager.get_history(session_id, auto_recover=False))]
+    return ResponseEnvelope.success(data={**result, "organized": True, "turns": turns})
+
+
+@router.post("/agent/sessions/{session_id}/split")
+@router.post("/ins-fqz/agent/sessions/{session_id}/split")
+async def split_session_topics(session_id: str, dto: SessionSplitDTO):
+    """Materialize selected organized topics into independent sessions excluding noise."""
+    result = session_store.split_session_by_topics(
+        session_id,
+        history_manager,
+        topic_ids=dto.topic_ids,
+        archive_source=dto.archive_source,
+    )
+    return ResponseEnvelope.success(data=result)
