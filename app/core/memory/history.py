@@ -54,30 +54,27 @@ class HistoryManager:
             logger.error(f"读取历史记录失败 [Session: {session_id}]: {e}")
             return []
 
-    def save_turn(self, session_id: str, human_msg: str, ai_msg: str):
-        """保存一轮对话"""
-        history = self.get_history(session_id)
-        
-        # 添加新消息
-        history.append(HumanMessage(content=human_msg))
-        history.append(AIMessage(content=ai_msg))
-        
-        # 截断历史记录，保持在 max_messages 以内
-        if len(history) > self.max_messages:
-            history = history[-self.max_messages:]
-            
+    def save_messages(self, session_id: str, messages: List[BaseMessage]) -> None:
+        """Atomically persist an explicit message sequence for a session."""
         path = self._get_path(session_id)
         try:
-            # 确保目录存在
             os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp_path = f"{path}.tmp.{os.getpid()}"
             with open(tmp_path, "w", encoding="utf-8") as f:
-                # 转换回字典列表进行存储
-                json.dump(messages_to_dict(history), f, ensure_ascii=False, indent=2)
+                json.dump(messages_to_dict(messages), f, ensure_ascii=False, indent=2)
             os.replace(tmp_path, path)
             logger.info(f"已更新会话历史 [Session: {session_id}]")
         except Exception as e:
             logger.error(f"保存历史记录失败 [Session: {session_id}]: {e}")
+
+    def save_turn(self, session_id: str, human_msg: str, ai_msg: str):
+        """保存一轮对话"""
+        history = self.get_history(session_id)
+        history.append(HumanMessage(content=human_msg))
+        history.append(AIMessage(content=ai_msg))
+        if len(history) > self.max_messages:
+            history = history[-self.max_messages:]
+        self.save_messages(session_id, history)
 
     def delete_history(self, session_id: str) -> bool:
         """Delete persisted JSON history file for the specified session."""

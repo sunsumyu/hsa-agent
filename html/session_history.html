@@ -371,6 +371,106 @@
             gap: 8px;
             flex-wrap: wrap;
         }
+        .view-switch {
+            display: inline-grid;
+            grid-template-columns: repeat(2, auto);
+            gap: 3px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            padding: 3px;
+        }
+        .view-btn {
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            padding: 5px 11px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.16s, color 0.16s;
+        }
+        .view-btn.active {
+            background: var(--surface-elevated);
+            color: var(--text);
+            font-weight: 600;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        }
+        .topic-toolbar {
+            padding: 14px 24px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(2, 6, 23, 0.35);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .topic-tabs {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .topic-tab {
+            border: 1px solid var(--border-strong);
+            background: var(--bg);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-family: inherit;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: border-color 0.16s, color 0.16s, background 0.16s;
+        }
+        .topic-tab:hover { color: var(--text); border-color: var(--accent); }
+        .topic-tab.active {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+            color: var(--text);
+            font-weight: 600;
+        }
+        .topic-meta-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .topic-summary {
+            color: var(--text-secondary);
+            font-size: 0.84rem;
+            flex: 1;
+            min-width: 240px;
+        }
+        .split-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .noise-drawer {
+            margin-top: 20px;
+            border-top: 1px solid var(--border-strong);
+            padding-top: 14px;
+        }
+        .noise-drawer summary {
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.84rem;
+            font-weight: 600;
+            user-select: none;
+            padding: 4px 0;
+        }
+        .noise-item {
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.35);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .noise-item:last-child { border-bottom: none; }
         .transcript-scroll {
             flex: 1;
             overflow-y: auto;
@@ -517,16 +617,26 @@
             {
                 session_id: "demo-audit-01",
                 domain: "audit",
-                title: "男性违规结算妇科药核查",
+                title: "骨科耗材重复收费与分解住院核查",
                 title_source: "llm",
-                last_message_preview: "请排查 2024 年结算明细中男性结算妇科专属药品的医院排名",
-                message_count: 4,
+                last_message_preview: "排查三甲医院骨科骨水泥重复收费与术后跨科分解住院情况",
+                message_count: 12,
                 pinned: true,
                 archived: false,
                 updated_at: "2026-11-27T04:15:00Z",
                 messages: [
-                    { role: "user", content: "请排查 2024 年结算明细中男性结算妇科专属药品的医院排名。" },
-                    { role: "ai", content: "已完成跨行对撞核查：共检出疑似违规明细 42 笔，涉及总金额 18,420.50 元，已按涉案金额降序汇总定点机构。" }
+                    { role: "user", content: "你好" },
+                    { role: "ai", content: "您好，请问今天需要核查哪类医保基金业务？" },
+                    { role: "user", content: "排查三甲医院骨科高值耗材骨水泥重复收费情况。" },
+                    { role: "ai", content: "已完成跨行对撞核查：共检出骨水泥超量及与打包手术重复收费明细 28 笔，涉及金额 8.4 万元。" },
+                    { role: "user", content: "展开说说" },
+                    { role: "ai", content: "临床单节段椎体成形术骨水泥常规用量为 3-6ml，其中 3 家医院在收取打包费后又单独计费球囊扩张装置。" },
+                    { role: "user", content: "换个问题，统计术后出院次日转入康复科的分解住院案例。" },
+                    { role: "ai", content: "共检出外科术后短期出院次日转入康复科疑似分解住院 19 例，重点时间窗集中在 1-3 天内。" },
+                    { role: "user", content: "再查下前面骨科高值耗材骨水泥重复收费涉案最高的前三家医院。" },
+                    { role: "ai", content: "涉案前三家医院骨科耗材违规金额合计 6.9 万元，占比 82.1%。" },
+                    { role: "user", content: "好的谢谢" },
+                    { role: "ai", content: "不客气，如需拆分成独立线索或导出底稿请随时告知。" }
                 ]
             },
             {
@@ -551,6 +661,11 @@
             total: 0,
             activeId: null,
             activeDetail: null,
+            viewMode: "raw",
+            activeOrganized: null,
+            activeTopicId: null,
+            archiveOnSplit: false,
+            organizing: false,
             domain: "",
             query: "",
             includeArchived: false,
@@ -763,6 +878,27 @@
 
             const actions = document.createElement("div");
             actions.className = "action-bar";
+
+            const viewSwitch = document.createElement("div");
+            viewSwitch.className = "view-switch";
+            viewSwitch.setAttribute("role", "tablist");
+            const rawBtn = document.createElement("button");
+            rawBtn.type = "button";
+            rawBtn.className = state.viewMode === "raw" ? "view-btn active" : "view-btn";
+            rawBtn.textContent = "原始对话";
+            rawBtn.onclick = () => { state.viewMode = "raw"; renderStage(); };
+            const topicBtn = document.createElement("button");
+            topicBtn.type = "button";
+            topicBtn.className = state.viewMode === "topics" ? "view-btn active" : "view-btn";
+            topicBtn.textContent = "主题视图";
+            topicBtn.onclick = () => switchToTopicView();
+            viewSwitch.appendChild(rawBtn);
+            viewSwitch.appendChild(topicBtn);
+            actions.appendChild(viewSwitch);
+
+            const orgBtn = renderActionButton(state.organizing ? "整理中..." : "整理主题", () => organizeCurrentSession(true), "btn-primary");
+            orgBtn.disabled = state.organizing;
+            actions.appendChild(orgBtn);
             actions.appendChild(renderActionButton("重命名", () => { state.renaming = true; renderStage(); }));
             actions.appendChild(renderActionButton("重新生成标题", regenerateTitle));
             actions.appendChild(renderActionButton(detail.pinned ? "取消置顶" : "置顶", () => patchSession({ pinned: !detail.pinned })));
@@ -774,6 +910,11 @@
             header.appendChild(cluster);
             header.appendChild(actions);
             elStage.appendChild(header);
+
+            if (state.viewMode === "topics") {
+                renderTopicStage(detail);
+                return;
+            }
 
             const scroll = document.createElement("div");
             scroll.className = "transcript-scroll";
@@ -800,6 +941,135 @@
                     block.appendChild(contentEl);
                     scroll.appendChild(block);
                 });
+            }
+            elStage.appendChild(scroll);
+        }
+
+        function renderTopicStage(detail) {
+            const org = state.activeOrganized;
+            if (!org || (!org.topics.length && !org.noise_turns.length)) {
+                const box = document.createElement("div");
+                box.className = "empty-state";
+                const t = document.createElement("div");
+                t.className = "empty-title";
+                t.textContent = state.organizing ? "正在梳理主题与过滤闲聊..." : "尚未对该会话执行主题整理";
+                const d = document.createElement("div");
+                d.className = "empty-desc";
+                d.textContent = "系统将自动分离纯寒暄确认等废话，并将同主题穿插追问归并到对应主题。";
+                box.appendChild(t);
+                box.appendChild(d);
+                if (!state.organizing) {
+                    box.appendChild(renderActionButton("立即整理主题", () => organizeCurrentSession(false), "btn-primary"));
+                }
+                elStage.appendChild(box);
+                return;
+            }
+
+            const topics = org.topics || [];
+            if (!topics.some((t) => t.topic_id === state.activeTopicId)) {
+                state.activeTopicId = topics.length ? topics[0].topic_id : null;
+            }
+            const activeTopic = topics.find((t) => t.topic_id === state.activeTopicId) || null;
+
+            const toolbar = document.createElement("div");
+            toolbar.className = "topic-toolbar";
+
+            if (topics.length > 0) {
+                const tabs = document.createElement("div");
+                tabs.className = "topic-tabs";
+                topics.forEach((t) => {
+                    const btn = document.createElement("button");
+                    btn.type = "button";
+                    btn.className = t.topic_id === state.activeTopicId ? "topic-tab active" : "topic-tab";
+                    btn.textContent = t.title + " (" + t.turn_indices.length + " 轮)";
+                    btn.onclick = () => { state.activeTopicId = t.topic_id; renderStage(); };
+                    tabs.appendChild(btn);
+                });
+                toolbar.appendChild(tabs);
+            }
+
+            const metaRow = document.createElement("div");
+            metaRow.className = "topic-meta-row";
+            const summary = document.createElement("div");
+            summary.className = "topic-summary";
+            summary.textContent = activeTopic
+                ? (activeTopic.summary || "该主题包含 " + activeTopic.turn_indices.length + " 轮核心讨论。")
+                : "本会话全部内容均已归入已过滤废话。";
+            metaRow.appendChild(summary);
+
+            if (topics.length >= 2) {
+                const splitBar = document.createElement("div");
+                splitBar.className = "split-bar";
+                const lbl = document.createElement("label");
+                lbl.className = "archive-toggle";
+                const cb = document.createElement("input");
+                cb.type = "checkbox";
+                cb.checked = state.archiveOnSplit;
+                cb.onchange = () => { state.archiveOnSplit = cb.checked; };
+                const span = document.createElement("span");
+                span.textContent = "拆分后归档原会话";
+                lbl.appendChild(cb);
+                lbl.appendChild(span);
+                splitBar.appendChild(lbl);
+                splitBar.appendChild(renderActionButton("拆分为独立会话", splitCurrentSession, "btn-primary"));
+                metaRow.appendChild(splitBar);
+            }
+            toolbar.appendChild(metaRow);
+            elStage.appendChild(toolbar);
+
+            const scroll = document.createElement("div");
+            scroll.className = "transcript-scroll";
+            const turns = org.turns || [];
+            if (activeTopic) {
+                activeTopic.turn_indices.forEach((idx) => {
+                    const turn = turns[idx];
+                    if (!turn) return;
+                    const uBlock = document.createElement("div");
+                    uBlock.className = "turn-block";
+                    const uRole = document.createElement("div");
+                    uRole.className = "turn-role user";
+                    uRole.textContent = "第 " + (idx + 1) + " 轮 · 提问";
+                    const uText = document.createElement("div");
+                    uText.className = "turn-content";
+                    uText.textContent = turn.user_message || "";
+                    uBlock.appendChild(uRole);
+                    uBlock.appendChild(uText);
+
+                    const aRole = document.createElement("div");
+                    aRole.className = "turn-role";
+                    aRole.style.marginTop = "12px";
+                    aRole.textContent = "回答";
+                    const aText = document.createElement("div");
+                    aText.className = "turn-content";
+                    aText.textContent = turn.ai_message || "";
+                    uBlock.appendChild(aRole);
+                    uBlock.appendChild(aText);
+                    scroll.appendChild(uBlock);
+                });
+            }
+
+            const noiseList = org.noise_turns || [];
+            if (noiseList.length > 0) {
+                const drawer = document.createElement("details");
+                drawer.className = "noise-drawer";
+                const sumEl = document.createElement("summary");
+                sumEl.textContent = "已过滤废话（" + noiseList.length + " 轮）";
+                drawer.appendChild(sumEl);
+                noiseList.forEach((nt) => {
+                    const turn = turns[nt.turn_index];
+                    if (!turn) return;
+                    const item = document.createElement("div");
+                    item.className = "noise-item";
+                    const textDiv = document.createElement("div");
+                    textDiv.className = "turn-content";
+                    textDiv.style.fontSize = "0.84rem";
+                    textDiv.style.color = "var(--text-secondary)";
+                    textDiv.textContent = "第 " + (nt.turn_index + 1) + " 轮：" + (turn.user_message || "");
+                    item.appendChild(textDiv);
+                    item.appendChild(createBadge(nt.reason || "寒暄或无实质内容", ""));
+                    drawer.appendChild(item);
+                });
+                scroll.appendChild(drawer);
             }
             elStage.appendChild(scroll);
         }
@@ -861,10 +1131,18 @@
             state.activeId = sessionId;
             state.renaming = false;
             state.confirmDeleteId = null;
+            state.activeOrganized = null;
+            state.activeTopicId = null;
             renderSessionList();
 
             if (state.offlineDemo) {
                 state.activeDetail = DEMO_SESSIONS.find((s) => s.session_id === sessionId) || null;
+                if (state.activeDetail && state.activeDetail._organized) {
+                    state.activeOrganized = state.activeDetail._organized;
+                }
+                if (state.viewMode === "topics" && state.activeDetail && !state.activeOrganized) {
+                    organizeDemoDetail(state.activeDetail);
+                }
                 renderStage();
                 return;
             }
@@ -873,9 +1151,164 @@
                 const json = await res.json();
                 if (!res.ok || !json.ok) throw new Error(json.error || ("HTTP " + res.status));
                 state.activeDetail = json.data;
+                if (state.viewMode === "topics") {
+                    await fetchOrOrganizeTopics(sessionId);
+                }
                 renderStage();
             } catch (err) {
                 showToast("加载会话详情失败：" + err.message, true);
+            }
+        }
+
+        function pairDemoTurns(messages) {
+            const turns = [];
+            for (let i = 0; i < messages.length; i += 2) {
+                turns.push({
+                    turn_index: turns.length,
+                    user_message: (messages[i] && messages[i].content) || "",
+                    ai_message: (messages[i + 1] && messages[i + 1].content) || ""
+                });
+            }
+            return turns;
+        }
+
+        function organizeDemoDetail(detail) {
+            const turns = pairDemoTurns(detail.messages || []);
+            if (detail.session_id === "demo-audit-01" && turns.length >= 6) {
+                const org = {
+                    session_id: detail.session_id,
+                    mode: "heuristic",
+                    turns: turns,
+                    topics: [
+                        { topic_id: "topic-1", title: "骨科高值耗材重复收费", domain: "audit", summary: "合并第 2、3、5 轮关于骨水泥超量与重复计费的跨轮讨论", turn_indices: [1, 2, 4] },
+                        { topic_id: "topic-2", title: "术后跨科分解住院认定", domain: "audit", summary: "排查外科出院次日转入康复科的时间窗案例", turn_indices: [3] }
+                    ],
+                    noise_turns: [
+                        { turn_index: 0, reason: "纯打招呼" },
+                        { turn_index: 5, reason: "礼貌确认或结束语" }
+                    ]
+                };
+                detail._organized = org;
+                state.activeOrganized = org;
+                return org;
+            }
+            const org = {
+                session_id: detail.session_id,
+                mode: "heuristic",
+                turns: turns,
+                topics: turns.length ? [{ topic_id: "topic-1", title: detail.title, domain: detail.domain, summary: detail.last_message_preview, turn_indices: turns.map((t) => t.turn_index) }] : [],
+                noise_turns: []
+            };
+            detail._organized = org;
+            state.activeOrganized = org;
+            return org;
+        }
+
+        async function fetchOrOrganizeTopics(sessionId) {
+            try {
+                const res = await fetch(API_HOST + "/agent/sessions/" + encodeURIComponent(sessionId) + "/topics");
+                const json = await res.json();
+                if (res.ok && json.ok && json.data.organized && !json.data.is_stale) {
+                    state.activeOrganized = json.data;
+                    return;
+                }
+            } catch (err) {
+                showToast("读取主题缓存失败：" + err.message, true);
+            }
+            await organizeCurrentSession(false);
+        }
+
+        function switchToTopicView() {
+            state.viewMode = "topics";
+            if (!state.activeDetail) { renderStage(); return; }
+            if (state.offlineDemo) {
+                if (!state.activeOrganized) organizeDemoDetail(state.activeDetail);
+                renderStage();
+                return;
+            }
+            if (!state.activeOrganized) {
+                fetchOrOrganizeTopics(state.activeDetail.session_id).then(() => renderStage());
+            } else {
+                renderStage();
+            }
+        }
+
+        async function organizeCurrentSession(force) {
+            const detail = state.activeDetail;
+            if (!detail) return;
+            state.viewMode = "topics";
+            if (state.offlineDemo) {
+                organizeDemoDetail(detail);
+                renderStage();
+                showToast("已完成主题归并与废话过滤（演示模式）", false);
+                return;
+            }
+            state.organizing = true;
+            renderStage();
+            try {
+                const res = await fetch(API_HOST + "/agent/sessions/" + encodeURIComponent(detail.session_id) + "/organize?force=" + String(Boolean(force)), {
+                    method: "POST"
+                });
+                const json = await res.json();
+                if (!res.ok || !json.ok) throw new Error(json.error || ("HTTP " + res.status));
+                state.activeOrganized = json.data;
+                state.activeTopicId = null;
+                showToast("已完成主题整理（过滤 " + (json.data.noise_turns || []).length + " 轮闲聊）", false);
+            } catch (err) {
+                showToast("整理失败：" + err.message, true);
+            } finally {
+                state.organizing = false;
+                renderStage();
+            }
+        }
+
+        async function splitCurrentSession() {
+            const detail = state.activeDetail;
+            const org = state.activeOrganized;
+            if (!detail || !org || (org.topics || []).length < 2) return;
+            if (state.offlineDemo) {
+                const created = org.topics.map((t, i) => {
+                    const childMsgs = [];
+                    t.turn_indices.forEach((idx) => {
+                        const turn = org.turns[idx];
+                        if (turn) {
+                            childMsgs.push({ role: "user", content: turn.user_message });
+                            childMsgs.push({ role: "ai", content: turn.ai_message });
+                        }
+                    });
+                    return {
+                        session_id: detail.session_id + "-split-" + (i + 1) + "-" + Date.now().toString().slice(-4),
+                        domain: t.domain || detail.domain,
+                        title: t.title,
+                        title_source: "llm",
+                        last_message_preview: t.summary || t.title,
+                        message_count: childMsgs.length,
+                        pinned: false,
+                        archived: false,
+                        updated_at: new Date().toISOString(),
+                        messages: childMsgs
+                    };
+                });
+                if (state.archiveOnSplit) detail.archived = true;
+                DEMO_SESSIONS.unshift(...created);
+                applyDemoFilter();
+                renderStage();
+                showToast("已拆分为 " + created.length + " 个独立主题会话（保留原会话" + (state.archiveOnSplit ? "并已归档" : "") + "）", false);
+                return;
+            }
+            try {
+                const res = await fetch(API_HOST + "/agent/sessions/" + encodeURIComponent(detail.session_id) + "/split", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ archive_source: Boolean(state.archiveOnSplit) })
+                });
+                const json = await res.json();
+                if (!res.ok || !json.ok) throw new Error(json.error || ("HTTP " + res.status));
+                const count = (json.data.created_sessions || []).length;
+                await fetchSessions();
+                showToast("已拆分为 " + count + " 个独立会话", false);
+            } catch (err) {
+                showToast("拆分失败：" + err.message, true);
             }
         }
 
@@ -978,9 +1411,9 @@
             }
         }
 
-        document.querySelectorAll(".seg-btn").forEach((btn) => {
+        document.querySelectorAll(".session-column .seg-btn").forEach((btn) => {
             btn.onclick = () => {
-                document.querySelectorAll(".seg-btn").forEach((b) => b.classList.remove("active"));
+                document.querySelectorAll(".session-column .seg-btn").forEach((b) => b.classList.remove("active"));
                 btn.classList.add("active");
                 state.domain = btn.dataset.domain || "";
                 if (state.offlineDemo) applyDemoFilter();

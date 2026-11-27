@@ -72,6 +72,8 @@ def register_services():
         "app.core.memory.history", fromlist=["HistoryManager"]).HistoryManager())
     ServiceProvider.register("session_store", lambda: __import__(
         "app.core.memory.session_store", fromlist=["SessionStore"]).SessionStore())
+    ServiceProvider.register("conversation_organizer", lambda: __import__(
+        "app.core.memory.conversation_organizer", fromlist=["ConversationOrganizer"]).ConversationOrganizer())
     ServiceProvider.register("experience_manager", lambda: __import__(
         "app.core.memory.experience", fromlist=["ExperienceManager"]).ExperienceManager())
 
