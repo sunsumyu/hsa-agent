@@ -35,7 +35,8 @@ jobs:
                  tests/unit/core/test_prompt_service_deep_red.py \
                  tests/unit/memory/test_session_management.py \
                  tests/unit/memory/test_conversation_organizer.py \
-                 tests/unit/memory/test_session_backfill_and_legal_t1.py -v
+                 tests/unit/memory/test_session_backfill_and_legal_t1.py \
+                 tests/unit/api/test_dual_domain_sse_continue.py -v
 
       - name: Execute Offline Golden Cases Quality Gate
         run: |

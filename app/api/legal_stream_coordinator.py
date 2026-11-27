@@ -9,10 +9,12 @@ app/api/legal_stream_coordinator.py
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncGenerator, Dict, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from loguru import logger
+
+from app.api.events.sse_contract import SSEEvent, SSEEventType
 
 from domains.legal.graph import build_legal_graph
 from domains.legal.state.case_state import LegalCaseState
@@ -204,20 +206,53 @@ def _render_dialectic_node(
     return None
 
 
+def _format_legal_packet(event_type: SSEEventType, data: Any, is_sse: bool, legacy: str) -> str:
+    """Format a legal stream packet as typed W3C SSE or legacy bracket notation."""
+    if is_sse:
+        return SSEEvent(event=event_type, data=data).to_sse_packet()
+    return legacy
+
+
 def _record_legal_session_turn(
     session_id: str,
     message: str,
     ai_reply: str,
     background_tasks: Optional[Any] = None,
-) -> None:
+) -> Optional[Dict[str, Any]]:
     try:
         meta = session_store.record_turn(session_id, message, ai_reply, domain="legal")
         if meta.get("should_refine_title") and background_tasks is not None:
             background_tasks.add_task(
                 session_store.refine_title_in_background, session_id, message, ai_reply, domain="legal"
             )
+        return meta
     except Exception as exc:
         logger.warning(f"[LegalStream] 会话元数据记录失败 [Session: {session_id}]: {exc}")
+        return None
+
+
+def _build_legal_title_and_done_packets(
+    session_id: str,
+    meta: Optional[Dict[str, Any]],
+    is_sse: bool,
+) -> List[str]:
+    """Build trailing session_title and done SSE frames when streaming in typed SSE mode."""
+    if not is_sse:
+        return []
+    packets: List[str] = []
+    if meta and meta.get("title"):
+        packets.append(
+            SSEEvent(
+                event=SSEEventType.SESSION_TITLE,
+                data={
+                    "session_id": session_id,
+                    "title": meta["title"],
+                    "title_source": meta.get("title_source", "fallback"),
+                },
+            ).to_sse_packet()
+        )
+    packets.append(SSEEvent(event=SSEEventType.DONE, data="[DONE]").to_sse_packet())
+    return packets
 
 
 async def _stream_direct_legal_mode(
@@ -225,16 +260,69 @@ async def _stream_direct_legal_mode(
     session_id: str,
     message: str,
     background_tasks: Optional[Any] = None,
+    is_sse: bool = False,
 ) -> AsyncGenerator[str, None]:
     status_text, role_tag, runner_obj, method_name = _DIRECT_MODE_SPECS[mode]
-    yield f"[[[STATUS: {status_text}]]]\n\n"
+    yield _format_legal_packet(
+        SSEEventType.STATUS,
+        {"message": status_text},
+        is_sse,
+        f"[[[STATUS: {status_text}]]]\n\n",
+    )
     text, usage = await getattr(runner_obj, method_name)(message)
-    yield text
+    yield _format_legal_packet(SSEEventType.MESSAGE, text, is_sse, text)
     prompt_tok = int(usage.get("prompt", 0))
     comp_tok = int(usage.get("completion", 0))
-    yield f"\n\n[[[RESOURCE: {{'role': '{role_tag}', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
+    yield _format_legal_packet(
+        SSEEventType.RESOURCE,
+        {"role": role_tag, "cost": 0.0, "prompt": prompt_tok, "completion": comp_tok},
+        is_sse,
+        f"\n\n[[[RESOURCE: {{'role': '{role_tag}', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n",
+    )
     history_manager.save_turn(session_id, message, text)
-    _record_legal_session_turn(session_id, message, text, background_tasks=background_tasks)
+    meta = _record_legal_session_turn(session_id, message, text, background_tasks=background_tasks)
+    for pkt in _build_legal_title_and_done_packets(session_id, meta, is_sse):
+        yield pkt
+
+
+def _finalize_dialectic_packets(
+    *,
+    session_id: str,
+    message: str,
+    ai_response_content: str,
+    token_usage: Dict[str, Any],
+    hitl_values: Optional[Dict[str, Any]],
+    background_tasks: Optional[Any],
+    is_sse: bool,
+) -> List[str]:
+    """Assemble HITL card, resource telemetry, persistence, and trailing SSE frames."""
+    packets: List[str] = []
+    full_reply = ai_response_content
+    if hitl_values is not None:
+        hitl_card = _format_hitl_card(hitl_values)
+        hitl_status = "⏸️ 等待人工补充缺失证据（或回复“跳过”继续）..."
+        packets.append(
+            _format_legal_packet(SSEEventType.STATUS, {"message": hitl_status}, is_sse, f"[[[STATUS: {hitl_status}]]]\n\n")
+        )
+        full_reply += hitl_card
+        packets.append(_format_legal_packet(SSEEventType.MESSAGE, hitl_card, is_sse, hitl_card))
+
+    prompt_tok = int(token_usage.get("prompt", 0))
+    comp_tok = int(token_usage.get("completion", 0))
+    packets.append(
+        _format_legal_packet(
+            SSEEventType.RESOURCE,
+            {"role": "JUDGE", "cost": 0.0, "prompt": prompt_tok, "completion": comp_tok},
+            is_sse,
+            f"[[[RESOURCE: {{'role': 'JUDGE', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n",
+        )
+    )
+    history_manager.save_turn(session_id, message, full_reply)
+    session_meta = _record_legal_session_turn(
+        session_id, message, full_reply, background_tasks=background_tasks
+    )
+    packets.extend(_build_legal_title_and_done_packets(session_id, session_meta, is_sse))
+    return packets
 
 
 class LegalStreamCoordinator:
@@ -272,14 +360,15 @@ class LegalStreamCoordinator:
         is_resuming: bool,
         config: Dict[str, Any],
         background_tasks: Optional[Any] = None,
+        is_sse: bool = False,
     ) -> AsyncGenerator[str, None]:
-        if is_resuming:
-            yield "[[[STATUS: 🔄 已接收补充材料，正在恢复辩法推演...]]]\n\n"
-            graph_input: Any = Command(resume=message)
-        else:
-            role_status = _ROLE_STATUS_MAP.get(role, "⚖️ 正在分析民商事案件事实与争议焦点...")
-            yield f"[[[STATUS: {role_status}]]]\n\n"
-            graph_input = _build_initial_legal_state(session_id, cause, role, message)
+        start_status = "🔄 已接收补充材料，正在恢复辩法推演..." if is_resuming else _ROLE_STATUS_MAP.get(
+            role, "⚖️ 正在分析民商事案件事实与争议焦点..."
+        )
+        graph_input: Any = Command(resume=message) if is_resuming else _build_initial_legal_state(session_id, cause, role, message)
+        yield _format_legal_packet(
+            SSEEventType.STATUS, {"message": start_status}, is_sse, f"[[[STATUS: {start_status}]]]\n\n"
+        )
 
         ai_response_content = ""
         token_usage: Dict[str, Any] = {"prompt": 0, "completion": 0, "model_id": "Argus-Legal"}
@@ -295,31 +384,41 @@ class LegalStreamCoordinator:
                     if rendered is None:
                         continue
                     status_text, section_text = rendered
-                    yield f"[[[STATUS: {status_text}]]]\n\n"
+                    yield _format_legal_packet(
+                        SSEEventType.STATUS, {"message": status_text}, is_sse, f"[[[STATUS: {status_text}]]]\n\n"
+                    )
                     ai_response_content += section_text
-                    yield section_text
+                    yield _format_legal_packet(SSEEventType.MESSAGE, section_text, is_sse, section_text)
                     if node_name != "REPORTER":
                         await asyncio.sleep(0.02)
 
             post_snapshot = await self._graph.aget_state(config)
-            if post_snapshot and post_snapshot.next:
-                hitl_card = _format_hitl_card(post_snapshot.values or {})
-                yield "[[[STATUS: ⏸️ 等待人工补充缺失证据（或回复“跳过”继续）...]]]\n\n"
-                ai_response_content += hitl_card
-                yield hitl_card
-
-            prompt_tok = int(token_usage.get("prompt", 0))
-            comp_tok = int(token_usage.get("completion", 0))
-            yield f"[[[RESOURCE: {{'role': 'JUDGE', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
-            history_manager.save_turn(session_id, message, ai_response_content)
-            _record_legal_session_turn(session_id, message, ai_response_content, background_tasks=background_tasks)
+            hitl_values = (post_snapshot.values or {}) if (post_snapshot and post_snapshot.next) else None
+            for pkt in _finalize_dialectic_packets(
+                session_id=session_id,
+                message=message,
+                ai_response_content=ai_response_content,
+                token_usage=token_usage,
+                hitl_values=hitl_values,
+                background_tasks=background_tasks,
+                is_sse=is_sse,
+            ):
+                yield pkt
         except Exception as exc:
             logger.exception("Legal Agent 推演异常")
             err_text = f"\n\n> [!CAUTION]\n> **法律辩法推理中断**: {str(exc)}"
-            ai_response_content += err_text
-            yield err_text
-            history_manager.save_turn(session_id, message, ai_response_content)
-            _record_legal_session_turn(session_id, message, ai_response_content, background_tasks=background_tasks)
+            if is_sse:
+                yield SSEEvent(
+                    event=SSEEventType.ERROR,
+                    data={"error": str(exc), "model_id": "Argus-Legal-Agent"},
+                ).to_sse_packet()
+            yield _format_legal_packet(SSEEventType.MESSAGE, err_text, is_sse, err_text)
+            history_manager.save_turn(session_id, message, ai_response_content + err_text)
+            session_meta = _record_legal_session_turn(
+                session_id, message, ai_response_content + err_text, background_tasks=background_tasks
+            )
+            for pkt in _build_legal_title_and_done_packets(session_id, session_meta, is_sse):
+                yield pkt
 
     async def coordinate_legal_stream(
         self,
@@ -327,12 +426,25 @@ class LegalStreamCoordinator:
         session_id: str,
         message: str,
         background_tasks: Optional[Any] = None,
+        is_sse: bool = False,
     ) -> AsyncGenerator[str, None]:
         with redis_manager.dist_lock(f"session:in_flight:{session_id}", timeout=120) as acquired:
             if acquired is False:
                 logger.warning(f"⚠️ [法律会话并发拦截] 会话 {session_id} 正在执行推演，拒绝并发请求。")
-                yield "[[[STATUS: 正在处理上一轮法律辩法推演，请勿重复提交...]]]\n\n"
-                yield "⚠️ 当前会话已有法律推演正在进行中，请等待上一轮完成后再发起新问题。"
+                yield _format_legal_packet(
+                    SSEEventType.STATUS,
+                    {"message": "正在处理上一轮法律辩法推演，请勿重复提交...", "in_flight": True},
+                    is_sse,
+                    "[[[STATUS: 正在处理上一轮法律辩法推演，请勿重复提交...]]]\n\n",
+                )
+                yield _format_legal_packet(
+                    SSEEventType.MESSAGE,
+                    "⚠️ 当前会话已有法律推演正在进行中，请等待上一轮完成后再发起新问题。",
+                    is_sse,
+                    "⚠️ 当前会话已有法律推演正在进行中，请等待上一轮完成后再发起新问题。",
+                )
+                if is_sse:
+                    yield SSEEvent(event=SSEEventType.DONE, data="[DONE]").to_sse_packet()
                 return
 
             config = {"configurable": {"thread_id": session_id}}
@@ -346,12 +458,18 @@ class LegalStreamCoordinator:
                 cause = prev_meta.get("cause", cause)
                 role = prev_meta.get("user_role", role)
 
-            yield "[[[ENGINE:Argus-Legal-Agent]]]"
-            yield "[[[VERSION:Argus-Legal-v2.0]]]\n\n"
+            yield _format_legal_packet(
+                SSEEventType.ENGINE, "Argus-Legal-Agent", is_sse, "[[[ENGINE:Argus-Legal-Agent]]]"
+            )
+            yield _format_legal_packet(
+                SSEEventType.VERSION, "Argus-Legal-v2.0", is_sse, "[[[VERSION:Argus-Legal-v2.0]]]\n\n"
+            )
 
             mode = self._detect_mode(message)
             if mode != "dialectic":
-                async for pkt in _stream_direct_legal_mode(mode, session_id, message, background_tasks=background_tasks):
+                async for pkt in _stream_direct_legal_mode(
+                    mode, session_id, message, background_tasks=background_tasks, is_sse=is_sse
+                ):
                     yield pkt
                 return
 
@@ -363,6 +481,7 @@ class LegalStreamCoordinator:
                 is_resuming=is_resuming,
                 config=config,
                 background_tasks=background_tasks,
+                is_sse=is_sse,
             ):
                 yield pkt
 
