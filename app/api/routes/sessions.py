@@ -59,6 +59,16 @@ async def list_sessions(
     return ResponseEnvelope.success(data=result)
 
 
+@router.post("/agent/sessions/backfill")
+@router.post("/ins-fqz/agent/sessions/backfill")
+async def backfill_sessions():
+    """Index legacy JSON conversation files into the session metadata store."""
+    from app.core.memory.session_backfill import backfill_legacy_history
+
+    result = backfill_legacy_history(session_store, history_manager)
+    return ResponseEnvelope.success(data=result)
+
+
 @router.get("/agent/sessions/{session_id}")
 @router.get("/ins-fqz/agent/sessions/{session_id}")
 async def get_session_detail(session_id: str):

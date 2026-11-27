@@ -31,6 +31,16 @@ from app.core.bootstrap import register_services
 async def lifespan(app: FastAPI):
     # [V211.0] Register all services into the DI container before anything else
     register_services()
+    try:
+        from app.core.memory.history import history_manager
+        from app.core.memory.session_backfill import backfill_legacy_history
+        from app.core.memory.session_store import session_store
+
+        backfill_stats = backfill_legacy_history(session_store, history_manager)
+        if backfill_stats["imported"] > 0:
+            logger.info(f">>> [SessionBackfill] 已自动回填 {backfill_stats['imported']} 条存量历史会话")
+    except Exception as exc:
+        logger.warning(f">>> [SessionBackfill] 启动回填跳过: {exc}")
 
     # [V220.0] 统一状态持久化层抽象工厂 (支持 SQLite / Postgres / Memory 配置切换)
     async with create_checkpointer() as saver_instance:

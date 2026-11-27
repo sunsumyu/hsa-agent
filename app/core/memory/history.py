@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, messages_from_dict, messages_to_dict
 from loguru import logger
 
@@ -9,7 +9,7 @@ class HistoryManager:
     基于本地 JSON 文件的会话历史管理器。
     存储路径: data/history/[session_id].json
     """
-    def __init__(self, storage_dir: str = "data/history", max_messages: int = 20):
+    def __init__(self, storage_dir: str = "data/history", max_messages: Optional[int] = None):
         self.storage_dir = storage_dir
         self.max_messages = max_messages
         os.makedirs(self.storage_dir, exist_ok=True)
@@ -32,8 +32,8 @@ class HistoryManager:
         files.sort(key=lambda x: os.path.getmtime(os.path.join(self.storage_dir, x)), reverse=True)
         return files[0].replace(".json", "")
 
-    def get_history(self, session_id: str, auto_recover: bool = False) -> List[BaseMessage]:
-        """获取指定会话的历史记录"""
+    def get_history(self, session_id: str, auto_recover: bool = False, limit: Optional[int] = None) -> List[BaseMessage]:
+        """获取指定会话的历史记录（默认返回全量无损历史，可选 limit 返回最近 N 条）"""
         path = self._get_path(session_id)
         
         # 如果当前 session 为空且开启了自动恢复
@@ -49,7 +49,10 @@ class HistoryManager:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return messages_from_dict(data)
+                messages = messages_from_dict(data)
+                if limit is not None and limit > 0:
+                    return messages[-limit:]
+                return messages
         except Exception as e:
             logger.error(f"读取历史记录失败 [Session: {session_id}]: {e}")
             return []
@@ -72,7 +75,7 @@ class HistoryManager:
         history = self.get_history(session_id)
         history.append(HumanMessage(content=human_msg))
         history.append(AIMessage(content=ai_msg))
-        if len(history) > self.max_messages:
+        if self.max_messages is not None and self.max_messages > 0 and len(history) > self.max_messages:
             history = history[-self.max_messages:]
         self.save_messages(session_id, history)
 

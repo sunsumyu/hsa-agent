@@ -296,7 +296,7 @@ class ChatStreamCoordinator:
             from app.api.legal_stream_coordinator import legal_stream_coordinator
 
             async for chunk in legal_stream_coordinator.coordinate_legal_stream(
-                session_id=session_id, message=message
+                session_id=session_id, message=message, background_tasks=background_tasks
             ):
                 yield chunk
             return
