@@ -169,6 +169,7 @@ def test_memory_hub_periodic_gc_start_stop():
 
 def test_legacy_cognitive_memory_manager_recall_context_returns_string():
     """验证旧版 CognitiveMemoryManager.recall_context 正常返回并桥接 MemoryHub 工作记忆"""
+    from app.core.context import tenant_context
     from app.core.memory.semantic_memory import CognitiveMemoryManager
 
     mgr = CognitiveMemoryManager()
@@ -176,11 +177,19 @@ def test_legacy_cognitive_memory_manager_recall_context_returns_string():
     mgr.semantic = MagicMock()
     mgr.semantic.recall_expert_knowledge.return_value = []
 
-    memory_hub.store_working("bridge_test", "医保基金监管重点线索", ttl=60)
-    ctx = mgr.recall_context("s1", "医保基金")
-    assert isinstance(ctx, str)
-    assert "旧版工作记忆线索" in ctx
-    assert "医保基金监管重点线索" in ctx
+    token = tenant_context.set("default")
+    saved_cache = dict(memory_hub.working.cache)
+    memory_hub.working.cache.clear()
+    try:
+        memory_hub.store_working("bridge_test", "医保基金监管重点线索", ttl=60)
+        ctx = mgr.recall_context("s1", "医保基金")
+        assert isinstance(ctx, str)
+        assert "旧版工作记忆线索" in ctx
+        assert "医保基金监管重点线索" in ctx
+    finally:
+        memory_hub.working.cache.clear()
+        memory_hub.working.cache.update(saved_cache)
+        tenant_context.reset(token)
 
 
 @pytest.mark.asyncio

@@ -158,9 +158,9 @@ class CognitiveMemoryManager:
         self.semantic: Optional[SemanticMemory] = None
 
     def _init_components(self):
-        if self._local_engine is None:
-            self._local_engine = LocalEmbeddingEngine(model_name=self.config.local_model)
         if self.semantic is None:
+            if self._local_engine is None:
+                self._local_engine = LocalEmbeddingEngine(model_name=self.config.local_model)
             self.semantic = SemanticMemory(self.config.storage_path, self._local_engine)
 
     def add_audit_event(self, content: str, importance: float = 0.5, topic: str = "general"):

@@ -75,6 +75,19 @@ class InMemoryObservabilityFake:
         self.closed = True
 
 
+_EVAL_MARKERS = {"basic", "fuzzy", "refusal", "rules", "user_perspective"}
+
+
+def pytest_collection_modifyitems(items):
+    """Auto-mark tests under tests/unit/ with @pytest.mark.unit unless explicitly eval-marked."""
+    for item in items:
+        path_str = str(getattr(item, "path", None) or item.fspath).replace("\\", "/")
+        if "/tests/unit/" in path_str:
+            existing_markers = {m.name for m in item.iter_markers()}
+            if not (existing_markers & _EVAL_MARKERS) and "unit" not in existing_markers:
+                item.add_marker(pytest.mark.unit)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_di():
     """Ensure DI container has services registered for all tests and observability initialized."""
