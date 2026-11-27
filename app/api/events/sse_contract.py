@@ -27,6 +27,7 @@ class SSEEventType(str, Enum):
     MESSAGE = "message"        # 正文交付内容 (前端气泡渲染)
     RESOURCE = "resource"      # Token 消耗与计费遥测
     ACTION = "action"          # 3D 联动动作 (如 MOVE, SCHEMA, SQL)
+    SESSION_TITLE = "session_title"  # 会话标题即时/精炼同步事件
     ERROR = "error"            # 运行时异常与熔断警告
     DONE = "done"              # 推演流式正常结束信令
 
@@ -77,6 +78,9 @@ class SSEEvent(BaseModel):
             action_type = self.data.get("type", "ACTION") if isinstance(self.data, dict) else "ACTION"
             val = self.data.get("value", "") if isinstance(self.data, dict) else self.data
             return f"[[[{action_type}:{val}]]]"
+        elif self.event == SSEEventType.SESSION_TITLE:
+            title = self.data.get("title", self.data) if isinstance(self.data, dict) else self.data
+            return f"[[[TITLE:{title}]]]"
         elif self.event == SSEEventType.ERROR:
             msg = self.data.get("message", self.data) if isinstance(self.data, dict) else self.data
             return f"\n\n⚠️ 异常: {msg}\n\n"

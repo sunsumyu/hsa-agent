@@ -79,6 +79,19 @@ class HistoryManager:
         except Exception as e:
             logger.error(f"保存历史记录失败 [Session: {session_id}]: {e}")
 
+    def delete_history(self, session_id: str) -> bool:
+        """Delete persisted JSON history file for the specified session."""
+        path = self._get_path(session_id)
+        if not os.path.exists(path):
+            return False
+        try:
+            os.remove(path)
+            logger.info(f"已删除会话历史 [Session: {session_id}]")
+            return True
+        except OSError as exc:
+            logger.warning(f"删除会话历史失败 [Session: {session_id}]: {exc}")
+            return False
+
     def dump_debug_history(self, session_id: str, messages: List[BaseMessage], internal_steps: List[str] = None):
         """[V18.1] 深度转储：包含影子思维链的全量审计记录"""
         debug_dir = os.path.join("data", "debug")

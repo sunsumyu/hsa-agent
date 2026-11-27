@@ -22,6 +22,7 @@ from domains.legal.agents.consultation_advisor import consultation_advisor
 from domains.legal.agents.evidence_examiner import evidence_examiner
 from domains.legal.agents.execution_advisor import execution_advisor
 from app.core.memory.history import history_manager
+from app.core.memory.session_store import session_store
 from app.infra.redis_client import redis_manager
 
 _DIRECT_MODE_SPECS: Dict[str, Tuple[str, str, Any, str]] = {
@@ -203,6 +204,13 @@ def _render_dialectic_node(
     return None
 
 
+def _record_legal_session_turn(session_id: str, message: str, ai_reply: str) -> None:
+    try:
+        session_store.record_turn(session_id, message, ai_reply, domain="legal")
+    except Exception as exc:
+        logger.warning(f"[LegalStream] 会话元数据记录失败 [Session: {session_id}]: {exc}")
+
+
 async def _stream_direct_legal_mode(
     mode: str,
     session_id: str,
@@ -216,6 +224,7 @@ async def _stream_direct_legal_mode(
     comp_tok = int(usage.get("completion", 0))
     yield f"\n\n[[[RESOURCE: {{'role': '{role_tag}', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
     history_manager.save_turn(session_id, message, text)
+    _record_legal_session_turn(session_id, message, text)
 
 
 class LegalStreamCoordinator:
@@ -292,12 +301,14 @@ class LegalStreamCoordinator:
             comp_tok = int(token_usage.get("completion", 0))
             yield f"[[[RESOURCE: {{'role': 'JUDGE', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
             history_manager.save_turn(session_id, message, ai_response_content)
+            _record_legal_session_turn(session_id, message, ai_response_content)
         except Exception as exc:
             logger.exception("Legal Agent 推演异常")
             err_text = f"\n\n> [!CAUTION]\n> **法律辩法推理中断**: {str(exc)}"
             ai_response_content += err_text
             yield err_text
             history_manager.save_turn(session_id, message, ai_response_content)
+            _record_legal_session_turn(session_id, message, ai_response_content)
 
     async def coordinate_legal_stream(
         self,

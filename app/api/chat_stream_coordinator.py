@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage
 
 from app.orchestration.agent_graph import get_graph_executor
 from app.core.memory.history import history_manager
+from app.core.memory.session_store import session_store
 from app.infra.usage_tracker import usage_tracker
 from app.infra.model_manager import model_manager
 from app.infra.redis_client import redis_manager
@@ -259,6 +260,24 @@ def _build_engine_header_packets(resolved_id: str, is_sse: bool) -> List[str]:
     return [f"[[[ENGINE:{resolved_id}]]]", f"[[[VERSION:{resolved_id}]]]"]
 
 
+def _record_session_and_schedule_title(
+    session_id: str,
+    message: str,
+    ai_reply: str,
+    background_tasks: Optional[BackgroundTasks],
+):
+    try:
+        meta = session_store.record_turn(session_id, message, ai_reply, domain="audit")
+        if meta.get("should_refine_title") and background_tasks is not None:
+            background_tasks.add_task(
+                session_store.refine_title_in_background, session_id, message, ai_reply, domain="audit"
+            )
+        return meta
+    except Exception as exc:
+        logger.warning(f"会话元数据记录失败 [Session: {session_id}]: {exc}")
+        return None
+
+
 class ChatStreamCoordinator:
     """流式推演核心协调器 (外部缝: coordinate_stream 窄接口; 内部缝: 事件翻译状态机 + 渲染状态契约)"""
 
@@ -306,7 +325,9 @@ class ChatStreamCoordinator:
                 async for event in executor.astream_events(inputs, config, version="v2"):
                     for packet in translator.translate(event, state):
                         yield packet
-                async for packet in self._finalize_run(executor, config, session_id, message, state, is_sse=is_sse):
+                async for packet in self._finalize_run(
+                    executor, config, session_id, message, state, is_sse=is_sse, background_tasks=background_tasks
+                ):
                     yield packet
                 if is_sse:
                     yield SSEEvent(event=SSEEventType.DONE, data="[DONE]").to_sse_packet()
@@ -368,6 +389,7 @@ class ChatStreamCoordinator:
         message: str,
         state: _StreamRenderState,
         is_sse: bool = False,
+        background_tasks: Optional[BackgroundTasks] = None,
     ) -> AsyncGenerator[str, None]:
         """收尾固化：挂起探测、拦截器残余 flush、会话历史与调试转储落盘"""
         snapshot = await executor.aget_state(config)
@@ -397,28 +419,25 @@ class ChatStreamCoordinator:
                         state.reporter_stream_buffer += cleaned
                 else:
                     state.ai_response_content += cleaned
-                    if is_sse:
-                        yield SSEEvent(event=SSEEventType.MESSAGE, data=cleaned).to_sse_packet()
-                    else:
-                        yield cleaned
+                    yield SSEEvent(event=SSEEventType.MESSAGE, data=cleaned).to_sse_packet() if is_sse else cleaned
 
         if not state.reporter_final_emitted and state.reporter_stream_buffer:
             buffered = state.reporter_stream_buffer
             state.reporter_stream_buffer = ""
             state.ai_response_content += buffered
-            if is_sse:
-                yield SSEEvent(event=SSEEventType.MESSAGE, data=buffered).to_sse_packet()
-            else:
-                yield buffered
+            yield SSEEvent(event=SSEEventType.MESSAGE, data=buffered).to_sse_packet() if is_sse else buffered
 
-        # 对话结束后，异步保存至持久化层
         history_manager.save_turn(session_id, message, state.ai_response_content)
+        session_meta = _record_session_and_schedule_title(session_id, message, state.ai_response_content, background_tasks)
+        if is_sse and session_meta and session_meta.get("title"):
+            yield SSEEvent(
+                event=SSEEventType.SESSION_TITLE,
+                data={"session_id": session_id, "title": session_meta["title"], "title_source": session_meta["title_source"]},
+            ).to_sse_packet()
 
         try:
             full_history = history_manager.get_history(session_id)
-            history_manager.dump_debug_history(
-                session_id, full_history, state.internal_thoughts
-            )
+            history_manager.dump_debug_history(session_id, full_history, state.internal_thoughts)
         except Exception as e:
             logger.error(f"调试转储失败: {e}")
 

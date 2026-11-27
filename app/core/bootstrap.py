@@ -70,6 +70,8 @@ def register_services():
     # ── Memory ────────────────────────────────────────────────
     ServiceProvider.register("history_manager", lambda: __import__(
         "app.core.memory.history", fromlist=["HistoryManager"]).HistoryManager())
+    ServiceProvider.register("session_store", lambda: __import__(
+        "app.core.memory.session_store", fromlist=["SessionStore"]).SessionStore())
     ServiceProvider.register("experience_manager", lambda: __import__(
         "app.core.memory.experience", fromlist=["ExperienceManager"]).ExperienceManager())
 
