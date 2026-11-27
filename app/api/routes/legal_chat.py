@@ -8,11 +8,13 @@ app/routes/legal_chat.py
 import json
 import re
 from typing import Optional, List, Dict, Any, AsyncGenerator, Tuple
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
+from app.api.legal_stream_coordinator import _record_legal_session_turn
+from app.core.memory.history import history_manager
 from domains.legal.graph import build_legal_graph
 from domains.legal.state.case_state import LegalCaseState
 
@@ -24,7 +26,25 @@ class LegalChatRequest(BaseModel):
     cause_of_action: str = Field(default="民间借贷纠纷", description="案由名称")
     active_focus_id: Optional[str] = Field(default=None, description="定向钻取的争议焦点ID")
 
-async def legal_stream_generator(req: LegalChatRequest) -> AsyncGenerator[str, None]:
+def _persist_legal_chat_turn(
+    thread_id: str,
+    message: str,
+    final_disposition: str,
+    summaries: List[str],
+    background_tasks: Optional[BackgroundTasks],
+) -> None:
+    """Persist legal chat endpoint turn to HistoryManager and SessionStore."""
+    ai_reply = final_disposition or "\n".join(s for s in summaries if s)
+    try:
+        history_manager.save_turn(thread_id, message, ai_reply)
+        _record_legal_session_turn(thread_id, message, ai_reply, background_tasks=background_tasks)
+    except Exception as exc:
+        logger.warning(f"[LegalChatRoute] 会话历史保存失败 [Thread: {thread_id}]: {exc}")
+
+async def legal_stream_generator(
+    req: LegalChatRequest,
+    background_tasks: Optional[BackgroundTasks] = None,
+) -> AsyncGenerator[str, None]:
     """流式执行图并逐节点 yield 事件"""
     graph = build_legal_graph()
 
@@ -47,6 +67,8 @@ async def legal_stream_generator(req: LegalChatRequest) -> AsyncGenerator[str, N
         "final_disposition": None
     }
 
+    final_disposition = ""
+    summaries: List[str] = []
     try:
         # 逐节点流式执行
         async for event in graph.astream(initial_state):
@@ -62,11 +84,13 @@ async def legal_stream_generator(req: LegalChatRequest) -> AsyncGenerator[str, N
                     evidence = [e.title if hasattr(e, "title") else e.get("title") for e in node_output.get("evidence_items", [])]
                     payload["summary"] = f"已提取客观事实 {len(facts)} 项，证据凭证 {len(evidence)} 项"
                     payload["evidence"] = evidence
+                    summaries.append(payload["summary"])
 
                 elif node_name == "PLANNER":
                     foci = node_output.get("dispute_foci", [])
                     payload["summary"] = f"锁定核心争议焦点 {len(foci)} 项"
                     payload["foci"] = [f.issue_statement if hasattr(f, "issue_statement") else f.get("issue_statement") for f in foci]
+                    summaries.append(payload["summary"])
 
                 elif node_name == "DIALECTIC":
                     turns = node_output.get("dialectic_history", [])
@@ -84,10 +108,12 @@ async def legal_stream_generator(req: LegalChatRequest) -> AsyncGenerator[str, N
                         payload["warning"] = node_output.get("error_log")
 
                 elif node_name == "REPORTER":
-                    payload["final_disposition"] = node_output.get("final_disposition")
+                    final_disposition = str(node_output.get("final_disposition") or "")
+                    payload["final_disposition"] = final_disposition
 
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+        _persist_legal_chat_turn(req.thread_id, req.message, final_disposition, summaries, background_tasks)
         yield "data: [DONE]\n\n"
 
     except Exception as e:
@@ -96,10 +122,10 @@ async def legal_stream_generator(req: LegalChatRequest) -> AsyncGenerator[str, N
         yield f"data: {json.dumps(err_payload, ensure_ascii=False)}\n\n"
 
 @router.post("/chat")
-async def legal_chat_endpoint(req: LegalChatRequest):
+async def legal_chat_endpoint(req: LegalChatRequest, background_tasks: BackgroundTasks):
     """法律辩法多轮流式对话接口"""
     return StreamingResponse(
-        legal_stream_generator(req),
+        legal_stream_generator(req, background_tasks=background_tasks),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

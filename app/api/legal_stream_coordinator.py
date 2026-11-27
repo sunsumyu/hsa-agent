@@ -204,9 +204,18 @@ def _render_dialectic_node(
     return None
 
 
-def _record_legal_session_turn(session_id: str, message: str, ai_reply: str) -> None:
+def _record_legal_session_turn(
+    session_id: str,
+    message: str,
+    ai_reply: str,
+    background_tasks: Optional[Any] = None,
+) -> None:
     try:
-        session_store.record_turn(session_id, message, ai_reply, domain="legal")
+        meta = session_store.record_turn(session_id, message, ai_reply, domain="legal")
+        if meta.get("should_refine_title") and background_tasks is not None:
+            background_tasks.add_task(
+                session_store.refine_title_in_background, session_id, message, ai_reply, domain="legal"
+            )
     except Exception as exc:
         logger.warning(f"[LegalStream] 会话元数据记录失败 [Session: {session_id}]: {exc}")
 
@@ -215,6 +224,7 @@ async def _stream_direct_legal_mode(
     mode: str,
     session_id: str,
     message: str,
+    background_tasks: Optional[Any] = None,
 ) -> AsyncGenerator[str, None]:
     status_text, role_tag, runner_obj, method_name = _DIRECT_MODE_SPECS[mode]
     yield f"[[[STATUS: {status_text}]]]\n\n"
@@ -224,7 +234,7 @@ async def _stream_direct_legal_mode(
     comp_tok = int(usage.get("completion", 0))
     yield f"\n\n[[[RESOURCE: {{'role': '{role_tag}', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
     history_manager.save_turn(session_id, message, text)
-    _record_legal_session_turn(session_id, message, text)
+    _record_legal_session_turn(session_id, message, text, background_tasks=background_tasks)
 
 
 class LegalStreamCoordinator:
@@ -261,6 +271,7 @@ class LegalStreamCoordinator:
         role: str,
         is_resuming: bool,
         config: Dict[str, Any],
+        background_tasks: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         if is_resuming:
             yield "[[[STATUS: 🔄 已接收补充材料，正在恢复辩法推演...]]]\n\n"
@@ -301,20 +312,21 @@ class LegalStreamCoordinator:
             comp_tok = int(token_usage.get("completion", 0))
             yield f"[[[RESOURCE: {{'role': 'JUDGE', 'cost': 0.0, 'prompt': {prompt_tok}, 'completion': {comp_tok}}}]]]\n\n"
             history_manager.save_turn(session_id, message, ai_response_content)
-            _record_legal_session_turn(session_id, message, ai_response_content)
+            _record_legal_session_turn(session_id, message, ai_response_content, background_tasks=background_tasks)
         except Exception as exc:
             logger.exception("Legal Agent 推演异常")
             err_text = f"\n\n> [!CAUTION]\n> **法律辩法推理中断**: {str(exc)}"
             ai_response_content += err_text
             yield err_text
             history_manager.save_turn(session_id, message, ai_response_content)
-            _record_legal_session_turn(session_id, message, ai_response_content)
+            _record_legal_session_turn(session_id, message, ai_response_content, background_tasks=background_tasks)
 
     async def coordinate_legal_stream(
         self,
         *,
         session_id: str,
         message: str,
+        background_tasks: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         with redis_manager.dist_lock(f"session:in_flight:{session_id}", timeout=120) as acquired:
             if acquired is False:
@@ -339,7 +351,7 @@ class LegalStreamCoordinator:
 
             mode = self._detect_mode(message)
             if mode != "dialectic":
-                async for pkt in _stream_direct_legal_mode(mode, session_id, message):
+                async for pkt in _stream_direct_legal_mode(mode, session_id, message, background_tasks=background_tasks):
                     yield pkt
                 return
 
@@ -350,6 +362,7 @@ class LegalStreamCoordinator:
                 role=role,
                 is_resuming=is_resuming,
                 config=config,
+                background_tasks=background_tasks,
             ):
                 yield pkt
 
