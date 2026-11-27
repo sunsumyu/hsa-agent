@@ -24,11 +24,18 @@ class LocalEmbeddingEngine(Embeddings):
         if self._initialized: return
         self.model_name = model_name
         self.model = None
-        self._load_model()
+        self._load_attempted = False
         self._initialized = True
 
-    def _load_model(self):
-        # [V4.5.4] 环境配置已在 config.py 统一管理，此处仅负责加载逻辑
+    def _ensure_model(self):
+        if self._load_attempted:
+            return
+        self._load_attempted = True
+        if os.getenv("DISABLE_LOCAL_EMBEDDING", "").lower() in ("true", "1") or os.getenv("HF_HUB_OFFLINE") == "1":
+            logger.info("⚡ [MemoryHub] 检测到离线模式，自动旁路跳过本地大模型加载。")
+            self.model = None
+            return
+        # [V4.5.4] 延迟加载：避免在模块导入时同步加载大模型导致主进程与测试死锁
         try:
             from sentence_transformers import SentenceTransformer
             self.model = SentenceTransformer(self.model_name)
@@ -38,10 +45,12 @@ class LocalEmbeddingEngine(Embeddings):
             self.model = None
 
     def embed_query(self, text: str) -> List[float]:
+        self._ensure_model()
         if not self.model: return [0.0] * 384
         return self.model.encode(text).tolist()
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        self._ensure_model()
         if not self.model: return [[0.0] * 384] * len(texts)
         return self.model.encode(texts).tolist()
 

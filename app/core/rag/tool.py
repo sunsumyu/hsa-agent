@@ -34,10 +34,8 @@ class RAGTool:
         doc_name = os.path.basename(file_path)
         
         try:
-            # 1. 物理层解析 (借用 PerceptualMemory 的转换能力)
-            from app.core.memory.types.perceptual import PerceptualMemory
-            # 这里我们直接手动执行转换逻辑
-            content = self._extract_content(file_path)
+            from app.core.rag.rag_fusion_ranker import extract_file_content
+            content = extract_file_content(file_path)
             
             if not content.strip():
                 return {"status": "ERROR", "message": "文档解析结果为空，可能格式不受支持或文件已加密。"}
@@ -77,6 +75,12 @@ class RAGTool:
         通过生成多维度查询扩展，大幅提升复杂审计场景下的召回率。
         """
         from app.core.memory.rag_utils import generate_mqe_queries, generate_hyde_document, preprocess_markdown_for_embedding
+        from app.core.rag.rag_fusion_ranker import (
+            bm25_rank_hits,
+            rrf_fuse_ranked_lists,
+            rerank_hits_with_api_or_fallback,
+            render_rag_report,
+        )
         
         # 1. 构造扩展查询列表
         expansions = [query]
@@ -91,52 +95,42 @@ class RAGTool:
         expansions = list(dict.fromkeys(expansions))
         logger.info(f"🔍 [RAGTool] 执行扩展检索，查询数: {len(expansions)}")
 
-        # 2. 并行检索
+        # 2. 多路 Dense 粗排召回
         pool_limit = limit * candidate_pool_multiplier
-        agg_results = {} # {content_hash: MemoryItem}
+        dense_ranked_lists = []
+        all_hits = []
         
         for q in expansions:
-            # 预处理查询
             clean_q = preprocess_markdown_for_embedding(q)
             hits = await memory_hub.semantic.recall(clean_q, limit=pool_limit)
-            
-            for item in hits:
-                # 使用内容 + 标题路径作为唯一标识进行去重
-                uid = f"{item.metadata.get('heading_path','')}_{item.content[:50]}"
-                if uid not in agg_results or item.score > agg_results[uid].score:
-                    agg_results[uid] = item
-        
-        # 3. 排序与截断
-        sorted_hits = sorted(agg_results.values(), key=lambda x: x.score, reverse=True)[:limit]
-        
-        if not sorted_hits:
-            return "🔍 [RAG] 未在知识库中找到相关合规性依据。"
-        
-        formatted = [f"【RAG 专家检索报告 - 基于 {len(expansions)} 组查询扩展】"]
-        for i, item in enumerate(sorted_hits, 1):
-            source = item.metadata.get("source", "Unknown")
-            path = item.metadata.get("heading_path", "ROOT")
-            # 标记来源类型
-            formatted.append(f"{i}. [来源: {source}] | [层级: {path}]\n   内容: {item.content.strip()}\n")
-            
-        return "\n".join(formatted)
+            if hits:
+                dense_ranked_lists.append(hits)
+                all_hits.extend(hits)
+
+        if not all_hits:
+            return render_rag_report([], expansion_count=len(expansions))
+
+        # 3. BM25 稀疏打分通道 + RRF (k=60) 倒数秩融合截取精排候选池
+        bm25_ranked = bm25_rank_hits(query, all_hits)
+        rrf_pool_limit = max(limit * 2, 20)
+        rrf_candidates = rrf_fuse_ranked_lists(
+            ranked_lists=[*dense_ranked_lists, bm25_ranked],
+            k=60,
+            limit=rrf_pool_limit,
+        )
+
+        # 4. 精排阶段：线上 Rerank API 优先，未配置或超时自动降级回 RRF 顺序
+        final_hits = await rerank_hits_with_api_or_fallback(
+            query=query,
+            candidates=rrf_candidates,
+            limit=limit,
+        )
+        return render_rag_report(final_hits, expansion_count=len(expansions))
 
     def _extract_content(self, path: str) -> str:
-        """内部转换引擎：支持 MarkItDown 与基础 Fallback"""
-        ext = os.path.splitext(path)[1].lower()
-        
-        # 尝试使用 MarkItDown
-        try:
-            from markitdown import MarkItDown
-            md = MarkItDown()
-            result = md.convert(path)
-            return getattr(result, "text_content", "")
-        except Exception:
-            # Fallback: 基础读取
-            try:
-                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                    return f.read()
-            except: return ""
+        """[Backward Compatibility] 委托深模块"""
+        from app.core.rag.rag_fusion_ranker import extract_file_content
+        return extract_file_content(path)
 
 # 全局单例
 rag_tool = RAGTool()

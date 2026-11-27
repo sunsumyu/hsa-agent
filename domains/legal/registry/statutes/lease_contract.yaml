@@ -1,0 +1,46 @@
+cause_of_action: "房屋租赁合同纠纷"
+governing_laws:
+  - code: "PRC_CIVIL_CODE_703_722"
+    name: "中华人民共和国民法典"
+    article: "第七百零三条、第七百二十二条"
+    title: "房屋租赁合同效力与承租人逾期支付租金催告解除权"
+  - code: "PRC_CIVIL_CODE_716"
+    name: "中华人民共和国民法典"
+    article: "第七百一十六条"
+    title: "承租人转租规则与出租人六个月异议期除斥期间"
+  - code: "SPC_LEASE_DISPUTE_INTERPRETATION_2020"
+    name: "最高人民法院关于审理城镇房屋租赁合同纠纷案件具体应用法律若干问题的解释"
+    article: "第六条、第七条"
+    title: "提前退租违约金司法酌减与合理空置期损失认定规则"
+
+essential_elements:
+  - element_id: "lease_contract_and_delivery"
+    name: "房屋租赁合同订立及标的房屋交付管领"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["房屋租赁合同", "房屋交付确认书/交接单", "门禁钥匙交接记录", "房屋权属证明/房产证"]
+
+  - element_id: "rent_and_deposit_payments"
+    name: "押金缴纳与历期租金/水电物业费清结事实"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["押金收据", "租金支付银行转账流水", "微信/支付宝转账记录", "物业水电费结清发票"]
+
+  - element_id: "lease_termination_and_vacating"
+    name: "合同到期/提前解除通知与房屋实际腾退交还"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["解除合同通知书及快递单", "微信退租沟通记录", "房屋钥匙退还交接单", "现场退租验收视频及照片"]
+
+  - element_id: "deposit_deduction_and_damages"
+    name: "房屋设施非正常损坏、维修折损与押金抵扣核算"
+    burden_of_proof: "defendant"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["退租交验对比照片", "第三方专业维修发票", "设施更换购买凭证", "保洁费用支出清单"]
+
+  - element_id: "break_lease_penalty_and_vacancy_loss"
+    name: "提前退租违约金合理性与房屋空置期实际损失"
+    burden_of_proof: "defendant"
+    is_mandatory_for_natural_person: false
+    ceiling_rule: "reasonable_vacancy_period_1_to_3_months"
+    accepted_evidence_types: ["违约金条款约定", "再次挂牌出租居间协议", "重新签约合同及起租日期凭据"]

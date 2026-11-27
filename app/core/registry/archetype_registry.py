@@ -93,8 +93,8 @@ class ArchetypeRegistry:
             name="gender_conflict",
             display_name="性别限制冲突",
             keywords=(
-                "性别限制", "男性", "女性", "妇科", "前列腺",
-                "避孕", "节育", "上环", "子宫", "卵巢"
+                "性别限制", "性别冲突", "男性使用妇科", "女性使用男科",
+                "性别不符", "男用妇科", "女用男科", "性别限制用药", "性别违规"
             ),
             target_tables=("fqz_fymx_test",),
             requires_group_by=False,

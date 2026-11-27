@@ -2,7 +2,7 @@
 Unit tests for app/skills/probe_guard.py.
 """
 import pytest
-from app.skills.probe_guard import is_probe_query, STRUCTURAL_WHITELIST, AGGREGATE_WHITELIST
+from app.skills.security.probe_guard import is_probe_query, STRUCTURAL_WHITELIST, AGGREGATE_WHITELIST
 
 
 # -- QA-CUST-26 batch-billing detection SQL patterns --
@@ -212,7 +212,7 @@ class TestCust26BatchBilling:
 
     def test_timestamp_heal_function(self):
         """The _heal_timestamp_tab function correctly wraps bare toDateTime."""
-        from app.skills.sql_tools import _heal_timestamp_tab
+        from app.skills.sql.sql_tools import _heal_timestamp_tab
         raw = "SELECT toDateTime(setl_time) FROM fqz_fymx_test"
         healed = _heal_timestamp_tab(raw)
         assert "substring(trim(setl_time),1,19)" in healed
@@ -220,7 +220,7 @@ class TestCust26BatchBilling:
 
     def test_timestamp_heal_no_double_wrap(self):
         """Already-wrapped toDateTime must not be double-wrapped."""
-        from app.skills.sql_tools import _heal_timestamp_tab
+        from app.skills.sql.sql_tools import _heal_timestamp_tab
         already_wrapped = (
             "SELECT toDateTime(substring(trim(setl_time),1,19)) FROM fqz_fymx_test"
         )
@@ -229,7 +229,7 @@ class TestCust26BatchBilling:
 
     def test_timestamp_heal_table_qualified(self):
         """Table-qualified column names are handled correctly."""
-        from app.skills.sql_tools import _heal_timestamp_tab
+        from app.skills.sql.sql_tools import _heal_timestamp_tab
         raw = "SELECT toDateTime(A.setl_time) FROM fqz_gz_jzsj_all_ql A"
         healed = _heal_timestamp_tab(raw)
         assert "substring(trim(A.setl_time),1,19)" in healed
@@ -237,7 +237,7 @@ class TestCust26BatchBilling:
 
     def test_timestamp_heal_idempotent(self):
         """Running heal twice produces the same result."""
-        from app.skills.sql_tools import _heal_timestamp_tab
+        from app.skills.sql.sql_tools import _heal_timestamp_tab
         raw = "SELECT toDateTime(setl_time) FROM t"
         once = _heal_timestamp_tab(raw)
         twice = _heal_timestamp_tab(once)

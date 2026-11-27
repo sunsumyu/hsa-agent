@@ -48,52 +48,15 @@ class ThresholdIntentParser:
 
     @classmethod
     def _load_config(cls) -> Dict[str, Any]:
-        """加载配置"""
-        if cls._config is None:
-            config_path = "configs/threshold_matrix.yaml"
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    cls._config = yaml.safe_load(f)
-            else:
-                logger.warning("⚠️ [ThresholdIntent] 配置文件不存在，使用默认配置")
-                cls._config = cls._default_config()
-        return cls._config
+        """加载配置（委托 threshold_config_provider）"""
+        from .threshold_config_provider import get_threshold_config
+        return get_threshold_config()
 
     @classmethod
     def _default_config(cls) -> Dict[str, Any]:
-        """默认配置"""
-        return {
-            "anomaly_degree_mapping": {
-                "keywords_to_degree": {
-                    "HIGH": {
-                        "keywords": ["排名最高", "最大", "极端", "异常大", "巨额", "特大", "最大额", "最高额", "排在前面"],
-                        "quantile": 0.99
-                    },
-                    "MEDIUM": {
-                        "keywords": ["大额", "高额", "异常", "偏高", "超出正常", "不正常", "疑似", "较高", "偏大"],
-                        "quantile": 0.95
-                    },
-                    "LOW": {
-                        "keywords": ["偏高", "较高", "略高", "稍微", "一点"],
-                        "quantile": 0.90
-                    }
-                }
-            },
-            "statistical_preference_mapping": {
-                "RANKING": {
-                    "keywords": ["排名", "排前", "前几", "列出", "TOP", "排行", "从高到低", "从低到高", "排序"],
-                    "threshold_optional": True
-                },
-                "COUNT_BASED": {
-                    "keywords": ["多少", "几个", "数量", "频次", "次数", "统计"],
-                    "threshold_optional": False
-                },
-                "TOP_N": {
-                    "keywords": ["前10", "前20", "前50", "前100", "TOP10", "TOP20", "TOP50", "TOP100"],
-                    "threshold_optional": True
-                }
-            }
-        }
+        """默认配置（委托 threshold_config_provider）"""
+        from .threshold_config_provider import get_default_config
+        return get_default_config()
 
     @classmethod
     def parse(cls, query: str, config: Optional[Dict[str, Any]] = None) -> ThresholdIntent:

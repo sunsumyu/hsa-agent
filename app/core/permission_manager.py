@@ -21,13 +21,15 @@ class AuditRole(Enum):
 # 能力映射表
 CAPABILITIES = {
     AuditRole.JUNIOR: {
-        "list_tables", "get_table_schema", "lookup_medical_schema", 
+        "list_tables", "get_table_schema", "lookup_medical_schema",
         "check_audit_governance", "search_expert_knowledge", "audit_medical_rule",
+        "query_law_database", "query_knowledge_base",
         "write_audit_note", "read_all_audit_notes", "clear_audit_notes"
     },
     AuditRole.SENIOR: {
-        "list_tables", "get_table_schema", "lookup_medical_schema", 
+        "list_tables", "get_table_schema", "lookup_medical_schema",
         "check_audit_governance", "search_expert_knowledge", "audit_medical_rule",
+        "query_law_database", "query_knowledge_base",
         "run_anomaly_detection", "federated_graph_sideloader", "execute_audit_sql",
         "write_audit_note", "read_all_audit_notes", "clear_audit_notes"
     },

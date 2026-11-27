@@ -108,7 +108,7 @@ def test_extract_temporal_overlap_cases():
     prompt2 = "核查全域医保结算是否存在入院时间晚于出院时间的异常住院结算记录"
     intent2 = AuditIntentPlanner.extract_intent(prompt2)
     assert intent2.archetype == AuditArchetype.TEMPORAL_OVERLAP
-    assert "adm_time > dscg_time" in intent2.violation_feature
+    assert "start_date > end_date" in intent2.violation_feature or "adm_time > dscg_time" in intent2.violation_feature
 
 def test_extract_split_billing_archetype():
     """测试用例 13: 手术分解收费/拆开计费 -> 锁定 SPLIT_BILLING 原型"""

@@ -1,0 +1,45 @@
+cause_of_action: "机动车交通事故责任纠纷"
+governing_laws:
+  - code: "PRC_CIVIL_CODE_1208_1213"
+    name: "中华人民共和国民法典"
+    article: "第一千二百零八条、第一千二百一十三条"
+    title: "机动车交通事故责任与交强险/商业险先行赔偿顺序"
+  - code: "PRC_TRAFFIC_INSURANCE_REGULATION_21_23"
+    name: "机动车交通事故责任强制保险条例"
+    article: "第二十一条、第二十三条"
+    title: "交强险法定责任限额（有责/无责）与分项赔付限额"
+  - code: "SPC_TRAFFIC_ACCIDENT_INTERPRETATION_2020"
+    name: "最高人民法院关于审理道路交通事故损害赔偿案件适用法律若干问题的解释"
+    article: "第十一条、第十三条"
+    title: "多车连环事故交强险分摊与承保商业险公司诉讼地位"
+
+essential_elements:
+  - element_id: "accident_fact_and_liability"
+    name: "交通事故发生事实及交警责任认定"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["道路交通事故认定书", "简易程序事故认定书", "交通事故证明书", "现场行车记录仪视频"]
+
+  - element_id: "compulsory_and_commercial_insurance"
+    name: "侵权车辆交强险与商业三者险投保状况"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["交强险保单", "商业三者险保单", "机动车行驶证", "保单查询信息"]
+
+  - element_id: "medical_and_treatment_expenses"
+    name: "医疗费、住院伙食补助费及必要用药支出凭证"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["门诊/住院病历", "医疗费发票原件", "住院费用汇总清单", "出院小结", "用药明细单"]
+
+  - element_id: "disability_loss_and_miscellaneous"
+    name: "伤残赔偿金、误工费、护理费及定残后续费用"
+    burden_of_proof: "plaintiff"
+    is_mandatory_for_natural_person: false
+    accepted_evidence_types: ["司法鉴定意见书", "残疾辅助器具费凭证", "误工收入银行流水", "用人单位误工及扣发工资证明", "护理费发票/护理人误工流水"]
+
+  - element_id: "fault_offset_ratio"
+    name: "过错责任比例划分与交强险法定限额先行扣除"
+    burden_of_proof: "defendant"
+    is_mandatory_for_natural_person: true
+    accepted_evidence_types: ["交强险有责限额先行赔付凭证", "交警认定责任比例（全责/主责/同责/次责）", "垫付医疗费收据/转账单"]

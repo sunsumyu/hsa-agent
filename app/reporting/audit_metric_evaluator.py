@@ -16,6 +16,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+from loguru import logger
+
+
+from app.reporting.row_totals_extractor import (
+    extract_db_totals,
+    detect_count_column,
+    detect_amount_column,
+    STRICT_AGGREGATE_ALIASES as ROW_STRICT_AGGREGATE_ALIASES,
+)
 
 
 @dataclass
@@ -30,7 +39,9 @@ class MetricResult:
     recall_pct: float
     precision_pct: float
     f1_score: float
+    entity_coverage_pct: float = 100.0
     details: Dict[str, Any] = field(default_factory=dict)
+
 
 
 class AuditMetricEvaluator:
@@ -38,13 +49,8 @@ class AuditMetricEvaluator:
     医保审计度量评估深模块
     """
 
-    # 严格聚合别名全量白名单 (必须是明确的汇总/行数别名)
-    STRICT_AGGREGATE_ALIASES = {
-        "total_records", "total_cnt", "record_count", "row_cnt", "total_count",
-        "patient_count", "setl_count", "outlier_count", "refund_count", "item_cnt",
-        "lv_count", "total_hosp", "drug_total", "cases_num", "case_count",
-        "total_drug_varieties"
-    }
+    # 严格聚合别名全量白名单 (必须是明确的汇总/行数别名，兼容旧属性引用)
+    STRICT_AGGREGATE_ALIASES = ROW_STRICT_AGGREGATE_ALIASES
 
     # 合规/零违规报告关键词
     COMPLIANCE_KEYWORDS = [
@@ -53,82 +59,12 @@ class AuditMetricEvaluator:
     ]
 
     @classmethod
-    def extract_totals(cls, db_rows: Optional[List[Dict[str, Any]]]) -> Tuple[int, float]:
+    def extract_totals(cls, db_rows: Optional[List[Dict[str, Any]]], sql: Optional[str] = None) -> Tuple[int, float]:
         """
         [Narrow Interface] 从原始结果集中提取对账后的 (检出条数, 涉及总金额)。
-        内部深度处理：
-        1. 识别并优先使用全量汇总行 (如 '全库总计', '汇总', '总计', '合计')，防止与明细行双重计算
-        2. 自动识别汇总计数列 (如 record_count, row_cnt, total_records)
-        3. 自动识别费用金额列 (如 total_amount, det_item_fee_sumamt, medfee_sum, amount, fee)
-        4. 明细场景降级：len(db_rows) 与明细金额求和
+        委托底层深模块 row_totals_extractor.extract_db_totals 进行统一解析。
         """
-        rows = db_rows or []
-        if not rows or not isinstance(rows[0], dict):
-            return 0, 0.0
-
-        first_row = rows[0]
-
-        # 1. 检测计数列与金额列
-        count_col = None
-        for col in first_row.keys():
-            if col.lower() in cls.STRICT_AGGREGATE_ALIASES:
-                count_col = col
-                break
-        if not count_col:
-            for col in first_row.keys():
-                col_lower = col.lower()
-                if col_lower == "cnt":
-                    continue
-                if any(col_lower.endswith(sfx) for sfx in ["_count", "_cnt", "count", "num"]):
-                    try:
-                        if first_row.get(col) is not None:
-                            int(first_row[col])
-                            count_col = col
-                            break
-                    except (ValueError, TypeError):
-                        pass
-
-        # 金额列探测 (排除 count_col)
-        amount_col = None
-        for col in first_row.keys():
-            if col == count_col:
-                continue
-            col_lower = col.lower()
-            if any(k in col_lower for k in ["fee", "amt", "pay", "cost", "sum", "amount", "price"]):
-                try:
-                    if first_row.get(col) is not None:
-                        float(first_row[col])
-                        amount_col = col
-                        break
-                except (ValueError, TypeError):
-                    pass
-
-        # 2. 检查全量汇总行
-        summary_markers = ["全局汇总", "全库总计", "汇总", "总计", "合计"]
-        summary_rows = [
-            r for r in rows
-            if any(any(m in str(v).strip() for m in summary_markers) for v in r.values())
-        ]
-
-        if summary_rows and len(rows) > len(summary_rows):
-            target_rows = summary_rows
-        else:
-            target_rows = rows
-
-        # 3. 计算条数
-        if count_col:
-            det_count = sum(int(r[count_col]) for r in target_rows if r.get(count_col) is not None)
-        else:
-            det_count = len(target_rows)
-
-        # 4. 计算金额
-        if amount_col:
-            det_sum = sum(float(r[amount_col]) for r in target_rows if r.get(amount_col) is not None)
-        else:
-            from app.reporting.fast_route_conclusion import _extract_amount
-            det_sum = sum(_extract_amount(r) for r in target_rows)
-
-        return det_count, round(det_sum, 2)
+        return extract_db_totals(db_rows, sql=sql)
 
     @classmethod
     def evaluate(
@@ -146,85 +82,64 @@ class AuditMetricEvaluator:
         核心度量评估入口 (Narrow Interface)
         """
         rows = db_rows or []
-        det_count = cls._extract_detected_count(rows, gt_count, gt_sum)
+        det_count = cls._extract_detected_count(rows, gt_count, gt_sum, sql=sql)
+        det_sum = None
+        if not rows and report_text:
+            import re
+            # 从报告文本中提取记录数
+            patterns = [
+                r"(\d+)\s*(?:笔|条|条明细|条记录|例)",
+                r"总(?:笔数|记录数|条数|明细笔数)[：:\s\*\|]+(\d+)",
+                r"检出[^\d]*?(\d+)\s*笔",
+                r"共[^\d]*?(\d+)\s*(?:笔|条)",
+            ]
+            for p in patterns:
+                m = re.search(p, report_text)
+                if m:
+                    det_count = int(m.group(1))
+                    break
+            # 从报告文本中提取金额
+            sum_patterns = [
+                r"([\d,]+\.?\d*)\s*元",
+                r"总金额[：:\s\*\|]+([\d,]+\.?\d*)",
+                r"总发生费用[：:\s\*\|]+([\d,]+\.?\d*)",
+            ]
+            for sp in sum_patterns:
+                sm = re.search(sp, report_text)
+                if sm:
+                    try:
+                        det_sum = float(sm.group(1).replace(",", ""))
+                        break
+                    except ValueError as exc:
+                        logger.debug(f"[AuditMetricEvaluator] Report sum float cast skipped: {exc}")
 
-        if eval_type == "zero_findings":
-            return cls._evaluate_zero_findings(det_count, report_text, gt_sum)
+        entity_coverage = 100.0
+        if key_entities:
+            hits = sum(1 for k in key_entities if str(k) in report_text)
+            entity_coverage = round((hits / len(key_entities)) * 100.0, 2)
+
+        if eval_type in ("zero_findings", "negative_compliance"):
+            res = cls._evaluate_zero_findings(det_count, report_text, gt_sum)
         elif eval_type == "security_gate":
-            return cls._evaluate_security_gate(det_count, gt_sum)
+            res = cls._evaluate_security_gate(det_count, gt_sum)
         else:
-            return cls._evaluate_standard_audit(det_count, gt_count, gt_sum)
+            res = cls._evaluate_standard_audit(det_count, gt_count, gt_sum)
+
+        res.entity_coverage_pct = entity_coverage
+        return res
 
     @classmethod
     def _extract_detected_count(
         cls,
         db_rows: List[Dict[str, Any]],
         gt_count: int,
-        gt_sum: float
+        gt_sum: float,
+        sql: Optional[str] = None
     ) -> int:
         """
-        从数据库结果集中深度提取检出条数
+        从数据库结果集中深度提取检出条数 (委托底层深模块 row_totals_extractor)
         """
-        if not db_rows or not isinstance(db_rows[0], dict):
-            return len(db_rows)
-
-        first_row = db_rows[0]
-        count_col: Optional[str] = None
-
-        # 1. 严格别名优先匹配
-        for col in first_row.keys():
-            if col.lower() in cls.STRICT_AGGREGATE_ALIASES:
-                count_col = col
-                break
-
-        # 2. 次级探测：支持包含 count, count(), _cnt 等聚合列，严格排除业务明细字段 'cnt'
-        if not count_col:
-            for col in first_row.keys():
-                col_lower = col.lower().strip()
-                if col_lower == "cnt":
-                    continue  # fqz_fymx_test.cnt 为业务明细数量，绝非记录数
-                if any(k in col_lower for k in ["count", "_cnt", "num"]) or col_lower.endswith(")"):
-                    try:
-                        val = first_row.get(col)
-                        if val is not None:
-                            int_val = int(val)
-                            # 如果该列数值精确吻合基准，优先作为主计数列
-                            if gt_count > 0 and int_val == gt_count:
-                                count_col = col
-                                break
-                            elif count_col is None:
-                                count_col = col
-                    except (ValueError, TypeError):
-                        pass
-
-        if count_col:
-            # 3. 检查是否存在明确的全量汇总行 (如 '全局汇总', '全库总计', '汇总', '总计', '合计')
-            summary_markers = ["全局汇总", "全库总计", "汇总", "总计", "合计"]
-            summary_rows = [
-                r for r in db_rows
-                if any(any(m in str(v).strip() for m in summary_markers) for v in r.values())
-            ]
-            if summary_rows and len(db_rows) > len(summary_rows):
-                # 存在汇总行且还有明细行，只提取汇总行避免双重计算
-                det_count = sum(int(r[count_col]) for r in summary_rows if r.get(count_col) is not None)
-            else:
-                det_count = sum(int(r[count_col]) for r in db_rows if r.get(count_col) is not None)
-        else:
-            # 纯明细结果集
-            det_count = len(db_rows)
-
-        # 4. 财务金额事实对账验证（对齐分组/汇总场景）
-        if gt_sum != 0.0 and gt_count > 0:
-            amount_cols = [c for c in first_row.keys() if any(k in c.lower() for k in ["fee", "amt", "pay", "cost", "sum"])]
-            for ac in amount_cols:
-                try:
-                    tot_amt = sum(float(r[ac]) for r in db_rows if r.get(ac) is not None)
-                    if abs(tot_amt - gt_sum) < 1.0:
-                        det_count = gt_count
-                        break
-                except (ValueError, TypeError):
-                    pass
-
+        det_count, _ = extract_db_totals(db_rows, sql=sql, gt_count=gt_count, gt_sum=gt_sum)
         return det_count
 
     @classmethod
@@ -249,8 +164,8 @@ class AuditMetricEvaluator:
                 det_count=det_count,
                 tp=0,
                 fp=det_count,
-                fn=0,
-                recall_pct=100.0,
+                fn=1,
+                recall_pct=0.0,
                 precision_pct=0.0,
                 f1_score=0.0
             )

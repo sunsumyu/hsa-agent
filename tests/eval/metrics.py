@@ -4,9 +4,10 @@ L1: 工具轨迹验证 (确定性, 无需 LLM)
 L2: 数值精确度验证 (确定性, 无需 LLM)
 L3: 报告质量评估 (LLM Judge, 仅此层)
 """
+import asyncio
 import os
 import re
-from typing import List
+from typing import List, Optional
 from loguru import logger
 from deepeval.metrics import BaseMetric, GEval
 from deepeval.test_case import LLMTestCase, LLMTestCaseParams
@@ -18,21 +19,35 @@ load_dotenv()
 
 
 # ============================================================
-# LLM Judge (仅用于 L3)
+# LLM Judge (仅用于 L3，复用项目统一算力池或环境变量覆盖)
 # ============================================================
 
-class QwenJudge(DeepEvalBaseLLM):
-    """裁判模型适配器"""
-    def __init__(self, model_name="qwen-max"):
-        self.model_name = model_name
-        self.model = ChatOpenAI(
-            model=model_name,
-            openai_api_key=os.getenv("BAILIAN_API_KEY"),
-            openai_api_base=os.getenv("BAILIAN_BASE_URL"),
-        )
+class UnifiedProviderJudge(DeepEvalBaseLLM):
+    """统一裁判模型适配器：优先读取 EVAL_JUDGE_* 环境变量，默认委托至项目 llm_provider 算力池"""
+
+    def __init__(self, model_name: Optional[str] = None, role: str = "planner_heavy"):
+        self.model_name = model_name or os.getenv("EVAL_JUDGE_MODEL") or f"pool:{role}"
+        self.role = role
+        self._explicit_model = None
+
+        api_key = os.getenv("EVAL_JUDGE_API_KEY")
+        base_url = os.getenv("EVAL_JUDGE_BASE_URL")
+        if api_key and base_url and os.getenv("EVAL_JUDGE_MODEL"):
+            self._explicit_model = ChatOpenAI(
+                model=os.getenv("EVAL_JUDGE_MODEL"),
+                openai_api_key=api_key,
+                openai_api_base=base_url,
+            )
 
     def load_model(self):
-        return self.model
+        return self._explicit_model
+
+    @staticmethod
+    def _extract_text(res) -> str:
+        content = getattr(res, "content", res)
+        if isinstance(content, list):
+            return "".join([str(p.get("text", "")) for p in content if isinstance(p, dict)])
+        return str(content)
 
     def _clean_json_output(self, text: str) -> str:
         match = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
@@ -41,24 +56,36 @@ class QwenJudge(DeepEvalBaseLLM):
         return text.strip()
 
     def generate(self, prompt: str) -> str:
-        res = self.load_model().invoke(prompt)
-        content = str(res.content) if not isinstance(res.content, list) else "".join(
-            [str(p.get("text", "")) for p in res.content if isinstance(p, dict)]
-        )
-        return self._clean_json_output(content)
+        if self._explicit_model is not None:
+            res = self._explicit_model.invoke(prompt)
+            return self._clean_json_output(self._extract_text(res))
+
+        coro = self.a_generate(prompt)
+        try:
+            asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, coro).result()
+        except RuntimeError:
+            return asyncio.run(coro)
 
     async def a_generate(self, prompt: str) -> str:
-        res = await self.load_model().ainvoke(prompt)
-        content = str(res.content) if not isinstance(res.content, list) else "".join(
-            [str(p.get("text", "")) for p in res.content if isinstance(p, dict)]
-        )
-        return self._clean_json_output(content)
+        if self._explicit_model is not None:
+            res = await self._explicit_model.ainvoke(prompt)
+            return self._clean_json_output(self._extract_text(res))
+
+        from app.core.llm_provider import llm_provider
+        res = await llm_provider.chat(role=self.role, messages=[("human", prompt)])
+        return self._clean_json_output(self._extract_text(res))
 
     def get_model_name(self):
         return self.model_name
 
 
-qwen_judge = QwenJudge()
+default_judge = UnifiedProviderJudge()
+# 向后兼容别名
+QwenJudge = UnifiedProviderJudge
+qwen_judge = default_judge
 
 
 # ============================================================
@@ -151,8 +178,8 @@ JSON示例：[123.45, 678.90]"""
             match = re.search(r'\[(.*?)\]', res_str.replace('\n', ''))
             if match:
                 return [float(x.strip()) for x in match.group(1).split(',') if x.strip()]
-        except:
-            pass
+        except Exception as exc:
+            logger.debug(f"[L2 验证] Judge 键值对提取跳过: {exc}")
         return []
 
     def measure(self, test_case: LLMTestCase) -> float:

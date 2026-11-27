@@ -44,9 +44,9 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
-data/reports/
-data/phoenix/
-data/semantic_index/
+/data/reports/
+/data/phoenix/
+/data/semantic_index/
 # 故意不忽略 usage_stats.json 以便跨电脑同步黑名单状态
 !data/usage_stats.json
 
@@ -70,9 +70,37 @@ uuid
 *.pdf
 anthropic_agents_text.txt
 
+# ── ClickHouse 本地运行时存储 (严禁提交) ────────────────────
+store/
+metadata/
+metadata_dropped/
+preprocessed_configs/
+cores/preprocessed_configs/
+format_schemas/
+flags/
+user_files/
+tmp/
+
 # ── 大仓库内脏文件 ────────────────────────────────────────
 
 docs-log/
 docs/
 tools/_history_chunk.md
-data/
+/data/
+# 运行时缓存 (app/data 源码包内, 不可整目录误伤)
+app/data/physical_schema_cache.json
+
+# BFCL 隔离评估环境与产物
+.venv-bfcl/
+artifacts/bfcl_results/
+artifacts/bfcl_reports/
+artifacts/bfcl_score/
+
+# GAIA 评估产物
+artifacts/gaia_results/
+artifacts/gaia_reports/
+
+*.pdf--
+verify_p1.png
+
+logs/

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -20,7 +21,11 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from loguru import logger
 
 
-_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "prompts"
+_REPO_ROOT = next(
+    (p for p in Path(__file__).resolve().parents if (p / "configs").is_dir()),
+    Path(__file__).resolve().parent.parent.parent.parent,
+)
+_PROMPTS_DIR = _REPO_ROOT / "configs" / "prompts"
 
 
 class PromptEntry:
@@ -58,12 +63,18 @@ class PromptEntry:
 
 
 class PromptRegistry:
-    """YAML-based Prompt 注册表。"""
+    """YAML-based Prompt 注册表。
+
+    并发契约: 双重检查锁 + 局部构建整体替换 (与 SchemaRegistry 同款)。
+    缓存引用只被原子替换、从不清空; reload 由提示词版本管理的 save/rollback
+    端点触发, 运行中的每次 LLM 调用都要 get_entry, 不允许出现清空窗口。
+    """
 
     def __init__(self, prompts_dir: Optional[Path] = None):
         self._dir = prompts_dir or _PROMPTS_DIR
         self._cache: Dict[str, PromptEntry] = {}
         self._loaded = False
+        self._lock = threading.Lock()
 
     # ── 公共 API ──────────────────────────────────────────────
 
@@ -75,12 +86,13 @@ class PromptRegistry:
     def get_entry(self, prompt_id: str) -> PromptEntry:
         """获取 PromptEntry (含元数据)。"""
         self._ensure_loaded()
-        if prompt_id not in self._cache:
+        cache = self._cache  # 引用快照读: 加载方只整体替换, 本地引用始终完整
+        if prompt_id not in cache:
             raise KeyError(
                 f"Prompt '{prompt_id}' not found. "
-                f"Available: {list(self._cache.keys())}"
+                f"Available: {list(cache.keys())}"
             )
-        return self._cache[prompt_id]
+        return cache[prompt_id]
 
     def get_version_info(self, prompt_id: str) -> Dict[str, str]:
         """返回版本信息, 供评测链路记录。"""
@@ -97,21 +109,45 @@ class PromptRegistry:
         return list(self._cache.keys())
 
     def reload(self) -> None:
-        """强制重新加载所有 YAML 文件。"""
-        self._cache.clear()
-        self._loaded = False
-        self._ensure_loaded()
+        """强制重新加载所有 YAML 文件。
+
+        与首次加载共用同一把锁; 先在锁内构建完整新缓存再整体替换引用。
+        旧实现先 _cache.clear() 再重载, clear 窗口内 get_entry 直接 KeyError。
+        """
+        with self._lock:
+            self._cache = self._load_all()
+            self._loaded = True
         logger.info(f"[PromptRegistry] Reloaded {len(self._cache)} prompts from {self._dir}")
 
     # ── 内部逻辑 ──────────────────────────────────────────────
 
     def _ensure_loaded(self) -> None:
+        """惰性加载守卫 (双重检查锁)。
+
+        快路径无锁读 _loaded, 已加载则零开销返回; 仅在未命中时加锁,
+        并在锁内二次检查, 保证并发首次调用只真正执行一次加载,
+        且加载期间不会向共享缓存边写边被迭代。
+        """
         if self._loaded:
             return
+
+        with self._lock:
+            if self._loaded:
+                return
+            self._cache = self._load_all()
+            self._loaded = True
+        logger.info(
+            f"[PromptRegistry] Initialized with {len(self._cache)} prompts "
+            f"from {self._dir}"
+        )
+
+    def _load_all(self) -> Dict[str, PromptEntry]:
+        """实际加载逻辑; 调用方必须持有 self._lock。构建局部缓存并整体返回。"""
+        cache: Dict[str, PromptEntry] = {}
+
         if not self._dir.exists():
             logger.warning(f"[PromptRegistry] Prompts directory not found: {self._dir}")
-            self._loaded = True
-            return
+            return cache
 
         for yaml_file in sorted(self._dir.glob("*.yaml")):
             try:
@@ -122,16 +158,12 @@ class PromptRegistry:
                     continue
                 prompt_id = data.get("id", yaml_file.stem)
                 entry = PromptEntry(prompt_id, data)
-                self._cache[prompt_id] = entry
+                cache[prompt_id] = entry
                 logger.debug(f"[PromptRegistry] Loaded {entry}")
             except Exception as e:
                 logger.error(f"[PromptRegistry] Failed to load {yaml_file.name}: {e}")
 
-        self._loaded = True
-        logger.info(
-            f"[PromptRegistry] Initialized with {len(self._cache)} prompts "
-            f"from {self._dir}"
-        )
+        return cache
 
 
 # 模块级单例

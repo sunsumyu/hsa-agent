@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List, Set, Tuple
+
+from pydantic import BaseModel, Field
+
+_CITE_TOKEN_RE = re.compile(r"\[CITE:([^\s\]]+)\]")
+_FREEFORM_STATUTE_RE = re.compile(
+    r"《(?P<title>[^》]{2,45})》"
+    r"(?:（[^）]{1,25}）)?"
+    r"(?P<article>第[一二三四五六七八九十百千0-9]+条"
+    r"(?:之[一二三四五六七八九十0-9]+)?"
+    r"(?:第[一二三四五六七八九十0-9]+款)?"
+    r"(?:第[（(]?[一二三四五六七八九十0-9]+[）)]?项)?)?"
+)
+_BARE_DOC_REF_RE = re.compile(
+    r"(?P<lead>(?:依据|根据|按照|依照|违反|触犯|参见|参照|结合|详见|另见|以及|[和与及])+)?(?P<ref>"
+    r"(?P<doc>"
+    r"[\u4e00-\u9fa5]{1,8}[〔\[（(](?:19|20)\d{2}[〕\]）)][0-9一二三四五六七八九十百千X×]+号"
+    r"|(?:[\u4e00-\u9fa5]{2,10})?第?[一二三四五六七八九十百千0-9]+号令"
+    r")"
+    r"(?P<article>第[一二三四五六七八九十百千0-9]+条"
+    r"(?:之[一二三四五六七八九十0-9]+)?"
+    r"(?:第[一二三四五六七八九十0-9]+款)?"
+    r"(?:第[（(]?[一二三四五六七八九十0-9]+[）)]?项)?)?)"
+)
+_AUTHORITATIVE_SPAN_RE = re.compile(r"（\[(?:向量库实查|规则库基准)\][^）]*）")
+_AUTHORITATIVE_ID_RE = re.compile(r"ID:\s*([A-Za-z0-9_.:-]+)\s*）")
+_PENALTY_MULT_RE = re.compile(r"(?:(\d+)|(十[一二三四五六七八九]?|[一二两三四五六七八九]))倍")
+_CN_DIGIT_MAP = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+}
+_DOC_EXT_RE = re.compile(r"\.(pdf|md|txt|docx?)$", re.IGNORECASE)
+_REDACTED_TAG = "[已拦截未核验法规引用]"
+
+
+class CitationGuardResult(BaseModel):
+    """System 2 法条引文核验结果。"""
+
+    passed: bool
+    sanitized_text: str
+    verified_ids: List[str] = Field(default_factory=list)
+    blocked_citations: List[str] = Field(default_factory=list)
+    faithfulness_warnings: List[str] = Field(default_factory=list)
+
+
+def _resolve_display_title(rec: Dict[str, Any]) -> str:
+    """提取用于展示与核验对齐的法规标题，必要时回退至去扩展名的来源文件名。"""
+    law_title = str(rec.get("law_title") or "").strip()
+    if law_title:
+        return law_title
+    source_doc = str(rec.get("source_doc") or "").strip()
+    if source_doc:
+        base = source_doc.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        cleaned = _DOC_EXT_RE.sub("", base).strip()
+        if cleaned:
+            return cleaned
+    return "法规条款"
+
+
+def _format_authoritative_citation(rec: Dict[str, Any]) -> str:
+    """将核验通过的引文记录格式化为带溯源锚点的权威引用。"""
+    title = _resolve_display_title(rec)
+    article = str(rec.get("article_num") or "").strip()
+    page = f", 第{rec['page_num']}页" if rec.get("page_num") else ""
+    origin = "向量库实查" if rec.get("source_type") in {"law_rag", "vector_rag"} else "规则库基准"
+    return f"《{title}》{article}（[{origin}] 来源: {rec.get('source_doc', '')}{page}, ID: {rec['citation_id']}）"
+
+
+def _resolve_cite_markers(
+    text: str,
+    ledger_by_id: Dict[str, Dict[str, Any]],
+) -> Tuple[str, Set[str], List[str]]:
+    """展开合法的 [CITE:<id>] 锚点并拦截伪造锚点。"""
+    verified: Set[str] = set()
+    blocked: List[str] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        cid = match.group(1)
+        rec = ledger_by_id.get(cid)
+        if rec is None:
+            blocked.append(f"[CITE:{cid}]")
+            return _REDACTED_TAG
+        verified.add(cid)
+        return _format_authoritative_citation(rec)
+
+    return _CITE_TOKEN_RE.sub(_replace, text), verified, blocked
+
+
+def _record_matches_statute(rec: Dict[str, Any], title: str, article: str) -> bool:
+    """判断自由文本法条引用是否与台账记录匹配。"""
+    haystack = " ".join(
+        str(rec.get(k) or "")
+        for k in ("law_title", "source_doc", "section_path", "snippet")
+    )
+    display_title = _resolve_display_title(rec)
+    if title != display_title and title not in haystack:
+        return False
+    if not article:
+        return True
+    art_haystack = " ".join(str(rec.get(k) or "") for k in ("article_num", "section_path", "snippet"))
+    return article in art_haystack
+
+
+def _audit_freeform_statutes(
+    text: str,
+    ledger: List[Dict[str, Any]],
+    strict: bool,
+) -> Tuple[str, Set[str], List[str]]:
+    """逐条审计文本中的自由法条引用，未命中台账时记录并按 strict 策略拦截。"""
+    verified: Set[str] = set()
+    blocked: List[str] = []
+
+    def _check(match: re.Match[str]) -> str:
+        full = match.group(0)
+        title = match.group("title").strip()
+        article = (match.group("article") or "").strip()
+        for rec in ledger:
+            if _record_matches_statute(rec, title, article):
+                if rec.get("citation_id"):
+                    verified.add(str(rec["citation_id"]))
+                return full
+        blocked.append(full)
+        return _REDACTED_TAG if strict else full
+
+    return _FREEFORM_STATUTE_RE.sub(_check, text), verified, blocked
+
+
+def _audit_bare_doc_refs(
+    text: str,
+    ledger: List[Dict[str, Any]],
+    strict: bool,
+) -> Tuple[str, Set[str], List[str]]:
+    """审计无书名号的红头文件文号与部委令号引用，跳过已展开的权威锚点括号。"""
+    protected = [(m.start(), m.end()) for m in _AUTHORITATIVE_SPAN_RE.finditer(text)]
+    verified: Set[str] = set()
+    blocked: List[str] = []
+
+    def _check(match: re.Match[str]) -> str:
+        s, e = match.span("ref")
+        if any(ps <= s and e <= pe for ps, pe in protected):
+            return match.group(0)
+        lead = match.group("lead") or ""
+        ref = match.group("ref")
+        doc_ref = match.group("doc").strip()
+        article = (match.group("article") or "").strip()
+        for rec in ledger:
+            haystack = " ".join(str(rec.get(k) or "") for k in ("law_title", "source_doc", "section_path", "snippet"))
+            if doc_ref in haystack:
+                if article:
+                    art_hay = " ".join(str(rec.get(k) or "") for k in ("article_num", "section_path", "snippet"))
+                    if article not in art_hay:
+                        continue
+                if rec.get("citation_id"):
+                    verified.add(str(rec["citation_id"]))
+                return match.group(0)
+        blocked.append(ref)
+        return f"{lead}{_REDACTED_TAG}" if strict else match.group(0)
+
+    return _BARE_DOC_REF_RE.sub(_check, text), verified, blocked
+
+
+def _extract_penalty_multipliers(text: str) -> Set[int]:
+    """提取文本中出现的整数型处罚/倍率数值（支持阿拉伯数字与一至十九中文数字）。"""
+    multipliers: Set[int] = set()
+    for digits, cn in _PENALTY_MULT_RE.findall(text or ""):
+        if digits:
+            multipliers.add(int(digits))
+        elif cn:
+            if len(cn) == 1 and cn in _CN_DIGIT_MAP:
+                multipliers.add(_CN_DIGIT_MAP[cn])
+            elif cn.startswith("十") and len(cn) == 2 and cn[1] in _CN_DIGIT_MAP:
+                multipliers.add(10 + _CN_DIGIT_MAP[cn[1]])
+    return multipliers
+
+
+def _find_sentence_cited_records(
+    sentence: str,
+    ledger_by_id: Dict[str, Dict[str, Any]],
+    verified_records: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """检索单句中显式锚定或自由文本命中台账的引文记录。"""
+    matched: Dict[str, Dict[str, Any]] = {}
+    for cid in _AUTHORITATIVE_ID_RE.findall(sentence):
+        rec = ledger_by_id.get(cid)
+        if rec is not None:
+            matched[cid] = rec
+    for m in _FREEFORM_STATUTE_RE.finditer(sentence):
+        title = m.group("title").strip()
+        article = (m.group("article") or "").strip()
+        for rec in verified_records:
+            cid = str(rec.get("citation_id") or "")
+            if cid and _record_matches_statute(rec, title, article):
+                matched[cid] = rec
+    return list(matched.values())
+
+
+def _audit_numeric_faithfulness(
+    text: str,
+    ledger_by_id: Dict[str, Dict[str, Any]],
+    verified_records: List[Dict[str, Any]],
+) -> List[str]:
+    """核验结论单句中的罚款倍率是否忠实于同一句所引用条文的检索原文。"""
+    warnings: List[str] = []
+    for sentence in re.split(r"[。；;\n]+", text or ""):
+        claimed = _extract_penalty_multipliers(sentence)
+        if not claimed:
+            continue
+        cited = _find_sentence_cited_records(sentence, ledger_by_id, verified_records)
+        snippet_mults: Set[int] = set()
+        for rec in cited:
+            snippet_mults |= _extract_penalty_multipliers(str(rec.get("snippet") or ""))
+        if not snippet_mults:
+            continue
+        unexpected = sorted(claimed - snippet_mults)
+        if unexpected:
+            warnings.append(
+                f"条文倍数核验存疑: 结论提及 {unexpected} 倍，检索原文仅含 {sorted(snippet_mults)} 倍"
+            )
+    return warnings
+
+
+def enforce_citation_grounding(
+    text: str,
+    ledger: List[Dict[str, Any]],
+    strict: bool = True,
+) -> CitationGuardResult:
+    """System 2 确定性法条引用门禁：反查合法 ID、拦截伪造 ID 与未召回的编造条款。"""
+    if not text:
+        return CitationGuardResult(passed=True, sanitized_text="")
+
+    ledger_list = [r for r in (ledger or []) if isinstance(r, dict)]
+    ledger_by_id = {str(r["citation_id"]): r for r in ledger_list if r.get("citation_id")}
+
+    expanded_text, id_verified, id_blocked = _resolve_cite_markers(text, ledger_by_id)
+    free_text, free_verified, free_blocked = _audit_freeform_statutes(
+        expanded_text, ledger_list, strict=strict
+    )
+    final_text, bare_verified, bare_blocked = _audit_bare_doc_refs(
+        free_text, ledger_list, strict=strict
+    )
+
+    all_blocked = id_blocked + free_blocked + bare_blocked
+    all_verified = sorted(id_verified | free_verified | bare_verified)
+    verified_records = [ledger_by_id[cid] for cid in all_verified if cid in ledger_by_id]
+    faithfulness_warnings = _audit_numeric_faithfulness(final_text, ledger_by_id, verified_records)
+    return CitationGuardResult(
+        passed=(len(all_blocked) == 0 and len(faithfulness_warnings) == 0),
+        sanitized_text=final_text,
+        verified_ids=all_verified,
+        blocked_citations=all_blocked,
+        faithfulness_warnings=faithfulness_warnings,
+    )

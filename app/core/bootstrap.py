@@ -31,9 +31,11 @@ def register_services():
     ServiceProvider.register("neo4j_manager", lambda: __import__(
         "app.infra.neo4j_manager", fromlist=["Neo4jManager"]).Neo4jManager())
     ServiceProvider.register("field_kg", lambda: __import__(
-        "app.infra.neo4j_manager", fromlist=["FieldKnowledgeGraph"]).FieldKnowledgeGraph())
+        "app.infra.field_knowledge_graph", fromlist=["FieldKnowledgeGraph"]).FieldKnowledgeGraph())
     ServiceProvider.register("perf_monitor", lambda: __import__(
         "app.api.perf_monitor", fromlist=["PerfMonitor"]).PerfMonitor())
+    ServiceProvider.register("observability", lambda: __import__(
+        "app.core.observability_service", fromlist=["ObservabilityService"]).ObservabilityService())
 
     # ── Core services ─────────────────────────────────────────
     ServiceProvider.register("llm_provider", lambda: __import__(
@@ -44,6 +46,10 @@ def register_services():
         "app.core.permission_manager", fromlist=["PermissionManager"]).PermissionManager())
     ServiceProvider.register("task_pool", lambda: __import__(
         "app.core.task_pool", fromlist=["TaskPoolManager"]).TaskPoolManager())
+    ServiceProvider.register("evaluation_service", lambda: __import__(
+        "app.core.evaluation_service", fromlist=["AuditEvaluationService"]).AuditEvaluationService())
+    ServiceProvider.register("prompt_registry", lambda: __import__(
+        "app.core.prompt_service", fromlist=["PromptRegistryService"]).PromptRegistryService())
 
     # ── Skills ────────────────────────────────────────────────
     ServiceProvider.register("fast_router", lambda: __import__(
@@ -63,9 +69,11 @@ def register_services():
 
     # ── Memory ────────────────────────────────────────────────
     ServiceProvider.register("history_manager", lambda: __import__(
-        "app.memory.history", fromlist=["HistoryManager"]).HistoryManager())
+        "app.core.memory.history", fromlist=["HistoryManager"]).HistoryManager())
+    ServiceProvider.register("session_store", lambda: __import__(
+        "app.core.memory.session_store", fromlist=["SessionStore"]).SessionStore())
     ServiceProvider.register("experience_manager", lambda: __import__(
-        "app.memory.experience", fromlist=["ExperienceManager"]).ExperienceManager())
+        "app.core.memory.experience", fromlist=["ExperienceManager"]).ExperienceManager())
 
     logger.info(f"[Bootstrap] {len(ServiceProvider.list_services())} services registered")
     logger.debug(f"[Bootstrap] Services: {ServiceProvider.list_services()}")

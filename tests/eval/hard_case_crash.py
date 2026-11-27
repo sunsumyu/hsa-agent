@@ -4,7 +4,7 @@ import json
 from dotenv import load_dotenv
 from app.infra.model_manager import model_manager
 from app.agents.agent import get_executor
-from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
+from app.skills.federated.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 
 load_dotenv(override=True)
 

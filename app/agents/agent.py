@@ -5,7 +5,7 @@ import pydantic
 from loguru import logger
 
 # [DEPRECATED] 此模块已被 agent_graph.py 完全取代，仅保留供旧版测试脚本兼容。
-# 新代码应使用: from app.core.agent_graph import get_graph_executor
+# 新代码应使用: from app.orchestration.agent_graph import get_graph_executor
 warnings.warn(
     "app.agent is deprecated. Use app.agent_graph.get_graph_executor instead.",
     DeprecationWarning,
@@ -35,10 +35,7 @@ except ImportError:
     logger.warning("langchain_classic 未安装，agent.py 旧版 AgentExecutor 不可用。请迁移至 agent_graph.py。")
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage
-from langchain_community.vectorstores import FAISS
-from langchain_community.docstore.in_memory import InMemoryDocstore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
+from app.skills.federated.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 from app.infra.model_manager import model_manager
 
 load_dotenv()
@@ -55,11 +52,11 @@ def get_llm():
     return _llm
 
 def get_embeddings():
-    from app.tools import get_embeddings
+    from app.skills.federated.tools import get_embeddings
     return get_embeddings()
 
 def build_vector_store(force_rebuild=False):
-    from app.tools import build_vector_store
+    from app.skills.federated.tools import build_vector_store
     return build_vector_store(force_rebuild)
 
 # 初始化向量库 - 延迟加载
@@ -67,7 +64,7 @@ _vector_store = None
 
 def get_vector_store():
     # 为了兼容旧版调用，从 tools 转发
-    from app.tools import get_vector_store
+    from app.skills.federated.tools import get_vector_store
     return get_vector_store()
 
 EXPERT_SYSTEM_PROMPT = """你是一名医保审计专家。你已经内化了所有的稽核表 Schema 和核心政策规则。
@@ -147,7 +144,7 @@ def get_tools():
 # 导出动态构建函数，支持根据前端 model_id 实时切换算力
 def get_executor(model_id: str = None):
     # [V33.6 架构归一化] 切换至 hardened AgentGraph
-    from app.core.agent_graph import AgentGraph
+    from app.orchestration.agent_graph import AgentGraph
     
     config = None
     if model_id:

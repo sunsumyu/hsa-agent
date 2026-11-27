@@ -165,29 +165,24 @@ class ToolEngine:
 
     # ── 2. 内部深度实现逻辑 (Deep Implementation) ──────────────────────────────
 
-    async def _execute_sql(
+    def _validate_grounded_sql(
         self,
         call_id: str,
-        params: ExecuteAuditSqlInput,
-        context: Dict[str, Any]
-    ) -> ToolResult:
-        raw_sql = params.sql
-        tenant_id = context.get("tenant_id")
-        expected_table = context.get("expected_table")
-
-        # 步骤 A: AST 模式地面化 (将 dim_std_admdvs 自动重写为物理真实表 fqz_admdvs)
-        grounded_sql, used_tables, ground_hints = SchemaGrounder.ground_sql(raw_sql)
-
-        # 步骤 B: SQLGuardian 物理安全与租户过滤
+        grounded_sql: str,
+        tenant_id: Any,
+        expected_table: Any,
+    ) -> Tuple[Optional[str], Optional[ToolResult]]:
+        """执行 SQLGuardian 物理安全校验，失败时直接构造结构化 ToolResult。"""
         try:
             safe_sql = SQLGuardian.validate_sql(
                 grounded_sql,
                 tenant_id=tenant_id,
-                expected_table=expected_table
+                expected_table=expected_table,
             )
+            return safe_sql, None
         except SecurityViolationError as sve:
             logger.error(f"🛡️ [ToolEngine] SQLGuardian 拦截: {sve}")
-            return ToolResult(
+            return None, ToolResult(
                 call_id=call_id,
                 tool_name="execute_audit_sql",
                 is_success=False,
@@ -195,121 +190,32 @@ class ToolEngine:
                 error_message=str(sve),
                 structured_hints=[
                     SchemaGrounder.get_registered_tables_hint(),
-                    "注意：所有表必须以合法的物理前缀 (如 fqz_) 开头并已在系统注册。"
-                ]
+                    "注意：所有表必须以合法的物理前缀 (如 fqz_) 开头并已在系统注册。",
+                ],
             )
         except Exception as e:
-            return ToolResult(
+            return None, ToolResult(
                 call_id=call_id,
                 tool_name="execute_audit_sql",
                 is_success=False,
                 error_type="SYNTAX_ERROR",
                 error_message=f"SQL 语法或解析异常: {e}",
-                structured_hints=["请检查 SQL 的语法闭合与括号配对。"]
+                structured_hints=["请检查 SQL 的语法闭合与括号配对。"],
             )
 
-        # 步骤 C: 物理适配器执行
-        try:
-            records = await self.db_adapter.query(safe_sql)
-        except Exception as exec_err:
-            err_str = str(exec_err)
-            logger.warning(f"⚠️ [ToolEngine] 数据库执行报错，尝试自动自愈: {err_str[:120]}")
-            
-            # 自愈分支 1: Code 6 包含制表符的日期转换
-            if "Code: 6" in err_str and "CANNOT_PARSE_TEXT" in err_str:
-                from app.skills.sql_tools import _heal_timestamp_tab
-                healed_sql = _heal_timestamp_tab(safe_sql)
-                if healed_sql != safe_sql:
-                    try:
-                        records = await self.db_adapter.query(healed_sql)
-                        safe_sql = healed_sql
-                    except Exception as retry_e:
-                        return ToolResult(
-                            call_id=call_id,
-                            tool_name="execute_audit_sql",
-                            is_success=False,
-                            error_type="EXECUTION_ERROR",
-                            error_message=str(retry_e),
-                            sql_executed=healed_sql
-                        )
-                else:
-                    return ToolResult(
-                        call_id=call_id,
-                        tool_name="execute_audit_sql",
-                        is_success=False,
-                        error_type="EXECUTION_ERROR",
-                        error_message=err_str,
-                        sql_executed=safe_sql
-                    )
-            # 自愈分支 2: Code 215 GROUP BY 漏字段
-            elif "Code: 215" in err_str:
-                from app.skills.sql_tools import _heal_group_by_215
-                healed_sql = _heal_group_by_215(safe_sql, err_str)
-                if healed_sql != safe_sql:
-                    try:
-                        records = await self.db_adapter.query(healed_sql)
-                        safe_sql = healed_sql
-                    except Exception as retry_e:
-                        return ToolResult(
-                            call_id=call_id,
-                            tool_name="execute_audit_sql",
-                            is_success=False,
-                            error_type="EXECUTION_ERROR",
-                            error_message=str(retry_e),
-                            sql_executed=healed_sql
-                        )
-                else:
-                    return ToolResult(
-                        call_id=call_id,
-                        tool_name="execute_audit_sql",
-                        is_success=False,
-                        error_type="EXECUTION_ERROR",
-                        error_message=err_str,
-                        sql_executed=safe_sql
-                    )
-            # 自愈分支 3: Code 184 别名遮蔽导致 ILLEGAL_AGGREGATION
-            elif "Code: 184" in err_str or "ILLEGAL_AGGREGATION" in err_str or "is found in WHERE in query" in err_str:
-                from app.core.protocol.tool_normalizer import ToolResponseNormalizer
-                healed_sql = ToolResponseNormalizer.fix_shadowing_aliases(safe_sql)
-                if healed_sql != safe_sql:
-                    try:
-                        records = await self.db_adapter.query(healed_sql)
-                        safe_sql = healed_sql
-                    except Exception as retry_e:
-                        return ToolResult(
-                            call_id=call_id,
-                            tool_name="execute_audit_sql",
-                            is_success=False,
-                            error_type="EXECUTION_ERROR",
-                            error_message=str(retry_e),
-                            sql_executed=healed_sql
-                        )
-                else:
-                    return ToolResult(
-                        call_id=call_id,
-                        tool_name="execute_audit_sql",
-                        is_success=False,
-                        error_type="EXECUTION_ERROR",
-                        error_message=err_str,
-                        sql_executed=safe_sql
-                    )
-            else:
-                return ToolResult(
-                    call_id=call_id,
-                    tool_name="execute_audit_sql",
-                    is_success=False,
-                    error_type="EXECUTION_ERROR",
-                    error_message=err_str,
-                    sql_executed=safe_sql
-                )
+    def _build_sql_success_result(
+        self,
+        call_id: str,
+        safe_sql: str,
+        records: List[Any],
+        ground_hints: List[str],
+    ) -> ToolResult:
+        """执行证据安全采样、内容指纹计算并封装成功态 ToolResult。"""
+        from app.core.tool_engine.tool_evidence_extractor import ToolEvidenceExtractor
 
-        # 步骤 D: 结构化采样与指纹生成 (集成 ToolEvidenceExtractor)
         total_count = len(records)
-        from app.agents.tool_evidence_extractor import ToolEvidenceExtractor
-        extractor = ToolEvidenceExtractor(max_chars=12000)
-        safe_serialized = extractor.truncate_data(records)
+        ToolEvidenceExtractor(max_chars=12000).truncate_data(records)
 
-        # 生成确定性内容指纹
         fp_src = f"{safe_sql}_{total_count}_{json.dumps(records[:3] if records else [], sort_keys=True, default=str)}"
         evidence_fp = hashlib.sha256(fp_src.encode("utf-8")).hexdigest()
 
@@ -321,12 +227,43 @@ class ToolEngine:
             call_id=call_id,
             tool_name="execute_audit_sql",
             is_success=True,
-            data=records[:50],                # 结构化保证完整的采样记录列表
+            data=records[:50],
             record_count=total_count,
             structured_hints=all_hints,
             evidence_fingerprint=evidence_fp,
-            sql_executed=safe_sql
+            sql_executed=safe_sql,
         )
+
+    async def _execute_sql(
+        self,
+        call_id: str,
+        params: ExecuteAuditSqlInput,
+        context: Dict[str, Any]
+    ) -> ToolResult:
+        grounded_sql, _, ground_hints = SchemaGrounder.ground_sql(params.sql)
+        safe_sql, error_res = self._validate_grounded_sql(
+            call_id,
+            grounded_sql,
+            context.get("tenant_id"),
+            context.get("expected_table"),
+        )
+        if error_res is not None or safe_sql is None:
+            return error_res
+
+        from app.core.protocol.clickhouse_error_healer import execute_with_auto_heal
+        try:
+            records, safe_sql = await execute_with_auto_heal(self.db_adapter.query, safe_sql)
+        except Exception as exec_err:
+            return ToolResult(
+                call_id=call_id,
+                tool_name="execute_audit_sql",
+                is_success=False,
+                error_type="EXECUTION_ERROR",
+                error_message=str(exec_err),
+                sql_executed=safe_sql,
+            )
+
+        return self._build_sql_success_result(call_id, safe_sql, records, ground_hints)
 
     def _handle_submit_plan(self, call_id: str, params: SubmitAuditPlanInput) -> ToolResult:
         """处理结构化 Planner 规划动作"""
@@ -352,7 +289,7 @@ class ToolEngine:
         context: Dict[str, Any]
     ) -> ToolResult:
         """调用预定义静态规则引擎"""
-        from app.skills.audit_rules import audit_rule_engine
+        from app.skills.rules.audit_rules import audit_rule_engine
         try:
             res = await audit_rule_engine.execute_rule(params.rule_id, params.extra_filters or {})
             records = res if isinstance(res, list) else (res.get("data") if isinstance(res, dict) else [])

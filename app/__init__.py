@@ -7,7 +7,7 @@ Provides a completely transparent redirect for all legacy imports as files are r
   - app/core/context/
   - app/core/registry/
 - app/agents/
-- app/memory/
+- app/core/memory/
 - app/skills/
 - app/infra/
 - app/reporting/
@@ -21,7 +21,7 @@ from loguru import logger
 # Map legacy app.<module> name to new deeply nested app.<subpackage>.<module> path
 DEPRECATED_MAPPINGS = {
     # Core Orchestration
-    "agent_graph": "app.core.agent_graph",
+    "agent_graph": "app.orchestration.agent_graph",
     "booster": "app.core.booster",
     "logging_config": "app.core.logging_config",
     "observability": "app.core.observability",
@@ -48,17 +48,15 @@ DEPRECATED_MAPPINGS = {
     "agent": "app.agents.agent",
     "coder_agent": "app.agents.coder_agent",
     "consolidator_agent": "app.agents.consolidator_agent",
-    "expert_bridge": "app.agents.expert_bridge",
     "planner_agent": "app.agents.planner_agent",
     "reflection_agent": "app.agents.reflection_agent",
 
     # Memory
-    "experience": "app.memory.experience",
-    "history": "app.memory.history",
-    "compressor": "app.memory.compressor",
-    "entity_extractor": "app.memory.entity_extractor",
-    "message_sanitizer": "app.memory.message_sanitizer",
-    "semantic_memory": "app.memory.semantic_memory",
+    "experience": "app.core.memory.experience",
+    "history": "app.core.memory.history",
+    "entity_extractor": "app.core.memory.entity_extractor",
+    "message_sanitizer": "app.core.memory.message_sanitizer",
+    "semantic_memory": "app.core.memory.semantic_memory",
 
     # Skills
     "audit_rules": "app.skills.audit_rules",
@@ -79,18 +77,14 @@ DEPRECATED_MAPPINGS = {
     "neo4j_manager": "app.infra.neo4j_manager",
     "model_manager": "app.infra.model_manager",
     "endpoint_pool_manager": "app.infra.endpoint_pool_manager",
-    "quota_fetcher": "app.infra.quota_fetcher",
     "usage_tracker": "app.infra.usage_tracker",
 
     # Reporting
     "report_renderer": "app.reporting.report_renderer",
-    "rich_reporter": "app.reporting.rich_reporter",
     "llm_judge": "app.reporting.llm_judge",
 
     # Network API
     "chat_stream": "app.api.chat_stream",
-    "monitor_server": "app.api.monitor_server",
-    "monitor_stream": "app.api.monitor_stream",
     "perf_monitor": "app.api.perf_monitor",
 }
 

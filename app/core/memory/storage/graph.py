@@ -46,7 +46,8 @@ class GraphStorage(BaseStorage):
                 }
                 try:
                     self.manager.execute_cypher(cypher, params)
-                except: pass # 忽略写入失败，保证主流程不中断
+                except Exception as exc:
+                    logger.debug(f"[GraphStorage] Neo4j entity merge skipped: {exc}")
 
     async def search(self, query: str, limit: int = 5) -> List[MemoryItem]:
         """

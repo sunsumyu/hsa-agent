@@ -45,6 +45,7 @@ class GlobalSettings(BaseSettings):
     sql_row_tolerance: int = 1000        # SQL 结果集容差（触发警告的阈值）
     max_agent_retries: int = 3          # Agent 自愈最大重试次数
     hitl_risk_threshold: float = 0.6    # 触发人工审批的风险分数阈值
+    use_execution_subgraph: bool = False # 是否启用执行与自愈子图架构 (Matt Pocock Deep Module)
     
     # --- 物理基础设施 ---
     redis_url: str = "redis://localhost:6379/0"

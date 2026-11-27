@@ -3,14 +3,14 @@
 用法: python tests/test_single_qa.py
 """
 import asyncio, time, sys, os
-if sys.platform == "win32":
+if __name__ == "__main__" and sys.platform == "win32":
     import io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 async def main():
-    from app.core.agent_graph import build_graph
+    from app.orchestration.agent_graph import build_graph
 
     question = "核查 2024 年是否存在同一天、同一患者、在同一医院多次收取的结算费用？"
     workflow = build_graph()

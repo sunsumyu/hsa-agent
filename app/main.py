@@ -2,6 +2,11 @@ import os
 import asyncio
 import sys
 
+# [V211.1 Windows 兼容性修复] 必须在任何事件循环创建前设置 SelectorEventLoopPolicy，
+# 否则 uvicorn.run(..., loop="asyncio") 与 psycopg AsyncConnectionPool 会因 ProactorEventLoop 报错。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # [V13.0 系统级避灾] 强制避开 Windows 4311-4410 保留端口段
 os.environ["PHOENIX_GRPC_PORT"] = "4517"
 os.environ["PHOENIX_COLLECTOR_GRPC_PORT"] = "4517"
@@ -15,7 +20,7 @@ import app.core.logging_config # [V41.6] 物理链路可跳转配置
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from app.core.checkpointer import create_checkpointer
 
 from app.infra.model_manager import model_manager
 from app.infra.usage_tracker import usage_tracker
@@ -27,19 +32,10 @@ async def lifespan(app: FastAPI):
     # [V211.0] Register all services into the DI container before anything else
     register_services()
 
-    # 针对 LangGraph 0.2.x 与 aiosqlite 的性能/兼容性修复
-    async with AsyncSqliteSaver.from_conn_string("audit_checkpoints.db") as saver_instance:
-        # 兼容性补丁：处理可能的属性缺失 (针对 aio-sqlite 连接对象)
-        target = None
-        if hasattr(saver_instance, "conn"): target = saver_instance.conn
-        elif hasattr(saver_instance, "connection"): target = saver_instance.connection
-        
-        if target and not hasattr(target, "is_alive"):
-            logger.debug(">>> [兼容性补丁] 注入异步连接 is_alive 属性")
-            target.is_alive = lambda: True
-            
+    # [V220.0] 统一状态持久化层抽象工厂 (支持 SQLite / Postgres / Memory 配置切换)
+    async with create_checkpointer() as saver_instance:
         app.state.saver = saver_instance
-        logger.info(">>> [系统启动] 异步持久化层 (AsyncSqliteSaver) 已就绪")
+        logger.info(f">>> [系统启动] 状态持久化层已就绪: {saver_instance.__class__.__name__}")
         
         # [V4.9.8] 初始化双重观测栈 (Langfuse & Phoenix)
         init_observability()
@@ -49,23 +45,40 @@ async def lifespan(app: FastAPI):
             logger.info(">>> [系统启明] 检测到今日首启，自动触发全量算力节点体检")
             usage_tracker.reset_blacklists() # 强制清除可能存在的历史误封
             asyncio.create_task(model_manager.run_health_check())
+
+        # 启动记忆中枢后台周期性三维 GC
+        from app.core.memory.manager import memory_hub
+        memory_hub.start_periodic_gc(interval_seconds=3600)
         
         yield
+
+        # 停止记忆中枢后台 GC
+        memory_hub.stop_periodic_gc()
         
         # [V39.0] 优雅离场：在 FastAPI 关机前物理固化所有观测数据
         from app.core.observability import shutdown_observability
         shutdown_observability()
 
+        # [Matt Pocock Deep Module] 释放所有受管单例服务的外部连接与资源
+        from app.core.container import ServiceProvider
+        ServiceProvider.dispose_all()
+
 app = FastAPI(title="Argus - Medical Audit Agent", lifespan=lifespan)
 
+# [Matt Pocock Deep Module] 注入统一 API 响应信封与全局异常拦截器
+from app.api.envelope import register_api_exception_handlers
+register_api_exception_handlers(app)
+
 # [重构 V10.0] 路由分组: palace / misc 端点已提取到 app/routes/
-from app.routes.palace import router as palace_router
-from app.routes.misc import router as misc_router
-from app.routes.graph_state import router as graph_state_router
-from app.routes.chat import router as chat_router
-from app.routes.memory import router as memory_router
-from app.routes.usage import router as usage_router
-from app.routes.prompts import router as prompts_router # [V192.0] 提示词版本管理
+from app.api.routes.palace import router as palace_router
+from app.api.routes.misc import router as misc_router
+from app.api.routes.graph_state import router as graph_state_router
+from app.api.routes.chat import router as chat_router
+from app.api.routes.memory import router as memory_router
+from app.api.routes.usage import router as usage_router
+from app.api.routes.prompts import router as prompts_router # [V192.0] 提示词版本管理
+from app.api.routes.legal_chat import router as legal_chat_router # [Legal Agent] 法律辩法多轮流式路由
+from app.api.routes.sessions import router as sessions_router
 app.include_router(palace_router)
 app.include_router(misc_router)
 app.include_router(graph_state_router)
@@ -73,6 +86,8 @@ app.include_router(chat_router)
 app.include_router(memory_router)
 app.include_router(usage_router)
 app.include_router(prompts_router) # [V192.0]
+app.include_router(legal_chat_router) # [Legal Agent]
+app.include_router(sessions_router)
 
 # 跨域配置: 从环境变量读取允许的来源, 默认仅本地开发
 # 生产环境必须设置 CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
@@ -100,6 +115,20 @@ app.add_middleware(
 )
 logger.info(f"[CORS] allowed_origins={_cors_origins} allow_credentials={_allow_credentials}")
 
+# [Frontend Static Files] 若前端已构建 dist 目录，挂载到 FastAPI 作为统一或备用访问点 (http://127.0.0.1:18883/legal)
+_frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "argus-frontend", "dist"))
+if os.path.exists(_frontend_dist):
+    from fastapi.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+    
+    @app.get("/legal")
+    @app.get("/legal/")
+    async def serve_legal_page():
+        return FileResponse(os.path.join(_frontend_dist, "index.html"))
+        
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend_static")
+    logger.info(f"[Frontend] 前端静态资源已就绪: http://127.0.0.1:18883/legal (源目录: {_frontend_dist})")
+
 if __name__ == "__main__":
     import uvicorn
     import sys
@@ -113,13 +142,14 @@ if __name__ == "__main__":
         sys.exit(0) # 本阶段我们仅需逻辑占位，真正的检查已在之前的替换中通过
 
     _host = os.getenv("UVICORN_HOST", "127.0.0.1")
-    _port = int(os.getenv("UVICORN_PORT", "18882"))
+    _port = int(os.getenv("UVICORN_PORT", "18883"))
     
-    # [V211.1 Windows 兼容性修复] 使用 SelectorEventLoop 避免 WinError 10014
+    # [V211.1 Windows 兼容性修复] loop="none" 防止 uvicorn 覆盖为 ProactorEventLoop，
+    # 由 asyncio.Runner(loop_factory=SelectorEventLoop) 直接驱动以兼容 psycopg 异步连接池。
     if sys.platform == "win32":
-        import asyncio
-        loop = asyncio.SelectorEventLoop()
-        asyncio.set_event_loop(loop)
-        uvicorn.run(app, host=_host, port=_port, loop="asyncio")
+        config = uvicorn.Config(app, host=_host, port=_port, loop="none")
+        server = uvicorn.Server(config)
+        with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+            runner.run(server.serve())
     else:
         uvicorn.run(app, host=_host, port=_port)

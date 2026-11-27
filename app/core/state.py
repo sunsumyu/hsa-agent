@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 def _default_message_reducer(left: List, right: List) -> List:
     """[V90.4] 企业级消息合并：委托给 message_sanitizer 的去重+压缩+净化 pipeline。"""
-    from app.memory.message_sanitizer import trim_and_sanitize
+    from app.core.memory.message_sanitizer import trim_and_sanitize
     return trim_and_sanitize(left, right, max_total=40, keep_head=5, keep_tail=25)
 
 
@@ -57,6 +57,12 @@ def _overwrite_list(left: List, right: List) -> List:
     return left or []
 
 
+def _merge_citations(left: List, right: List) -> List:
+    """合并并按 citation_id 去重当前轮次检索到的溯源账本。"""
+    from app.core.rag.citation_ledger import merge_citation_ledgers
+    return merge_citation_ledgers(left, right)
+
+
 # ── Layer 1: 框架通用状态 ──────────────────────────────────────
 
 class WorkflowState(TypedDict, total=False):
@@ -64,6 +70,9 @@ class WorkflowState(TypedDict, total=False):
     messages: Annotated[Sequence[BaseMessage], _default_message_reducer]
     session_id: str
     retry_count: int
+    plan_retry_count: int
+    sql_retry_count: int
+    tool_step_count: int
     error_log: Optional[str]
     human_input: Optional[str]
     is_awaiting_human: bool
@@ -79,10 +88,12 @@ class TaskArtifacts(TypedDict, total=False):
     sql_query: str
     sql_history: Annotated[List[str], _overwrite_list]
     raw_data: str
+    evidence_row_count: int  # [证据对账] 证据通道中实际可解析的行数（与 raw_data Append-Only 同步累加）
     sql_validated: bool
     execution_trace: List[str]
     schema_hint: Optional[str]
     metadata: Annotated[Dict[str, Any], _merge_dict]
+    retrieved_citations: Annotated[List[Dict[str, Any]], _merge_citations]
 
 
 # ── Layer 3: 领域专属上下文 ────────────────────────────────────
@@ -127,6 +138,11 @@ class AuditDomainContext(TypedDict, total=False):
     audit_feedback: Optional[AuditFeedback]
     methodology: str
     temp_table: Optional[str]
+    # [V227.0 SPEC-227] 多轮状态机解耦与长链上下文治理字段
+    current_turn_query: Optional[str]
+    accumulated_findings: Annotated[List[Dict[str, Any]], _overwrite_list]
+    turn_type: Optional[str]
+    audit_notes: Annotated[List[str], _overwrite_list]
 
 
 # ── 组合: 最终 State ──────────────────────────────────────────
@@ -134,3 +150,12 @@ class AuditDomainContext(TypedDict, total=False):
 class AuditState(WorkflowState, TaskArtifacts, AuditDomainContext):
     """完整的医保稽核 Agent 状态, 由三层组合而成。"""
     pass
+
+
+# ── 状态生命周期与清洗标准化导出 (Matt Pocock Deep Module) ─────────
+from app.core.state_governance import (
+    build_initial_audit_state,
+    create_turn_reset_patch,
+    filter_state_for_logging,
+)
+

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 from app.agents.agent import get_executor, get_prompt
-from app.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
+from app.skills.federated.tools import execute_audit_sql, list_tables, get_table_schema, calculator, search_expert_knowledge
 from tests.eval.metrics import get_hsa_evidence_chain_metric, HSANumericalPrecisionMetric
 from deepeval.test_case import LLMTestCase
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder

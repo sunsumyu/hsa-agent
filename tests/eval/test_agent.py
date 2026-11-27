@@ -3,16 +3,22 @@ import json
 import time
 import datetime
 import pytest
-from deepeval import assert_test
-from deepeval.test_case import LLMTestCase
-from tests.eval.metrics import get_hsa_evidence_chain_metric, NumericalPrecisionMetric as HSANumericalPrecisionMetric
+try:
+    from deepeval import assert_test
+    from deepeval.test_case import LLMTestCase
+    from tests.eval.metrics import get_hsa_evidence_chain_metric, NumericalPrecisionMetric as HSANumericalPrecisionMetric
+except ImportError:
+    assert_test = None
+    LLMTestCase = None
+    get_hsa_evidence_chain_metric = None
+    HSANumericalPrecisionMetric = None
 from dotenv import load_dotenv
 
 # 确保在运行前正确加载环境
 os.environ["CLICKHOUSE_DB"] = "hsa_sandbox"
 load_dotenv(override=True)
 
-from app.core.agent_graph import get_graph_executor as get_executor
+from app.orchestration.agent_graph import get_graph_executor as get_executor
 from app.core.registry.prompt_registry import prompt_registry
 from app.core.registry.rule_registry import rule_registry
 
@@ -227,3 +233,57 @@ async def test_medical_agent_rules(item):
         extra={"sql_query": state.get("sql_query", ""), "methodology": state.get("methodology", "")},
     )
     _assert_sql_template_used(state, item["expected_template_ids"])
+
+
+# ──────────────────────────────────────────────────────────────
+# Suite: user_perspective (全新真实用户视角全场景评测套件)
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.user_perspective
+@pytest.mark.asyncio
+@pytest.mark.parametrize("item", _load_suite("user_perspective"))
+async def test_medical_agent_user_perspective(item):
+    """用户视角全场景用例：覆盖各角色提问、领域原型路由、客观度量与安全拦截。"""
+    case_id = item.get("id") or item.get("case_id") or "CASE"
+    tag = item.get("tag") or item.get("context") or ""
+    persona = item.get("persona") or "业务用户"
+    prompt = item.get("input") or item.get("prompt") or ""
+
+    print(f"\n\n{'='*80}", flush=True)
+    print(f"🚀 [正在执行评测] {case_id}: {tag}", flush=True)
+    print(f"👤 【用户角色】: {persona}", flush=True)
+    print(f"❓ 【用户提问】: {prompt}", flush=True)
+    print(f"{'-'*80}", flush=True)
+
+    final_output, state, elapsed = await _run_agent(prompt)
+    _persist_case_result(
+        item, final_output, elapsed,
+        extra={
+            "sql_query": state.get("sql_query", ""),
+            "methodology": state.get("methodology", ""),
+            "persona": persona,
+            "case_id": case_id,
+        },
+    )
+
+    # 终端输出完整的测试报告
+    print(f"📊 【终端审计报告输出 (Terminal Audit Report)】:", flush=True)
+    print(f"{'-'*80}", flush=True)
+    print(final_output, flush=True)
+    print(f"{'-'*80}", flush=True)
+    if state.get("sql_query"):
+        print(f"🔍 【生成执行 SQL】: {state.get('sql_query').strip()}", flush=True)
+    print(
+        f"⏱️ 【执行耗时】: {elapsed:.2f}s | 【基准期望】: {item.get('expected_count', 0)} 笔 / ¥{item.get('expected_sum', 0.0):,.2f}",
+        flush=True
+    )
+    print(f"{'='*80}\n", flush=True)
+
+    atype = item.get("assertion_type", "keyword_any")
+    if atype == "sql_template_used":
+        _assert_sql_template_used(state, item["expected_template_ids"])
+    elif atype in ("keyword_any", "refusal_expected"):
+        _assert_keyword_any(final_output, item["expected_keywords"])
+    else:
+        pytest.fail(f"Unsupported assertion_type for user_perspective suite: {atype}")
+
