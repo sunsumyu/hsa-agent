@@ -40,6 +40,8 @@ from app.api.chat_stream import (
 
 def _is_legal_request(model_id: Optional[str], message: str) -> bool:
     """启发式与显式意图判断：是否路由至法律辩法智能体"""
+    if model_id and "audit" in model_id.lower():
+        return False
     if model_id and ("legal" in model_id.lower() or "law" in model_id.lower()):
         return True
     if model_id in (None, "", "auto", "default"):
@@ -296,10 +298,15 @@ class ChatStreamCoordinator:
             from app.api.legal_stream_coordinator import legal_stream_coordinator
 
             async for chunk in legal_stream_coordinator.coordinate_legal_stream(
-                session_id=session_id, message=message, background_tasks=background_tasks
+                session_id=session_id,
+                message=message,
+                background_tasks=background_tasks,
+                is_sse=is_sse,
             ):
                 yield chunk
             return
+
+        effective_model_id = None if (model_id and model_id.lower() in ("audit", "audit-agent")) else model_id
 
         with redis_manager.dist_lock(f"session:in_flight:{session_id}", timeout=120) as acquired:
             if acquired is False:
@@ -309,7 +316,7 @@ class ChatStreamCoordinator:
                 return
 
             executor, resolved_id = get_graph_executor(
-                checkpointer=_resolve_checkpointer(request), model_id=model_id
+                checkpointer=_resolve_checkpointer(request), model_id=effective_model_id
             )
             logger.info(f">>> [算力调配] 正在激活物理模型节点: {resolved_id}")
             history_manager.get_history(session_id, auto_recover=False)

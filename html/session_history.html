@@ -96,11 +96,18 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
         }
         .column-heading h1 {
             margin: 0;
             font-size: 1.05rem;
             font-weight: 600;
+        }
+        .heading-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
         }
         .search-wrap { position: relative; }
         .search-input {
@@ -495,6 +502,102 @@
             font-size: 0.93rem;
             line-height: 1.68;
         }
+        .thought-details {
+            margin-bottom: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 10px;
+            background: rgba(2, 6, 23, 0.4);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .thought-details summary {
+            cursor: pointer;
+            user-select: none;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        .thought-body {
+            margin-top: 6px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text-muted);
+            line-height: 1.55;
+        }
+        .composer-bar {
+            flex-shrink: 0;
+            border-top: 1px solid var(--border);
+            background: rgba(2, 6, 23, 0.45);
+            padding: 14px 24px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .composer-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .status-inline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+            animation: pulse-dot 1.2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+        .composer-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+        }
+        .composer-input {
+            flex: 1;
+            min-width: 0;
+            min-height: 44px;
+            max-height: 140px;
+            resize: none;
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border-strong);
+            border-radius: 10px;
+            padding: 10px 12px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            outline: none;
+            transition: border-color 0.18s, box-shadow 0.18s;
+        }
+        .composer-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .composer-foot {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 0.76rem;
+            color: var(--text-muted);
+        }
+        .desktop-hint { display: none; }
+        @media (hover: hover) and (min-width: 900px) {
+            .desktop-hint { display: inline; }
+        }
         .empty-state {
             padding: 40px 24px;
             text-align: center;
@@ -546,8 +649,11 @@
             .sidebar { width: 100%; flex-direction: row; overflow-x: auto; padding: 12px; gap: 6px; border-right: none; border-bottom: 1px solid var(--border); }
             .brand, .sidebar-footer { display: none; }
             .nav-item { margin-bottom: 0; white-space: nowrap; }
-            .session-column { width: 100%; height: 340px; border-right: none; border-bottom: 1px solid var(--border); }
-            .workspace-wrap { height: 520px; padding: 12px; }
+            .session-column { width: 100%; height: 280px; border-right: none; border-bottom: 1px solid var(--border); }
+            .workspace-wrap { height: 560px; padding: 12px; }
+            .stage-header { padding: 14px 16px; }
+            .transcript-scroll { padding: 14px 16px; }
+            .composer-bar { padding: 12px 14px; }
         }
     </style>
 </head>
@@ -568,7 +674,11 @@
         <div class="list-controls">
             <div class="column-heading">
                 <h1>历史会话</h1>
-                <button class="btn btn-quiet" id="refreshBtn" type="button">刷新</button>
+                <div class="heading-actions">
+                    <button class="btn btn-primary btn-quiet" id="newSessionBtn" type="button">新建</button>
+                    <button class="btn btn-quiet" id="backfillBtn" type="button" title="扫描并导入旧版 JSON 对话记录">同步</button>
+                    <button class="btn btn-quiet" id="refreshBtn" type="button">刷新</button>
+                </div>
             </div>
             <div class="search-wrap">
                 <input id="searchInput" class="search-input" type="search" placeholder="搜索标题或内容预览...">
@@ -672,8 +782,17 @@
             offlineDemo: false,
             renaming: false,
             confirmDeleteId: null,
-            searchTimer: null
+            searchTimer: null,
+            streaming: false,
+            streamController: null,
+            streamStatus: "",
+            streamBuffer: "",
+            streamThoughts: "",
+            draftInput: "",
+            backfilling: false,
+            titlePollTimer: null
         };
+        let activeStreamRefs = null;
 
         const elList = document.getElementById("sessionList");
         const elStage = document.getElementById("stageCanvas");
@@ -808,9 +927,11 @@
             t.textContent = "请选择左侧会话查看完整对话";
             const d = document.createElement("div");
             d.className = "empty-desc";
-            d.textContent = "支持按医保审计或法律辩法筛选会话、查看 T0 规则占位 / T1 模型精炼 / T2 人工锁定标题状态，并执行重命名、置顶、归档与级联清理。";
+            d.textContent = "支持按医保审计或法律辩法筛选、在原会话中流式续聊或新建对话、查看 T0/T1/T2 标题状态，并执行主题整理与拆分子会话。";
+            const startBtn = renderActionButton("发起新对话", startNewSession, "btn-primary");
             box.appendChild(t);
             box.appendChild(d);
+            box.appendChild(startBtn);
             elStage.appendChild(box);
         }
 
@@ -823,13 +944,14 @@
             return btn;
         }
 
-        function renderStage() {
+        function renderStage(scrollToBottom) {
             const detail = state.activeDetail;
             if (!detail) {
                 renderEmptyStage();
                 return;
             }
             clearNode(elStage);
+            activeStreamRefs = null;
 
             const header = document.createElement("div");
             header.className = "stage-header";
@@ -837,6 +959,8 @@
             const cluster = document.createElement("div");
             cluster.className = "title-cluster";
 
+            let titleEl = null;
+            let sourceBadgeEl = null;
             if (state.renaming) {
                 const group = document.createElement("div");
                 group.className = "rename-group";
@@ -860,14 +984,20 @@
                 const h2 = document.createElement("h2");
                 h2.className = "stage-title";
                 h2.textContent = detail.title || "新对话";
+                titleEl = h2;
+                sourceBadgeEl = createBadge(
+                    SOURCE_LABELS[detail.title_source] || detail.title_source || "规则占位",
+                    detail.title_source === "llm" ? "badge-accent" : ""
+                );
                 titleRow.appendChild(h2);
-                titleRow.appendChild(createBadge(SOURCE_LABELS[detail.title_source] || detail.title_source, detail.title_source === "llm" ? "badge-accent" : ""));
+                titleRow.appendChild(sourceBadgeEl);
                 cluster.appendChild(titleRow);
             }
 
             const sub = document.createElement("div");
             sub.className = "stage-submeta";
             sub.appendChild(createBadge(DOMAIN_LABELS[detail.domain] || detail.domain, ""));
+            if (detail.isDraft) sub.appendChild(createBadge("草稿待发送", "badge-accent"));
             if (detail.pinned) sub.appendChild(createBadge("置顶", "badge-pinned"));
             if (detail.archived) sub.appendChild(createBadge("已归档", ""));
             if (state.offlineDemo) sub.appendChild(createBadge("离线演示模式", "badge-accent"));
@@ -891,21 +1021,36 @@
             topicBtn.type = "button";
             topicBtn.className = state.viewMode === "topics" ? "view-btn active" : "view-btn";
             topicBtn.textContent = "主题视图";
+            topicBtn.disabled = Boolean(detail.isDraft || state.streaming);
             topicBtn.onclick = () => switchToTopicView();
             viewSwitch.appendChild(rawBtn);
             viewSwitch.appendChild(topicBtn);
             actions.appendChild(viewSwitch);
 
             const orgBtn = renderActionButton(state.organizing ? "整理中..." : "整理主题", () => organizeCurrentSession(true), "btn-primary");
-            orgBtn.disabled = state.organizing;
+            orgBtn.disabled = Boolean(state.organizing || detail.isDraft || state.streaming);
             actions.appendChild(orgBtn);
-            actions.appendChild(renderActionButton("重命名", () => { state.renaming = true; renderStage(); }));
-            actions.appendChild(renderActionButton("重新生成标题", regenerateTitle));
-            actions.appendChild(renderActionButton(detail.pinned ? "取消置顶" : "置顶", () => patchSession({ pinned: !detail.pinned })));
-            actions.appendChild(renderActionButton(detail.archived ? "取消归档" : "归档", () => patchSession({ archived: !detail.archived })));
+
+            const renameBtn = renderActionButton("重命名", () => { state.renaming = true; renderStage(); });
+            renameBtn.disabled = Boolean(detail.isDraft);
+            actions.appendChild(renameBtn);
+
+            const regenBtn = renderActionButton("重新生成标题", regenerateTitle);
+            regenBtn.disabled = Boolean(detail.isDraft || state.streaming);
+            actions.appendChild(regenBtn);
+
+            const pinBtn = renderActionButton(detail.pinned ? "取消置顶" : "置顶", () => patchSession({ pinned: !detail.pinned }));
+            pinBtn.disabled = Boolean(detail.isDraft);
+            actions.appendChild(pinBtn);
+
+            const archBtn = renderActionButton(detail.archived ? "取消归档" : "归档", () => patchSession({ archived: !detail.archived }));
+            archBtn.disabled = Boolean(detail.isDraft);
+            actions.appendChild(archBtn);
 
             const isConfirming = state.confirmDeleteId === detail.session_id;
-            actions.appendChild(renderActionButton(isConfirming ? "确认删除" : "删除", handleDeleteClick, isConfirming ? "btn-danger confirming" : "btn-danger"));
+            const delBtn = renderActionButton(isConfirming ? "确认删除" : "删除", handleDeleteClick, isConfirming ? "btn-danger confirming" : "btn-danger");
+            delBtn.disabled = Boolean(detail.isDraft || state.streaming);
+            actions.appendChild(delBtn);
 
             header.appendChild(cluster);
             header.appendChild(actions);
@@ -913,19 +1058,26 @@
 
             if (state.viewMode === "topics") {
                 renderTopicStage(detail);
+                renderComposerBar(detail, titleEl, sourceBadgeEl, null, null, null, null);
                 return;
             }
 
             const scroll = document.createElement("div");
             scroll.className = "transcript-scroll";
             const msgs = detail.messages || [];
-            if (msgs.length === 0) {
+            if (msgs.length === 0 && !state.streaming) {
                 const empty = document.createElement("div");
                 empty.className = "empty-state";
                 const t = document.createElement("div");
                 t.className = "empty-title";
-                t.textContent = "该会话暂无可展示的正文消息";
+                t.textContent = detail.isDraft ? "新会话已就绪，请在下方输入问题" : "该会话暂无可展示的正文消息";
+                const d = document.createElement("div");
+                d.className = "empty-desc";
+                d.textContent = detail.isDraft
+                    ? "可在底部切换医保审计或法律辩法领域，发送后将自动保存历史并生成标题。"
+                    : "可直接在底部输入框追问，继续该会话上下文。";
                 empty.appendChild(t);
+                empty.appendChild(d);
                 scroll.appendChild(empty);
             } else {
                 msgs.forEach((m) => {
@@ -942,7 +1094,142 @@
                     scroll.appendChild(block);
                 });
             }
+
+            let thoughtDetailsEl = null;
+            let thoughtBodyEl = null;
+            let aiTextEl = null;
+            if (state.streaming) {
+                const liveBlock = document.createElement("div");
+                liveBlock.className = "turn-block";
+                const liveRole = document.createElement("div");
+                liveRole.className = "turn-role";
+                liveRole.textContent = "回答（生成中）";
+                liveBlock.appendChild(liveRole);
+
+                thoughtDetailsEl = document.createElement("details");
+                thoughtDetailsEl.className = "thought-details";
+                thoughtDetailsEl.style.display = state.streamThoughts ? "block" : "none";
+                const sumEl = document.createElement("summary");
+                sumEl.textContent = "专家推演过程";
+                thoughtBodyEl = document.createElement("div");
+                thoughtBodyEl.className = "thought-body";
+                thoughtBodyEl.textContent = state.streamThoughts || "";
+                thoughtDetailsEl.appendChild(sumEl);
+                thoughtDetailsEl.appendChild(thoughtBodyEl);
+                liveBlock.appendChild(thoughtDetailsEl);
+
+                aiTextEl = document.createElement("div");
+                aiTextEl.className = "turn-content";
+                aiTextEl.textContent = state.streamBuffer || "等待模型首包响应...";
+                liveBlock.appendChild(aiTextEl);
+                scroll.appendChild(liveBlock);
+            }
+
             elStage.appendChild(scroll);
+            renderComposerBar(detail, titleEl, sourceBadgeEl, scroll, thoughtDetailsEl, thoughtBodyEl, aiTextEl);
+
+            if (scrollToBottom || state.streaming) {
+                scroll.scrollTop = scroll.scrollHeight;
+            }
+        }
+
+        function renderComposerBar(detail, titleEl, sourceBadgeEl, scrollEl, thoughtDetailsEl, thoughtBodyEl, aiTextEl) {
+            const bar = document.createElement("div");
+            bar.className = "composer-bar";
+
+            let statusTextEl = null;
+            if (state.streaming || detail.archived) {
+                const statusRow = document.createElement("div");
+                statusRow.className = "composer-status";
+                const inline = document.createElement("div");
+                inline.className = "status-inline";
+                if (state.streaming) {
+                    const dot = document.createElement("span");
+                    dot.className = "status-dot";
+                    inline.appendChild(dot);
+                }
+                statusTextEl = document.createElement("span");
+                statusTextEl.textContent = state.streaming
+                    ? (state.streamStatus || "正在流式推演...")
+                    : "当前会话已归档，发送新消息后将继续记录到本会话。";
+                inline.appendChild(statusTextEl);
+                statusRow.appendChild(inline);
+                bar.appendChild(statusRow);
+            }
+
+            const row = document.createElement("div");
+            row.className = "composer-row";
+            const input = document.createElement("textarea");
+            input.id = "composerInput";
+            input.className = "composer-input";
+            input.rows = 2;
+            input.placeholder = detail.domain === "legal"
+                ? "输入案情补充、抗辩观点或法律问题继续对话..."
+                : "输入医保审计追问、规则核查诉求继续对话...";
+            input.value = state.draftInput || "";
+            input.disabled = state.streaming;
+            input.oninput = () => {
+                state.draftInput = input.value;
+            };
+            input.onkeydown = (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!state.streaming) sendContinuationMessage();
+                }
+            };
+
+            const actionBtn = state.streaming
+                ? renderActionButton("停止", () => abortActiveStream(false), "btn-danger")
+                : renderActionButton("发送", sendContinuationMessage, "btn-primary");
+            actionBtn.id = "composerActionBtn";
+
+            row.appendChild(input);
+            row.appendChild(actionBtn);
+            bar.appendChild(row);
+
+            const foot = document.createElement("div");
+            foot.className = "composer-foot";
+            if (detail.isDraft && !state.streaming) {
+                const domainSwitch = document.createElement("div");
+                domainSwitch.className = "view-switch";
+                ["audit", "legal"].forEach((dom) => {
+                    const b = document.createElement("button");
+                    b.type = "button";
+                    b.className = detail.domain === dom ? "view-btn active" : "view-btn";
+                    b.textContent = DOMAIN_LABELS[dom];
+                    b.onclick = () => {
+                        detail.domain = dom;
+                        detail.session_id = "web-" + dom + "-" + Date.now().toString(36);
+                        state.activeId = detail.session_id;
+                        renderStage();
+                    };
+                    domainSwitch.appendChild(b);
+                });
+                foot.appendChild(domainSwitch);
+            } else {
+                const modeNote = document.createElement("span");
+                modeNote.textContent = "续聊目标：" + (DOMAIN_LABELS[detail.domain] || detail.domain) + "引擎（SSE 实时流）";
+                foot.appendChild(modeNote);
+            }
+            const hint = document.createElement("span");
+            hint.className = "desktop-hint";
+            hint.textContent = "Enter 发送 · Shift+Enter 换行";
+            foot.appendChild(hint);
+            bar.appendChild(foot);
+
+            elStage.appendChild(bar);
+
+            if (state.streaming) {
+                activeStreamRefs = {
+                    titleEl,
+                    sourceBadgeEl,
+                    scrollEl,
+                    statusTextEl,
+                    thoughtDetailsEl,
+                    thoughtBodyEl,
+                    aiTextEl
+                };
+            }
         }
 
         function renderTopicStage(detail) {
@@ -1128,6 +1415,10 @@
         }
 
         async function selectSession(sessionId) {
+            if (state.streaming && state.activeId !== sessionId) {
+                abortActiveStream(true);
+            }
+            clearTimeout(state.titlePollTimer);
             state.activeId = sessionId;
             state.renaming = false;
             state.confirmDeleteId = null;
@@ -1157,6 +1448,387 @@
                 renderStage();
             } catch (err) {
                 showToast("加载会话详情失败：" + err.message, true);
+            }
+        }
+
+        function startNewSession() {
+            if (state.streaming) {
+                showToast("请先等待当前回复完成或点击停止", true);
+                return;
+            }
+            clearTimeout(state.titlePollTimer);
+            const domain = state.domain || "audit";
+            const sessionId = "web-" + domain + "-" + Date.now().toString(36);
+            state.activeId = sessionId;
+            state.renaming = false;
+            state.confirmDeleteId = null;
+            state.activeOrganized = null;
+            state.activeTopicId = null;
+            state.viewMode = "raw";
+            state.draftInput = "";
+            state.activeDetail = {
+                session_id: sessionId,
+                domain: domain,
+                title: "新对话",
+                title_source: "fallback",
+                last_message_preview: "",
+                message_count: 0,
+                pinned: false,
+                archived: false,
+                updated_at: new Date().toISOString(),
+                messages: [],
+                isDraft: true
+            };
+            renderSessionList();
+            renderStage();
+            const el = document.getElementById("composerInput");
+            if (el) el.focus();
+        }
+
+        async function triggerBackfill() {
+            if (state.backfilling) return;
+            if (state.offlineDemo) {
+                showToast("离线演示模式下不执行本地文件扫描", false);
+                return;
+            }
+            const btn = document.getElementById("backfillBtn");
+            state.backfilling = true;
+            if (btn) { btn.disabled = true; btn.textContent = "同步中..."; }
+            try {
+                const res = await fetch(API_HOST + "/agent/sessions/backfill", { method: "POST" });
+                const json = await res.json();
+                if (!res.ok || !json.ok) throw new Error(json.error || ("HTTP " + res.status));
+                const d = json.data || {};
+                const imported = Number(d.imported || 0);
+                const skipped = Number(d.skipped || 0);
+                const scanned = Number(d.scanned || 0);
+                showToast(
+                    imported > 0
+                        ? ("已导入 " + imported + " 条存量会话（跳过 " + skipped + " 条）")
+                        : ("存量历史已是最新（共扫描 " + scanned + " 个文件）"),
+                    false
+                );
+                await fetchSessions();
+            } catch (err) {
+                showToast("存量回填失败：" + err.message, true);
+            } finally {
+                state.backfilling = false;
+                if (btn) { btn.disabled = false; btn.textContent = "同步"; }
+            }
+        }
+
+        function abortActiveStream(silent) {
+            if (state.streamController) {
+                state.streamController.abort();
+                state.streamController = null;
+            }
+            if (!silent) {
+                showToast("已停止生成", false);
+            }
+        }
+
+        function safeParseJson(raw) {
+            try { return JSON.parse(raw); } catch (_) { return null; }
+        }
+
+        function appendStreamMessageChunk(text) {
+            if (!text) return;
+            state.streamBuffer += text;
+            if (activeStreamRefs && activeStreamRefs.aiTextEl) {
+                activeStreamRefs.aiTextEl.textContent = state.streamBuffer;
+                if (activeStreamRefs.scrollEl) {
+                    activeStreamRefs.scrollEl.scrollTop = activeStreamRefs.scrollEl.scrollHeight;
+                }
+            }
+        }
+
+        function applyTitleUpdateFromStream(detail, payload) {
+            if (!payload || !payload.title) return;
+            const nextTitle = String(payload.title);
+            const nextSource = payload.title_source || detail.title_source || "fallback";
+            detail.title = nextTitle;
+            detail.title_source = nextSource;
+            if (activeStreamRefs && activeStreamRefs.titleEl) {
+                activeStreamRefs.titleEl.textContent = nextTitle;
+            }
+            if (activeStreamRefs && activeStreamRefs.sourceBadgeEl) {
+                activeStreamRefs.sourceBadgeEl.textContent = SOURCE_LABELS[nextSource] || nextSource;
+                activeStreamRefs.sourceBadgeEl.className = nextSource === "llm" ? "badge badge-accent" : "badge";
+            }
+            const existing = state.sessions.find((s) => s.session_id === detail.session_id);
+            if (existing) {
+                existing.title = nextTitle;
+                existing.title_source = nextSource;
+                renderSessionList();
+            }
+        }
+
+        function handleSSEEvent(eventName, rawData, detail) {
+            if (eventName === "status") {
+                const obj = safeParseJson(rawData);
+                const msg = (obj && (obj.display_name || obj.message || obj.warning)) || rawData;
+                if (msg) {
+                    state.streamStatus = String(msg);
+                    if (activeStreamRefs && activeStreamRefs.statusTextEl) {
+                        activeStreamRefs.statusTextEl.textContent = state.streamStatus;
+                    }
+                }
+                return;
+            }
+            if (eventName === "thought") {
+                const obj = safeParseJson(rawData);
+                const txt = (obj && obj.text) ? String(obj.text) : rawData;
+                if (txt) {
+                    state.streamThoughts += txt;
+                    if (activeStreamRefs && activeStreamRefs.thoughtBodyEl) {
+                        activeStreamRefs.thoughtDetailsEl.style.display = "block";
+                        activeStreamRefs.thoughtBodyEl.textContent = state.streamThoughts;
+                        if (activeStreamRefs.scrollEl) {
+                            activeStreamRefs.scrollEl.scrollTop = activeStreamRefs.scrollEl.scrollHeight;
+                        }
+                    }
+                }
+                return;
+            }
+            if (eventName === "message") {
+                appendStreamMessageChunk(rawData);
+                return;
+            }
+            if (eventName === "session_title") {
+                const obj = safeParseJson(rawData);
+                applyTitleUpdateFromStream(detail, obj);
+                return;
+            }
+            if (eventName === "error") {
+                const obj = safeParseJson(rawData);
+                const errMsg = (obj && (obj.error || obj.message)) || rawData;
+                showToast("推演异常：" + errMsg, true);
+            }
+        }
+
+        function processLegacyChunk(text, detail) {
+            let cleaned = text.replace(/\[\[\[(?:ENGINE|VERSION|RESOURCE):[\s\S]*?\]\]\]/g, "");
+            cleaned = cleaned.replace(/\[\[\[STATUS:\s*([^\]]+?)\]\]\]\s*/g, (_, st) => {
+                handleSSEEvent("status", st.trim(), detail);
+                return "";
+            });
+            cleaned = cleaned.replace(/\[\[\[TITLE:\s*([^\]]+?)\]\]\]\s*/g, (_, title) => {
+                applyTitleUpdateFromStream(detail, { title: title.trim() });
+                return "";
+            });
+            appendStreamMessageChunk(cleaned);
+        }
+
+        function dispatchSSEFrame(rawBlock, detail) {
+            const lines = rawBlock.split("\n");
+            let eventName = "message";
+            const dataLines = [];
+            lines.forEach((line) => {
+                if (line.startsWith("event:")) {
+                    eventName = line.slice(6).trim() || "message";
+                } else if (line.startsWith("data:")) {
+                    dataLines.push(line[5] === " " ? line.slice(6) : line.slice(5));
+                }
+            });
+            if (dataLines.length > 0) {
+                handleSSEEvent(eventName, dataLines.join("\n"), detail);
+            }
+        }
+
+        async function consumeSSEStream(res, detail) {
+            const contentType = (res.headers.get("content-type") || "").toLowerCase();
+            const isLegacyText = contentType.includes("text/plain");
+            if (!res.body) {
+                const whole = await res.text();
+                if (isLegacyText) processLegacyChunk(whole, detail);
+                else whole.replace(/\r\n/g, "\n").split("\n\n").forEach((b) => dispatchSSEFrame(b, detail));
+                return;
+            }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const chunk = decoder.decode(value, { stream: true });
+                if (isLegacyText) {
+                    processLegacyChunk(chunk, detail);
+                    continue;
+                }
+                buffer += chunk.replace(/\r\n/g, "\n");
+                let sepIdx = buffer.indexOf("\n\n");
+                while (sepIdx >= 0) {
+                    const frame = buffer.slice(0, sepIdx);
+                    buffer = buffer.slice(sepIdx + 2);
+                    if (frame.trim()) dispatchSSEFrame(frame, detail);
+                    sepIdx = buffer.indexOf("\n\n");
+                }
+            }
+            const rest = decoder.decode();
+            if (isLegacyText && rest) {
+                processLegacyChunk(rest, detail);
+            } else {
+                buffer += rest.replace(/\r\n/g, "\n");
+                if (buffer.trim()) dispatchSSEFrame(buffer, detail);
+            }
+        }
+
+        function scheduleTitlePollIfNeeded(sessionId) {
+            clearTimeout(state.titlePollTimer);
+            if (!state.activeDetail || state.activeDetail.title_source !== "fallback") return;
+            state.titlePollTimer = setTimeout(async () => {
+                if (state.streaming || state.activeId !== sessionId) return;
+                try {
+                    const res = await fetch(API_HOST + "/agent/sessions/" + encodeURIComponent(sessionId));
+                    const json = await res.json();
+                    if (res.ok && json.ok && json.data && json.data.title && state.activeId === sessionId && state.activeDetail) {
+                        if (json.data.title !== state.activeDetail.title || json.data.title_source !== state.activeDetail.title_source) {
+                            applyTitleUpdateFromStream(state.activeDetail, json.data);
+                        }
+                    }
+                } catch (_) {
+                    // ignore background poll errors
+                }
+            }, 3500);
+        }
+
+        async function fetchSessionsAndKeepDetail(sessionId) {
+            try {
+                const params = new URLSearchParams({
+                    include_archived: String(state.includeArchived),
+                    limit: "50",
+                    offset: "0"
+                });
+                if (state.domain) params.set("domain", state.domain);
+                if (state.query.trim()) params.set("q", state.query.trim());
+                const [listRes, detailRes] = await Promise.all([
+                    fetch(API_HOST + "/agent/sessions?" + params.toString()),
+                    fetch(API_HOST + "/agent/sessions/" + encodeURIComponent(sessionId))
+                ]);
+                const listJson = await listRes.json();
+                const detailJson = await detailRes.json();
+                if (listRes.ok && listJson.ok) {
+                    state.sessions = listJson.data.items || [];
+                    state.total = listJson.data.total || 0;
+                    renderSessionList();
+                }
+                if (detailRes.ok && detailJson.ok && state.activeId === sessionId) {
+                    state.activeDetail = detailJson.data;
+                    renderStage(true);
+                    return;
+                }
+            } catch (_) {
+                // fallback to optimistic local detail below
+            }
+            renderSessionList();
+            renderStage(true);
+        }
+
+        async function simulateDemoContinuation(detail, userMsg, controller) {
+            const steps = detail.domain === "legal"
+                ? [
+                    ["status", "正在唤醒法律辩法对抗图谱..."],
+                    ["thought", "检索民法典相关请求权基础与诉讼时效抗辩要点...\n"],
+                    ["message", "【法律续聊推演】基于您补充的要点“" + userMsg.slice(0, 24) + "”：\n"],
+                    ["message", "1. 建议重点核对微信催款记录与银行转账回单的时间对应关系；\n2. 约定利率按一年期 LPR 四倍分段校验，避免超限诉请被驳回。"]
+                ]
+                : [
+                    ["status", "正在激活医保审计 SQL 与规则协同节点..."],
+                    ["thought", "校验追问语义并关联历史核查批次指标...\n"],
+                    ["message", "【审计续聊结论】针对“" + userMsg.slice(0, 24) + "”已补充明细校验：\n"],
+                    ["message", "1. 已按就诊流水号与项目编码完成同院跨科聚合；\n2. 建议对高风险结算单导出疑点底稿复核。"]
+                ];
+            for (const [evt, payload] of steps) {
+                if (controller.signal.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+                await new Promise((r) => setTimeout(r, 120));
+                if (controller.signal.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
+                handleSSEEvent(evt, payload, detail);
+            }
+            if (detail.isDraft) {
+                detail.title = userMsg.slice(0, 18);
+                detail.title_source = "fallback";
+                detail.isDraft = false;
+                DEMO_SESSIONS.unshift(detail);
+            }
+        }
+
+        async function sendContinuationMessage() {
+            const detail = state.activeDetail;
+            const text = (state.draftInput || "").trim();
+            if (!detail || !text || state.streaming) return;
+
+            clearTimeout(state.titlePollTimer);
+            state.draftInput = "";
+            state.viewMode = "raw";
+            state.activeOrganized = null;
+            detail.messages = detail.messages || [];
+            detail.messages.push({ role: "user", content: text });
+
+            const controller = new AbortController();
+            state.streaming = true;
+            state.streamController = controller;
+            state.streamBuffer = "";
+            state.streamThoughts = "";
+            state.streamStatus = detail.domain === "legal" ? "正在连接法律辩法流式引擎..." : "正在连接医保审计流式引擎...";
+            renderStage(true);
+
+            let streamAborted = false;
+            let streamErrored = false;
+            try {
+                if (state.offlineDemo) {
+                    await simulateDemoContinuation(detail, text, controller);
+                } else {
+                    const modelId = detail.domain === "legal" ? "legal-agent" : "audit-agent";
+                    const res = await fetch(API_HOST + "/agent/chat?format=sse", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "text/event-stream",
+                            "X-Session-Id": detail.session_id
+                        },
+                        body: JSON.stringify({
+                            message: text,
+                            session_id: detail.session_id,
+                            model_id: modelId
+                        }),
+                        signal: controller.signal
+                    });
+                    if (!res.ok) throw new Error("HTTP " + res.status);
+                    await consumeSSEStream(res, detail);
+                }
+            } catch (err) {
+                if (err && err.name === "AbortError") {
+                    streamAborted = true;
+                } else {
+                    streamErrored = true;
+                    showToast("续聊失败：" + ((err && err.message) || "网络异常"), true);
+                    if (!state.streamBuffer) {
+                        state.streamBuffer = "[请求失败] " + ((err && err.message) || "网络异常");
+                    }
+                }
+            } finally {
+                state.streaming = false;
+                state.streamController = null;
+                state.streamStatus = "";
+                activeStreamRefs = null;
+                if (state.streamBuffer) {
+                    detail.messages.push({ role: "ai", content: state.streamBuffer });
+                    detail.last_message_preview = text;
+                    detail.message_count = detail.messages.length;
+                    detail.updated_at = new Date().toISOString();
+                }
+                detail.isDraft = false;
+
+                if (state.offlineDemo) {
+                    applyDemoFilter();
+                    renderStage(true);
+                } else if (!streamAborted && !streamErrored) {
+                    await fetchSessionsAndKeepDetail(detail.session_id);
+                    scheduleTitlePollIfNeeded(detail.session_id);
+                } else {
+                    renderSessionList();
+                    renderStage(true);
+                }
             }
         }
 
@@ -1436,9 +2108,12 @@
             else fetchSessions();
         };
 
+        document.getElementById("newSessionBtn").onclick = () => startNewSession();
+        document.getElementById("backfillBtn").onclick = () => triggerBackfill();
         document.getElementById("refreshBtn").onclick = () => fetchSessions();
         document.addEventListener("keydown", (e) => {
-            if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
+            const tag = document.activeElement ? document.activeElement.tagName : "";
+            if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") {
                 e.preventDefault();
                 elSearch.focus();
             }
